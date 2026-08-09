@@ -170,6 +170,26 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 session.send(app, Payload::Error(error), request_id);
                 return;
             }
+            // Restore whatever this device learned last time. Compensation is
+            // expensive to obtain — by ear, or by a calibration run with the
+            // whole room quiet — so losing it to a restart is not acceptable.
+            if let Some(profile) = app.profiles.get(&session.device_id) {
+                if let Some(client) = room.clients.get_mut(&session.client_id) {
+                    client.info.acoustic_offset_ms = profile.acoustic_offset_ms;
+                    // The browser holds its own manual value and will send it;
+                    // this is the fallback for a device whose storage was
+                    // cleared.
+                    if profile.manual_offset_ms != 0.0 {
+                        client.info.manual_offset_ms = profile.manual_offset_ms;
+                    }
+                }
+                tracing::info!(
+                    device = %session.device_id,
+                    acoustic_ms = profile.acoustic_offset_ms,
+                    "restored a saved device profile"
+                );
+            }
+
             session.room_code = Some(code.clone());
             tracing::info!(client = %session.client_id, room = %code, role = ?join.role, "client joined");
 
@@ -200,6 +220,17 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             if let Some(muted) = update.muted {
                 client.info.muted = muted;
             }
+            if let Some(available) = update.microphone_available {
+                client.info.microphone_available = available;
+            }
+
+            let remembered = client.info.clone();
+            app.profiles.update(&session.device_id, |profile| {
+                profile.name = remembered.name.clone();
+                profile.role = remembered.role;
+                profile.manual_offset_ms = remembered.manual_offset_ms;
+            });
+
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);

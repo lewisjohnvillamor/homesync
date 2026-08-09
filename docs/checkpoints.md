@@ -4,9 +4,14 @@ The point of these is to find out whether the synchronisation idea works before
 building anything on top of it. Run them in order. If checkpoint 2 fails, no
 amount of YouTube or Windows-capture work will help.
 
-Record results in `docs/results.md` as you go, including the failures — a
+Record results in `docs/compatibility.md` as you go, including the failures — a
 device that could not hold alignment is the most useful thing this project can
 learn.
+
+When something looks wrong, press **Download diagnostics** in the log panel
+before changing anything. It saves every device's clock, telemetry, buffer
+health and the last calibration, which is far more useful than a description of
+what you heard.
 
 ---
 
@@ -103,10 +108,12 @@ Implemented; never run against a real microphone. Do not start it until
 checkpoints 2 and 3 have passed — if the schedule cannot be held, measuring it
 more precisely will not help.
 
-**Microphone access needs a secure context.** Over plain HTTP on a LAN address
-`getUserMedia` is usually unavailable, so either serve HTTPS (a local Caddy or
-a self-signed certificate) or run the microphone device against `localhost`.
-The calibration panel shows which devices reported a usable microphone.
+**Start the coordinator with `--tls`.** Microphone access needs a secure
+context, and `http://192.168.x.x` is not one. HomeSync generates its own
+certificate; each device shows a warning the first time, which you accept once.
+Without this, no device can be the calibration microphone and this checkpoint
+cannot start. The calibration panel shows which devices reported a usable
+microphone.
 
 1. Get two devices audibly misaligned — undo any manual compensation.
 2. Choose a microphone device and put it where you will actually listen.

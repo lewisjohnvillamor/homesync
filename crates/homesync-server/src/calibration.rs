@@ -394,6 +394,16 @@ fn solve_and_apply(
 
         if let Some(room) = rooms.get_mut(room_code) {
             room.set_acoustic_offset_ms(&target.client_id, acoustic_ms);
+            // Saved against the device id, not the client id, so it survives a
+            // reconnect and a coordinator restart.
+            if let Some(client) = room.clients.get(&target.client_id) {
+                let device_id = client.info.device_id.clone();
+                let name = client.info.name.clone();
+                app.profiles.update(&device_id, |profile| {
+                    profile.name = name;
+                    profile.acoustic_offset_ms = acoustic_ms;
+                });
+            }
         }
     }
 
@@ -445,6 +455,7 @@ fn finish(app: &App, room_code: &str, result: CalibrationResult) {
     let mut rooms = app.rooms();
     let Some(room) = rooms.get_mut(room_code) else { return };
     room.calibration = None;
+    room.last_calibration = Some(result.clone());
     room.broadcast(Payload::CalibrationResult(result), now);
     let snapshot = room.snapshot(manifest);
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);

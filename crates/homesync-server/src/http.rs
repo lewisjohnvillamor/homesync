@@ -29,6 +29,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/media/{id}/manifest", get(media_item_manifest))
         .route("/api/v1/calibration/chirp/{code}", get(calibration_chirp))
         .route("/api/v1/calibration/recording", post(calibration_recording))
+        .route("/api/v1/diagnostics", get(diagnostics))
         .route("/ws", get(crate::ws::ws_handler))
         .fallback(static_asset)
         .with_state(app)
@@ -146,6 +147,88 @@ fn insert(response: &mut Response, name: header::HeaderName, value: String) {
     if let Ok(value) = HeaderValue::from_str(&value) {
         response.headers_mut().insert(name, value);
     }
+}
+
+/// Everything known about the coordinator and its rooms, in one document.
+///
+/// Exists so a problem found during testing arrives as data rather than as a
+/// description of a sound. It carries the room snapshot, every client's clock
+/// and telemetry, the live stream parameters, and the last calibration's
+/// measurements — not merely the compensation those measurements produced.
+#[derive(Debug, Serialize)]
+struct Diagnostics {
+    server_version: &'static str,
+    protocol_version: u32,
+    /// Coordinator monotonic nanoseconds, which is also its uptime.
+    server_ns: u64,
+    config: DiagnosticsConfig,
+    rooms: Vec<DiagnosticsRoom>,
+    /// Devices with saved compensation, including ones not currently present.
+    saved_devices: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticsConfig {
+    start_lead_ms: f64,
+    max_clients: usize,
+    media_items: usize,
+    state_file: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticsRoom {
+    snapshot: homesync_protocol::RoomSnapshot,
+    /// The most recent finished calibration run, if there was one.
+    last_calibration: Option<homesync_protocol::CalibrationResult>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DiagnosticsQuery {
+    /// The room secret. Diagnostics carry device names and telemetry, so they
+    /// are not readable by anything that merely reached the port.
+    secret: String,
+}
+
+async fn diagnostics(State(app): State<Arc<App>>, Query(query): Query<DiagnosticsQuery>) -> Response {
+    let manifest = app.media.manifest();
+    let rooms = app.rooms();
+
+    // Any room whose secret matches. In practice there is one.
+    let authorised: Vec<DiagnosticsRoom> = rooms
+        .values()
+        .filter(|room| room.secret == query.secret)
+        .map(|room| DiagnosticsRoom {
+            snapshot: room.snapshot(manifest.clone()),
+            last_calibration: room.last_calibration.clone(),
+        })
+        .collect();
+
+    if authorised.is_empty() {
+        return (StatusCode::FORBIDDEN, "the room secret is required to read diagnostics").into_response();
+    }
+
+    let report = Diagnostics {
+        server_version: app.version,
+        protocol_version: homesync_protocol::PROTOCOL_VERSION,
+        server_ns: app.now_ns(),
+        config: DiagnosticsConfig {
+            start_lead_ms: app.config.start_lead_ms,
+            max_clients: app.config.max_clients,
+            media_items: manifest.items.len(),
+            state_file: app.config.state_path().map(|p| p.display().to_string()),
+        },
+        rooms: authorised,
+        saved_devices: app.profiles.len(),
+    };
+
+    let mut response = Json(report).into_response();
+    // Named so a file saved from a browser is obviously a HomeSync report.
+    insert(
+        &mut response,
+        header::CONTENT_DISPOSITION,
+        "attachment; filename=\"homesync-diagnostics.json\"".to_string(),
+    );
+    response
 }
 
 /// Serves a calibration chirp as a WAV file.
