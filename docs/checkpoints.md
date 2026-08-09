@@ -156,6 +156,18 @@ messages flow — not that anything sounded right.
 Pass: under 100 ms apart on the watch-party target, recovering automatically
 after buffering.
 
+**"Video unavailable — Watch on YouTube" is not a HomeSync failure.** The
+video's owner has disallowed playback outside youtube.com (IFrame error 101 or
+150), and the refusal happens inside YouTube's own player. Most major-label
+music videos are published that way. Nothing in this project can change it —
+pick a different video. HomeSync now says so explicitly instead of showing a
+raw error code.
+
+Videos that reliably embed: official channels that want to be shared,
+conference talks, Creative Commons material, and most independent uploads. If
+you want a known-good one for testing, `aqz-KE-bpKQ` (Big Buck Bunny) is what
+the automated end-to-end run uses.
+
 Expect ads to break it outright on some accounts — they are inserted per
 viewer, so two devices are watching different content and no scheduling fixes
 that. Record it as an observation, not a bug.

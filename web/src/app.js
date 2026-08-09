@@ -121,6 +121,13 @@ async function join() {
   }
   state.youtube = new YoutubePlayer($('youtube-player'), connection.clock);
   state.youtube.onLog = log;
+  // A video YouTube refuses to embed fails on every device at once, so it is
+  // shown as a visible problem rather than a line in a scrolling log.
+  state.youtube.onUnplayable = (message) => {
+    const element = $('youtube-problem');
+    element.textContent = `${message} (Most music videos are restricted this way.)`;
+    element.classList.remove('hidden');
+  };
   if (CalibrationMicrophone.available()) {
     state.microphone = new CalibrationMicrophone(connection.clock);
     state.microphone.onLog = log;
@@ -236,6 +243,9 @@ function onTransport(transport) {
   }
 
   if (transport.mode === 'youtube') {
+    if (modeChanged || previous?.youtube_video_id !== transport.youtube_video_id) {
+      $('youtube-problem').classList.add('hidden');
+    }
     if (transport.youtube_video_id) {
       state.youtube?.load(transport.youtube_video_id).catch((error) => log(error.message));
       $('youtube-stage').classList.remove('hidden');

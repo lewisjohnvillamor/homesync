@@ -30,6 +30,29 @@ const STATE_NAMES = {
 /** How close to the target a seek must land before we stop re-seeking. */
 const SEEK_TOLERANCE_S = 0.15;
 
+/**
+ * IFrame API error codes, in language that says what to do about it.
+ *
+ * 101 and 150 are the same condition reported two ways, and they are the
+ * common one: the video's owner has disallowed playback outside youtube.com.
+ * Most major-label music videos are published that way. Nothing in HomeSync
+ * can change it — the refusal happens inside YouTube's own player — so the
+ * only useful response is to say so plainly and let someone pick another
+ * video.
+ */
+const ERROR_MESSAGES = {
+  2: 'That video id is not valid.',
+  5: 'The YouTube player could not play that video in this browser.',
+  100: 'That video does not exist, or it is private.',
+  101: 'That video cannot be embedded — its owner only allows playback on YouTube itself. Pick a different video.',
+  150: 'That video cannot be embedded — its owner only allows playback on YouTube itself. Pick a different video.',
+};
+
+/** Whether an error means the video will never play here, whatever we do. */
+export function isUnembeddable(code) {
+  return code === 101 || code === 150 || code === 100;
+}
+
 let apiPromise = null;
 
 /** Loads the IFrame API once per page. */
@@ -80,8 +103,12 @@ export class YoutubePlayer {
     this.playCalledNs = null;
     /** Measured start latency awaiting report, in milliseconds. */
     this.observedStartLatencyMs = null;
+    /** Most recent IFrame API error code, if any. */
+    this.lastError = null;
     /** @type {((message: string) => void)|null} */
     this.onLog = null;
+    /** Called when the video will never play here, whatever we do. */
+    this.onUnplayable = null;
   }
 
   /**
@@ -95,6 +122,7 @@ export class YoutubePlayer {
    */
   async load(videoId) {
     if (this.videoId === videoId && this.player && this.ready) return;
+    this.lastError = null;
     const YT = await loadApi();
 
     if (this.readyPromise) {
@@ -118,14 +146,29 @@ export class YoutubePlayer {
         videoId,
         // Cue rather than autoplay: playback must begin at the rendezvous
         // instant, not whenever the iframe finishes loading.
-        playerVars: { autoplay: 0, controls: 0, disablekb: 1, rel: 0, playsinline: 1 },
+        playerVars: {
+          autoplay: 0,
+          controls: 0,
+          disablekb: 1,
+          rel: 0,
+          playsinline: 1,
+          // YouTube checks these against the page. Without a matching origin
+          // the API is refused from a LAN address, which looks identical to
+          // the video being unavailable.
+          enablejsapi: 1,
+          origin: window.location.origin,
+        },
         events: {
           onReady: () => {
             this.ready = true;
             resolve();
           },
           onError: (event) => {
-            this.#log(`YouTube player error ${event.data} (the video may not allow embedding)`);
+            this.lastError = event.data;
+            this.#log(ERROR_MESSAGES[event.data] ?? `The YouTube player reported error ${event.data}.`);
+            if (this.onUnplayable && isUnembeddable(event.data)) {
+              this.onUnplayable(ERROR_MESSAGES[event.data] ?? `error ${event.data}`);
+            }
             resolve();
           },
         },
