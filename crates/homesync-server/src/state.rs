@@ -4,6 +4,7 @@ use crate::calibration::CalibrationRegistry;
 use crate::clock::ServerClock;
 use crate::config::Config;
 use crate::media::MediaLibrary;
+use crate::profiles::ProfileStore;
 use crate::room::Room;
 use crate::stream::StreamHandle;
 use std::collections::HashMap;
@@ -30,11 +31,13 @@ pub struct App {
     streams: Mutex<HashMap<String, StreamHandle>>,
     /// In-flight calibration runs.
     pub calibration: CalibrationRegistry,
+    /// Per-device compensation that survives a restart.
+    pub profiles: ProfileStore,
 }
 
 impl App {
     /// Builds the shared state and creates the default room.
-    pub fn new(config: Config, media: MediaLibrary, room: Room) -> Self {
+    pub fn new(config: Config, media: MediaLibrary, room: Room, profiles: ProfileStore) -> Self {
         let mut rooms = HashMap::new();
         rooms.insert(room.code.clone(), room);
         Self {
@@ -45,6 +48,7 @@ impl App {
             version: env!("CARGO_PKG_VERSION"),
             streams: Mutex::new(HashMap::new()),
             calibration: CalibrationRegistry::default(),
+            profiles,
         }
     }
 

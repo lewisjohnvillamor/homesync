@@ -20,12 +20,17 @@ Open the link on two devices, press **Enable audio & join** on each, pick
 **Click track (built-in, 60 s)** and press **Play**.
 
 ```sh
-cargo run --release -- --port 8080 --media-dir ~/Music
+cargo run --release -- --tls --media-dir ~/Music
 ```
 
 Any `wav/mp3/m4a/aac/ogg/opus/flac/webm` file in `--media-dir` joins the
 catalogue. The built-in click track is always present, so the timing
 checkpoints are runnable on a fresh checkout with no audio files at all.
+
+**`--tls` is required for acoustic calibration.** Browsers refuse microphone
+access on a plain-HTTP LAN address, so without it no device can be the
+calibration microphone. HomeSync signs its own certificate and each device
+shows a warning once. See [`docs/self-hosting.md`](docs/self-hosting.md).
 
 Open `/probe.html` on any device to find out whether it can hold a schedule
 before trusting it as a receiver.
@@ -66,6 +71,14 @@ reasons are in [`docs/protocol.md`](docs/protocol.md).
   is real, and only after a calibration run.
 - **Single binary.** The web client is embedded; no bundler, no npm dependency,
   no build step.
+- **Compensation that survives a restart.** Values found by ear or by
+  calibration are saved per device and restored when it rejoins — losing them
+  to a restart would make the feature feel unreliable even when it works.
+- **`homesync.local` over mDNS**, so devices can be pointed at a name instead
+  of an address read off a terminal. Android does not resolve `.local`, and the
+  banner says so rather than pretending.
+- **A diagnostics export**, so a problem is a JSON file rather than a
+  description of a sound.
 
 ## Testing
 
@@ -76,12 +89,12 @@ reasons are in [`docs/protocol.md`](docs/protocol.md).
 Runs formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **137 Rust tests.** Clock estimation against synthetic latency, jitter, drift
+- **150 Rust tests.** Clock estimation against synthetic latency, jitter, drift
   and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and clock skew; room state
   machine.
-- **Two integration tests** drive the real coordinator binary over a socket
+- **Four integration tests** drive the real coordinator binary over a socket
   with fake devices:
   - *Calibration loop* — a fake microphone uploads recordings in which the
     chirp sits at a **known** delay, so the test asserts against ground truth:
@@ -92,6 +105,8 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
     contiguous sequence numbers, exactly 10 ms presentation spacing, no
     re-anchoring, and a lead over real time that does not shrink. Reverting
     the capture-pacing fix makes it fail, so it has teeth.
+  - *Diagnostics access* — the export is gated on the room secret, and public
+    endpoints never carry it.
 - **47 browser tests.** `web/test/clock.test.mjs` mirrors the Rust clock tests
   case for case, and `web/test/live.test.mjs` mirrors the playout buffer tests,
   because both algorithms exist twice and must not drift apart.
@@ -130,6 +145,11 @@ This is the part to read before trusting anything.
   the run. Buffers prime and underruns settle to zero.
 - YouTube: the rendezvous reaches every device and the transport converges.
 - Checkpoint 1 passes headlessly with ~0.01 ms of cross-client disagreement.
+- HTTPS: a browser reaches the coordinator over `wss`, reports
+  `isSecureContext`, and exposes `getUserMedia` — which is what makes
+  calibration reachable on a real phone at all.
+- Persistence: a device whose browser storage was cleared rejoins and recovers
+  its compensation from the coordinator.
 
 ### Implemented but never run against reality
 
@@ -153,6 +173,7 @@ results belong — including the failures.
 
 - Opus compression. PCM only; the format code is reserved and rejected.
 - Multiple simultaneous rooms. One room is created at startup.
+- Rate limiting on join attempts (spec section 17).
 - Controlled video (mode D), so no lip-sync with HomeSync-owned video.
 - Bounded resampling for slow drift correction; drift over threshold causes a
   coordinated restart instead.

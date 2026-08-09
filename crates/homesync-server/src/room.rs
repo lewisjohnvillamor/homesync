@@ -5,8 +5,9 @@
 //! of already-serialised frames.
 
 use homesync_protocol::{
-    BufferReport, CalibrationProgress, ClientInfo, ClockQuality, ClockReport, DiagnosticReport, Envelope, ErrorMessage,
-    MediaManifest, Payload, Role, RoomSnapshot, SourceMode, StreamInfo, Transport, TransportState, YoutubeState,
+    BufferReport, CalibrationProgress, CalibrationResult, ClientInfo, ClockQuality, ClockReport, DiagnosticReport,
+    Envelope, ErrorMessage, MediaManifest, Payload, Role, RoomSnapshot, SourceMode, StreamInfo, Transport,
+    TransportState, YoutubeState,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -74,6 +75,10 @@ pub struct Room {
     pub stream: Option<StreamInfo>,
     /// Calibration progress, when a run is in flight.
     pub calibration: Option<CalibrationProgress>,
+    /// The most recent finished calibration, kept so a diagnostics export
+    /// carries the measurements rather than only the compensation they
+    /// produced.
+    pub last_calibration: Option<CalibrationResult>,
     start_lead_ns: u64,
     max_clients: usize,
 }
@@ -90,6 +95,7 @@ impl Room {
             dirty: false,
             stream: None,
             calibration: None,
+            last_calibration: None,
             start_lead_ns,
             max_clients,
         }

@@ -4,3 +4,11 @@ node_modules/
 media/*
 !media/.gitkeep
 *.log
+
+# Generated at runtime: TLS material and saved device compensation. The key in
+# particular must never be committed.
+homesync-cert.pem
+homesync-key.pem
+homesync-cert-names.json
+homesync-devices.json
+*.json.tmp

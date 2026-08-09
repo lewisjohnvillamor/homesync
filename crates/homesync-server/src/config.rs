@@ -32,6 +32,39 @@ pub struct Config {
     #[arg(long, default_value_t = 16, env = "HOMESYNC_MAX_CLIENTS")]
     pub max_clients: usize,
 
+    /// Where per-device profiles are stored. Compensation found by ear or by
+    /// calibration is expensive to obtain, so it survives a restart.
+    #[arg(long, default_value = "homesync-devices.json", env = "HOMESYNC_STATE_FILE")]
+    pub state_file: PathBuf,
+
+    /// Do not read or write the device profile file.
+    #[arg(long, default_value_t = false)]
+    pub no_state: bool,
+
+    /// Forget every saved device profile at startup.
+    #[arg(long, default_value_t = false)]
+    pub reset_state: bool,
+
+    /// Serve HTTPS with a self-signed certificate.
+    ///
+    /// Needed for acoustic calibration: browsers refuse microphone access on a
+    /// plain-HTTP LAN address. Each device shows a certificate warning once,
+    /// which somebody has to accept.
+    #[arg(long, default_value_t = false, env = "HOMESYNC_TLS")]
+    pub tls: bool,
+
+    /// Directory the generated certificate and key are kept in, so devices do
+    /// not have to accept a new warning after every restart.
+    #[arg(long, default_value = ".", env = "HOMESYNC_TLS_DIR")]
+    pub tls_dir: PathBuf,
+
+    /// Advertise the coordinator over mDNS as `homesync.local`.
+    ///
+    /// Resolves on macOS, iOS and Windows; on Linux with Avahi. Android does
+    /// not resolve `.local` names, so a phone still needs the IP address.
+    #[arg(long, default_value_t = true, env = "HOMESYNC_MDNS", action = clap::ArgAction::Set)]
+    pub mdns: bool,
+
     /// Fixed room code, six characters. Random when omitted.
     #[arg(long, env = "HOMESYNC_ROOM_CODE")]
     pub room_code: Option<String>,
@@ -55,6 +88,15 @@ pub struct Config {
 }
 
 impl Config {
+    /// Path profiles are stored at, or `None` when persistence is disabled.
+    pub fn state_path(&self) -> Option<PathBuf> {
+        if self.no_state {
+            None
+        } else {
+            Some(self.state_file.clone())
+        }
+    }
+
     /// Playback start lead, in nanoseconds.
     pub fn start_lead_ns(&self) -> u64 {
         (self.start_lead_ms.max(0.0) * 1e6) as u64

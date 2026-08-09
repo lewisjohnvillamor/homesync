@@ -27,6 +27,8 @@ const state = {
   /** @type {object|null} */ selectedItem: null,
   /** Live stream epoch currently being rendered. */
   streamEpoch: -1,
+  /** Whether compensation has been reconciled with the coordinator yet. */
+  offsetReconciled: false,
   role: 'speaker',
   seeking: false,
   loadToken: 0,
@@ -55,6 +57,17 @@ function init() {
 
   $('join').addEventListener('click', join);
   wireControls();
+
+  // Pasting a new invite link while the page is already open changes only the
+  // fragment, which is not a reload. Without this the new room is ignored and
+  // nothing appears to happen.
+  window.addEventListener('hashchange', () => {
+    const next = readInvite();
+    if (!next.room || state.connection) return;
+    $('room-code').value = next.room;
+    $('room-secret').value = next.secret;
+    log('Invite link picked up. Press "Enable audio & join".');
+  });
 
   if (usingFallbackDigest()) {
     log('Page is not a secure context: media hashes are verified in JavaScript (slower).');
@@ -115,7 +128,11 @@ async function join() {
     log('No microphone API here, so this device cannot be the calibration microphone.');
   }
 
-  connection.onStatus = (status) => setPill($('status'), status, status === 'connected' ? 'ok' : 'idle');
+  connection.onStatus = (status) => {
+    // A reconnect re-joins the room, so compensation must be reconciled again.
+    if (status === 'connecting' || status === 'reconnecting') state.offsetReconciled = false;
+    setPill($('status'), status, status === 'connected' ? 'ok' : 'idle');
+  };
   connection.onWelcome = () => log('Connected to the coordinator.');
   connection.onError = (error) => log(`Coordinator: ${error.message}`);
   connection.onSnapshot = onSnapshot;
@@ -153,6 +170,7 @@ function onSnapshot(snapshot) {
   const me = snapshot.clients.find((c) => c.client_id === state.connection?.clientId);
   if (me && state.player) {
     state.player.setAcousticOffsetMs(me.acoustic_offset_ms || 0, state.transport);
+    reconcileManualOffset(me);
     state.live?.setCompensationMs(totalCompensationMs());
   }
 
@@ -337,6 +355,8 @@ function wireControls() {
   });
   $('calibration-cancel').addEventListener('click', () => state.connection?.send('calibration_cancel'));
 
+  $('download-diagnostics').addEventListener('click', downloadDiagnostics);
+
   $('play').addEventListener('click', () => {
     state.connection?.send('play', { force: $('force').checked });
   });
@@ -391,6 +411,69 @@ function wireControls() {
       if (state.transport) player.applyTransport(state.transport, { force: true });
     });
   });
+}
+
+/**
+ * Makes the coordinator's view of this device's manual compensation match what
+ * the device is actually applying.
+ *
+ * Runs once per join, and matters in both directions. A browser whose storage
+ * was cleared should pick up the value the coordinator remembered rather than
+ * silently reverting to zero. And a browser that does have a saved value must
+ * publish it, or the diagnostics table reports a compensation this device is
+ * not applying — which is worse than reporting nothing.
+ */
+function reconcileManualOffset(me) {
+  if (state.offsetReconciled) return;
+  state.offsetReconciled = true;
+
+  const saved = localStorage.getItem('homesync.offsetMs');
+  const serverMs = me.manual_offset_ms || 0;
+
+  if (saved === null && serverMs !== 0) {
+    const ms = clampOffset(serverMs);
+    $('offset').value = String(ms);
+    $('offset-number').value = String(ms);
+    localStorage.setItem('homesync.offsetMs', String(ms));
+    state.player?.setManualOffsetMs(ms, state.transport);
+    log(`Restored ${ms} ms of saved compensation for this device.`);
+    return;
+  }
+
+  const localMs = clampOffset(Number(saved ?? 0));
+  if (localMs !== serverMs) {
+    state.connection?.send('client_update', { manual_offset_ms: localMs });
+  }
+}
+
+/**
+ * Saves a full diagnostics snapshot.
+ *
+ * The room secret gates it, because the report carries device names and
+ * telemetry for everyone present.
+ */
+async function downloadDiagnostics() {
+  const secret = state.connection?.secret;
+  if (!secret) {
+    log('Join a room before downloading diagnostics.');
+    return;
+  }
+  try {
+    const response = await fetch(`/api/v1/diagnostics?secret=${encodeURIComponent(secret)}`);
+    if (!response.ok) throw new Error(`the coordinator returned HTTP ${response.status}`);
+    const text = await response.text();
+
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.download = `homesync-diagnostics-${stamp}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    log('Diagnostics saved.');
+  } catch (error) {
+    log(`Could not download diagnostics: ${error.message}`);
+  }
 }
 
 /** Starts a calibration run with the chosen microphone device. */
