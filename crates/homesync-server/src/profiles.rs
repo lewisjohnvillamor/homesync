@@ -38,17 +38,35 @@ pub struct DeviceProfile {
     pub output_route: Option<String>,
 }
 
+/// The room's identity, kept so it survives a restart.
+///
+/// Without this, every restart mints a new code and secret, which silently
+/// invalidates the invite link saved on every device. The devices then fail to
+/// join for a reason nobody can see, which is a miserable way to lose an
+/// evening.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoomIdentity {
+    /// Six-character display code.
+    pub code: String,
+    /// Shared secret required to join.
+    pub secret: String,
+}
+
 /// On-disk shape. Versioned so a future format change can be recognised
 /// rather than silently misread.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredProfiles {
     version: u32,
+    #[serde(default)]
     devices: HashMap<String, DeviceProfile>,
+    /// Absent in files written before rooms were persisted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    room: Option<RoomIdentity>,
 }
 
 impl Default for StoredProfiles {
     fn default() -> Self {
-        Self { version: 1, devices: HashMap::new() }
+        Self { version: 1, devices: HashMap::new(), room: None }
     }
 }
 
@@ -60,6 +78,7 @@ const FORMAT_VERSION: u32 = 1;
 pub struct ProfileStore {
     path: Option<PathBuf>,
     profiles: Mutex<HashMap<String, DeviceProfile>>,
+    room: Mutex<Option<RoomIdentity>>,
 }
 
 impl ProfileStore {
@@ -70,13 +89,15 @@ impl ProfileStore {
     /// nuisance, refusing to start is worse.
     pub fn load(path: Option<PathBuf>) -> Self {
         let Some(path) = path else {
-            return Self { path: None, profiles: Mutex::new(HashMap::new()) };
+            return Self { path: None, profiles: Mutex::new(HashMap::new()), room: Mutex::new(None) };
         };
 
+        let mut room = None;
         let profiles = match std::fs::read_to_string(&path) {
             Ok(text) => match serde_json::from_str::<StoredProfiles>(&text) {
                 Ok(stored) if stored.version == FORMAT_VERSION => {
                     tracing::info!(count = stored.devices.len(), path = %path.display(), "loaded device profiles");
+                    room = stored.room;
                     stored.devices
                 }
                 Ok(stored) => {
@@ -99,7 +120,18 @@ impl ProfileStore {
             }
         };
 
-        Self { path: Some(path), profiles: Mutex::new(profiles) }
+        Self { path: Some(path), profiles: Mutex::new(profiles), room: Mutex::new(room) }
+    }
+
+    /// The room identity remembered from a previous run, if any.
+    pub fn room_identity(&self) -> Option<RoomIdentity> {
+        self.room.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Remembers a room identity so saved invite links keep working.
+    pub fn set_room_identity(&self, identity: RoomIdentity) {
+        *self.room.lock().unwrap_or_else(|e| e.into_inner()) = Some(identity);
+        self.save();
     }
 
     /// The profile for one device, if it has one.
@@ -132,6 +164,7 @@ impl ProfileStore {
     /// Forgets every profile, for a user who wants to start clean.
     pub fn clear(&self) {
         self.profiles.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        *self.room.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.save();
     }
 
@@ -145,6 +178,7 @@ impl ProfileStore {
         let stored = StoredProfiles {
             version: FORMAT_VERSION,
             devices: self.profiles.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            room: self.room.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             tracing::error!("could not serialise device profiles");
@@ -215,6 +249,50 @@ mod tests {
         let profile = store.get("d").expect("profile");
         assert_eq!(profile.manual_offset_ms, 20.0);
         assert_eq!(profile.acoustic_offset_ms, -100.0);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_room_identity_survives_a_restart() {
+        // Otherwise every restart invalidates the invite link saved on every
+        // device, and they fail to join for a reason nobody can see.
+        let path = temp_path("room");
+        let store = ProfileStore::load(Some(path.clone()));
+        assert!(store.room_identity().is_none());
+
+        store.set_room_identity(RoomIdentity { code: "ABC123".into(), secret: "s3cret".into() });
+        store.update("d", |p| p.acoustic_offset_ms = -10.0);
+
+        let reloaded = ProfileStore::load(Some(path.clone()));
+        let identity = reloaded.room_identity().expect("identity survived");
+        assert_eq!(identity.code, "ABC123");
+        assert_eq!(identity.secret, "s3cret");
+        // And the devices are still there beside it.
+        assert_eq!(reloaded.get("d").expect("profile").acoustic_offset_ms, -10.0);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn resetting_forgets_the_room_as_well_as_the_devices() {
+        let path = temp_path("room-clear");
+        let store = ProfileStore::load(Some(path.clone()));
+        store.set_room_identity(RoomIdentity { code: "ABC123".into(), secret: "s".into() });
+        store.clear();
+
+        assert!(ProfileStore::load(Some(path.clone())).room_identity().is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_file_written_before_rooms_were_persisted_still_loads() {
+        let path = temp_path("legacy");
+        std::fs::write(&path, r#"{"version":1,"devices":{"d":{"manual_offset_ms":7.0}}}"#).expect("write");
+
+        let store = ProfileStore::load(Some(path.clone()));
+        assert!(store.room_identity().is_none(), "no room recorded, so a fresh one is minted");
+        assert_eq!(store.get("d").expect("profile").manual_offset_ms, 7.0);
 
         let _ = std::fs::remove_file(&path);
     }

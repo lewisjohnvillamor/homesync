@@ -49,6 +49,12 @@ is not enough.
 
 ## What survives a restart
 
+**The room keeps its code and secret.** Without that, every restart would mint a
+new room and silently invalidate the invite link saved on every device — and
+because those credentials live in per-browser storage, one browser can keep
+working while another suddenly cannot. If the coordinator does mint a new room,
+the banner says so under the room code.
+
 Compensation is expensive to obtain, so it is saved to
 `homesync-devices.json` (`--state-file` to move it) against each device's
 identity, and restored when that device rejoins. That covers both the value you
@@ -85,6 +91,17 @@ Then, on the device that cannot connect:
 4. **Suspect client isolation.** Many routers isolate clients on guest
    networks, and some on the main one. Devices can each reach the internet but
    not each other. Move everything onto the same SSID.
+
+## One browser works and another does not
+
+Room credentials are stored per browser, so Safari and Chrome on the same
+machine hold different ones. A browser that opened the current invite link
+works; one that was pointed at the bare address reuses whatever it saved
+earlier.
+
+If a browser is refused, it now says so plainly and returns to the join screen,
+having forgotten the credentials that failed. Open the invite link the
+coordinator is printing, or scan its QR code.
 
 ## Media
 

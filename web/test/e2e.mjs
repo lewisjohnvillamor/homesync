@@ -253,6 +253,31 @@ try {
   } catch (error) {
     console.log(`SKIP  YouTube phase did not complete: ${error.message}`);
   }
+  // --- a refused join --------------------------------------------------
+  // Stale credentials are the normal case after a coordinator restart, and
+  // they used to produce an endless "join a room before sending that message"
+  // stream that buried the real reason.
+  const stale = await browser.newContext();
+  await stale.addInitScript(() => {
+    localStorage.setItem('homesync.roomCode', 'OLDCOD');
+    localStorage.setItem('homesync.roomSecret', 'stale-secret');
+  });
+  const strayPage = await stale.newPage();
+  await strayPage.goto(BASE);
+  await strayPage.click('#join');
+  await sleep(8000);
+
+  const refused = await strayPage.evaluate(() => ({
+    spam: (document.getElementById('log').textContent.match(/join a room before sending/g) || []).length,
+    explained: document.getElementById('log').textContent.includes('Could not join'),
+    backToJoin: !document.getElementById('join-panel').classList.contains('hidden'),
+  }));
+  await stale.close();
+
+  if (refused.spam > 0) throw new Error(`a refused join produced ${refused.spam} repeated errors`);
+  if (!refused.explained) throw new Error('a refused join did not explain itself');
+  if (!refused.backToJoin) throw new Error('a refused join left the user on a dead page');
+  ok('a refused join explains itself once and returns to the join screen');
 } finally {
   await browser.close();
   stopServer();

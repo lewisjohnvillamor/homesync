@@ -52,8 +52,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let media = MediaLibrary::load(&config.media_dir);
-    let room_code = config.room_code.clone().unwrap_or_else(random_room_code);
-    let room_secret = config.room_secret.clone().unwrap_or_else(|| Ulid::new().to_string());
+
+    // The room keeps its identity across restarts. A new code and secret on
+    // every start silently invalidates the invite link saved on every device,
+    // and the resulting join failure is invisible from the coordinator side.
+    let saved_room = profiles.room_identity();
+    let room_code = config
+        .room_code
+        .clone()
+        .or_else(|| saved_room.as_ref().map(|room| room.code.clone()))
+        .unwrap_or_else(random_room_code);
+    let room_secret = config
+        .room_secret
+        .clone()
+        .or_else(|| saved_room.as_ref().map(|room| room.secret.clone()))
+        .unwrap_or_else(|| Ulid::new().to_string());
+    let room_reused = saved_room.map(|room| room.code == room_code && room.secret == room_secret).unwrap_or(false);
+    profiles.set_room_identity(profiles::RoomIdentity { code: room_code.clone(), secret: room_secret.clone() });
     let room = Room::new(room_code.clone(), room_secret.clone(), config.start_lead_ns(), config.max_clients);
 
     let addr = SocketAddr::new(config.bind, config.port);
@@ -116,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    print_banner(&app, &room_code, &room_secret, bound, scheme, &lan_addresses, certificate.as_ref());
+    print_banner(&app, &room_code, &room_secret, bound, scheme, &lan_addresses, certificate.as_ref(), room_reused);
 
     // Coalesced telemetry snapshots.
     let flusher = {
@@ -278,6 +293,7 @@ fn print_banner(
     scheme: &str,
     lan_addresses: &[IpAddr],
     certificate: Option<&tls::Certificate>,
+    room_reused: bool,
 ) {
     let local = format!("{scheme}://{}:{}", display_host(bound.ip()), bound.port());
     let lan: Vec<String> = lan_addresses.iter().map(|ip| format!("{scheme}://{ip}:{}", bound.port())).collect();
@@ -302,6 +318,9 @@ fn print_banner(
         println!("  Also try             : {scheme}://homesync.local:{}", bound.port());
     }
     println!("  Room code            : {room_code}");
+    if !room_reused {
+        println!("                         (new — devices holding an older invite must reopen this link)");
+    }
     println!("  Invite link          : {invite}");
     println!("  Media items          : {}", app.media.manifest().items.len());
     println!("  Saved devices        : {}", app.profiles.len());

@@ -135,6 +135,7 @@ async function join() {
   };
   connection.onWelcome = () => log('Connected to the coordinator.');
   connection.onError = (error) => log(`Coordinator: ${error.message}`);
+  connection.onJoinRejected = onJoinRejected;
   connection.onSnapshot = onSnapshot;
   connection.onTransport = onTransport;
   connection.diagnosticsProvider = () => (player.ctx ? player.diagnostics(state.transport) : null);
@@ -158,6 +159,41 @@ async function join() {
 // ---------------------------------------------------------------------------
 // Server events
 // ---------------------------------------------------------------------------
+
+/**
+ * The room refused us. Almost always because the coordinator was restarted
+ * with a fresh room, leaving this browser holding an invite that no longer
+ * exists — and because credentials live in per-browser storage, one browser can
+ * work while another does not.
+ *
+ * The saved values are cleared so the next attempt starts from whatever the
+ * user supplies rather than silently reusing what just failed.
+ */
+function onJoinRejected(error) {
+  const explanation = {
+    no_such_room: 'That room no longer exists. The coordinator was probably restarted with a new room.',
+    bad_secret: 'That room secret is not accepted. It changes if the coordinator is started with a new room.',
+    room_full: 'That room is full.',
+  }[error.code] ?? error.message;
+
+  localStorage.removeItem('homesync.roomCode');
+  localStorage.removeItem('homesync.roomSecret');
+
+  state.connection = null;
+  state.snapshot = null;
+  state.transport = null;
+
+  // Back to the join screen: nothing else on this page means anything now.
+  $('join-panel').classList.remove('hidden');
+  for (const id of ['room-panel', 'device-panel', 'calibration-panel', 'diagnostics-panel']) {
+    $(id).classList.add('hidden');
+  }
+  $('room-secret').value = '';
+  setPill($('status'), 'not joined', 'idle');
+
+  log(`Could not join: ${explanation}`);
+  log('Open the invite link the coordinator is printing now, or scan its QR code.');
+}
 
 function onSnapshot(snapshot) {
   state.snapshot = snapshot;
