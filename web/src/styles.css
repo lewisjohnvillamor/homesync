@@ -233,6 +233,15 @@ tr.self td {
   margin: 0;
 }
 
+.problem {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2624c;
+  border-radius: 8px;
+  color: #e2624c;
+  font-size: 14px;
+}
+
 .stage {
   margin-bottom: 12px;
   aspect-ratio: 16 / 9;

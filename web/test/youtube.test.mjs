@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseVideoId } from '../src/youtube.js';
+import { parseVideoId, isUnembeddable } from '../src/youtube.js';
 
 test('accepts a bare video id', () => {
   assert.equal(parseVideoId('dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
@@ -22,6 +22,22 @@ test('accepts the URL shapes people actually paste', () => {
   assert.equal(parseVideoId('https://youtu.be/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
   assert.equal(parseVideoId('https://www.youtube.com/embed/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
   assert.equal(parseVideoId('https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=42s'), 'dQw4w9WgXcQ');
+});
+
+test('identifies the errors that no retry can fix', () => {
+  // 101 and 150 are the same condition: the owner allows playback only on
+  // youtube.com. 100 is a video that is gone or private. Retrying, reloading
+  // or rescheduling changes none of them, so the user has to be told rather
+  // than left watching a broken player.
+  assert.equal(isUnembeddable(101), true);
+  assert.equal(isUnembeddable(150), true);
+  assert.equal(isUnembeddable(100), true);
+
+  // These are transient or local, and are not worth telling the whole room
+  // to pick a different video over.
+  assert.equal(isUnembeddable(5), false);
+  assert.equal(isUnembeddable(2), false);
+  assert.equal(isUnembeddable(undefined), false);
 });
 
 test('rejects things that are not video ids', () => {
