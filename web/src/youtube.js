@@ -68,6 +68,8 @@ export class YoutubePlayer {
     this.player = null;
     this.videoId = null;
     this.ready = false;
+    /** Resolves when the player's methods exist. Also guards construction. */
+    this.readyPromise = null;
     /** Rendezvous epoch currently being served. */
     this.epoch = -1;
     /** Timer for the scheduled `playVideo()` call. */
@@ -82,19 +84,36 @@ export class YoutubePlayer {
     this.onLog = null;
   }
 
-  /** Loads (or reloads) a video, resolving once the player reports ready. */
+  /**
+   * Loads (or reloads) a video, resolving once the player is usable.
+   *
+   * `new YT.Player()` returns an object immediately, but its methods —
+   * `cueVideoById`, `seekTo`, `playVideo` — do not exist until the player
+   * reports ready. Calling one before then throws
+   * "cueVideoById is not a function", which is why every path here waits on
+   * the same readiness promise rather than on the object merely existing.
+   */
   async load(videoId) {
-    if (this.videoId === videoId && this.player) return;
+    if (this.videoId === videoId && this.player && this.ready) return;
     const YT = await loadApi();
-    this.videoId = videoId;
 
-    if (this.player) {
-      this.ready = false;
+    if (this.readyPromise) {
+      await this.readyPromise;
+      if (this.videoId === videoId) return;
+      if (typeof this.player?.cueVideoById !== 'function') {
+        this.#log('the YouTube player never became ready; reload the page to try again');
+        return;
+      }
+      this.videoId = videoId;
+      // Readiness is not cleared here: onReady fires once, at construction,
+      // and cueing another video does not repeat it. Clearing it would leave
+      // the player permanently reported as unready.
       this.player.cueVideoById(videoId);
       return;
     }
 
-    await new Promise((resolve) => {
+    this.videoId = videoId;
+    this.readyPromise = new Promise((resolve) => {
       this.player = new YT.Player(this.container, {
         videoId,
         // Cue rather than autoplay: playback must begin at the rendezvous
@@ -112,6 +131,7 @@ export class YoutubePlayer {
         },
       });
     });
+    await this.readyPromise;
   }
 
   /** Current state, in the shape of the protocol's `youtube_state` payload. */
@@ -165,6 +185,10 @@ export class YoutubePlayer {
     const untilStartS = Math.max(0, (startNs - nowNs) / 1e9);
     const seekTarget = message.target_position_s;
 
+    if (typeof this.player.seekTo !== 'function') {
+      this.#log('the YouTube player is not ready to seek yet; skipping this rendezvous');
+      return;
+    }
     this.player.pauseVideo();
     this.player.seekTo(seekTarget, true);
 
@@ -191,7 +215,7 @@ export class YoutubePlayer {
 
   #play() {
     this.startTimer = null;
-    if (!this.player) return;
+    if (typeof this.player?.playVideo !== 'function') return;
     this.playCalledNs = this.clock.serverNow();
     this.player.playVideo();
     this.#watchForStart();
@@ -233,6 +257,7 @@ export class YoutubePlayer {
   pause() {
     this.#cancelPending();
     this.epoch = -1;
+    // Optional call: the methods do not exist before the player is ready.
     this.player?.pauseVideo?.();
   }
 
@@ -243,6 +268,7 @@ export class YoutubePlayer {
     this.player = null;
     this.ready = false;
     this.videoId = null;
+    this.readyPromise = null;
     this.epoch = -1;
   }
 

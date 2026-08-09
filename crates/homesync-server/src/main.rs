@@ -64,15 +64,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
-    let lan_ip = local_ip_address::local_ip().ok();
+    let lan_addresses = lan_addresses();
+    let lan_ip = lan_addresses.first().copied();
 
     // TLS first: a failure here changes every URL printed in the banner, so it
     // must be resolved before anything is announced.
     let certificate = if use_tls {
         let mut addresses: Vec<IpAddr> = vec![IpAddr::from([127, 0, 0, 1])];
-        if let Some(ip) = lan_ip {
-            addresses.push(ip);
-        }
+        // Every interface, not just the first: a machine with both Wi-Fi and
+        // Ethernet is reachable at either, and a certificate that omits the
+        // one a device actually used is rejected outright.
+        addresses.extend(lan_addresses.iter().copied());
         if !bound.ip().is_unspecified() {
             addresses.push(bound.ip());
         }
@@ -114,7 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    print_banner(&app, &room_code, &room_secret, bound, scheme, lan_ip, certificate.as_ref());
+    print_banner(&app, &room_code, &room_secret, bound, scheme, &lan_addresses, certificate.as_ref());
 
     // Coalesced telemetry snapshots.
     let flusher = {
@@ -177,6 +179,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Every private IPv4 address this machine has, most-likely-first.
+///
+/// `local_ip()` returns one address, which is wrong on any machine with both
+/// Wi-Fi and Ethernet: a device on the other network cannot reach the one it
+/// picked, and the failure looks like the coordinator being down.
+fn lan_addresses() -> Vec<IpAddr> {
+    let mut addresses: Vec<IpAddr> = local_ip_address::list_afinet_netifas()
+        .map(|interfaces| {
+            interfaces
+                .into_iter()
+                .map(|(_, ip)| ip)
+                // IPv4 only: the invite links and QR codes are typed and
+                // scanned by people, and an IPv6 literal in a URL needs
+                // brackets and is hopeless on a television remote.
+                .filter(|ip| ip.is_ipv4() && !ip.is_loopback() && !ip.is_unspecified())
+                .filter(is_private_v4)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // The interface `local_ip()` would have chosen goes first, so the invite
+    // link and QR code keep pointing at the most likely address.
+    if let Ok(preferred) = local_ip_address::local_ip() {
+        addresses.retain(|ip| *ip != preferred);
+        addresses.insert(0, preferred);
+    }
+    addresses.dedup();
+    addresses
+}
+
+/// Whether an address is in a private range, so link-local and public
+/// addresses do not clutter the banner.
+fn is_private_v4(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_private(),
+        IpAddr::V6(_) => false,
+    }
+}
+
 /// Serves the router, with TLS when a certificate was prepared.
 ///
 /// The two paths are separate because rustls needs to own the listener, so a
@@ -235,19 +276,26 @@ fn print_banner(
     room_secret: &str,
     bound: SocketAddr,
     scheme: &str,
-    lan_ip: Option<IpAddr>,
+    lan_addresses: &[IpAddr],
     certificate: Option<&tls::Certificate>,
 ) {
     let local = format!("{scheme}://{}:{}", display_host(bound.ip()), bound.port());
-    let lan = lan_ip.map(|ip| format!("{scheme}://{ip}:{}", bound.port()));
-    let invite_base = lan.clone().unwrap_or_else(|| local.clone());
+    let lan: Vec<String> = lan_addresses.iter().map(|ip| format!("{scheme}://{ip}:{}", bound.port())).collect();
+    let invite_base = lan.first().cloned().unwrap_or_else(|| local.clone());
     let invite = format!("{invite_base}/#room={room_code}&secret={room_secret}");
 
     println!();
     println!("  HomeSync coordinator {} — protocol v{}", app.version, homesync_protocol::PROTOCOL_VERSION);
     println!("  ---------------------------------------------");
-    if let Some(lan) = &lan {
-        println!("  Open on the LAN      : {lan}");
+    // Every address, because a device can only reach the coordinator on a
+    // network it shares with it. A laptop that cannot open the first address
+    // is usually on a different one — a guest SSID, a VPN, another subnet.
+    for (index, url) in lan.iter().enumerate() {
+        let label = if index == 0 { "Open on the LAN     " } else { "  or                " };
+        println!("  {label} : {url}");
+    }
+    if lan.is_empty() {
+        println!("  Open on the LAN      : no private network address found");
     }
     println!("  Open on this machine : {local}");
     if app.config.mdns {
@@ -355,6 +403,33 @@ mod tests {
         // section, so the code has to come from the random section.
         let codes: std::collections::HashSet<String> = (0..20).map(|_| random_room_code()).collect();
         assert!(codes.len() > 1, "room codes must not be constant within a millisecond");
+    }
+
+    #[test]
+    fn only_private_ipv4_addresses_are_offered() {
+        // Public and link-local addresses are not places a phone on the sofa
+        // can reach the coordinator, and an IPv6 literal is unusable on a
+        // television remote.
+        assert!(is_private_v4(&"192.168.1.50".parse().unwrap()));
+        assert!(is_private_v4(&"10.0.0.5".parse().unwrap()));
+        assert!(is_private_v4(&"172.16.0.1".parse().unwrap()));
+        assert!(!is_private_v4(&"8.8.8.8".parse().unwrap()));
+        assert!(!is_private_v4(&"169.254.1.1".parse().unwrap()), "link-local is not routable here");
+        assert!(!is_private_v4(&"fe80::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn the_preferred_address_leads_and_nothing_repeats() {
+        // The invite link and QR code use the first entry, so it has to be the
+        // one the host would have chosen on its own.
+        let addresses = lan_addresses();
+        let unique: std::collections::HashSet<_> = addresses.iter().collect();
+        assert_eq!(unique.len(), addresses.len(), "an address was listed twice: {addresses:?}");
+        if let Ok(preferred) = local_ip_address::local_ip() {
+            if addresses.contains(&preferred) {
+                assert_eq!(addresses[0], preferred);
+            }
+        }
     }
 
     #[test]

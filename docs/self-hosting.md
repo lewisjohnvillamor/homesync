@@ -60,6 +60,32 @@ found by ear and the one calibration measured.
 A device is recognised by an identifier its browser stores. Clearing a
 browser's site data makes it a new device.
 
+## A device cannot reach the coordinator
+
+If some devices connect and one does not, the coordinator is fine — it is
+listening, and the firewall is letting others in. The fault is between that
+device and the host.
+
+The banner lists **every** private address the host has, because a machine with
+both Wi-Fi and Ethernet is reachable at either and a device can only use one it
+shares a network with. Try each of them.
+
+Then, on the device that cannot connect:
+
+1. **Check its own address.** `ipconfig` on Windows, `ifconfig`/`ip addr`
+   elsewhere. If it is not on the same subnet as the coordinator —
+   `192.168.254.x` versus `192.168.1.x`, say — there is no route, and that is
+   the whole answer. Common causes: a guest SSID, a 2.4/5 GHz pair bridged to
+   different subnets, an Ethernet dock, or a phone hotspot.
+2. **Turn off any VPN.** A VPN client routinely captures all traffic including
+   private addresses, and this is the single most common cause on laptops.
+3. **Try a ping.** If ping fails too, it is not HomeSync — it is the network.
+   If ping succeeds but the browser does not load, suspect a proxy setting or
+   a local firewall on the device.
+4. **Suspect client isolation.** Many routers isolate clients on guest
+   networks, and some on the main one. Devices can each reach the internet but
+   not each other. Move everything onto the same SSID.
+
 ## Media
 
 ```sh
