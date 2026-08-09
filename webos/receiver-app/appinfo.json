@@ -1,0 +1,15 @@
+{
+  "id": "com.homesync.receiver",
+  "version": "0.1.0",
+  "vendor": "HomeSync",
+  "type": "web",
+  "main": "index.html",
+  "title": "HomeSync Receiver",
+  "icon": "icon.png",
+  "largeIcon": "icon.png",
+  "bgColor": "#0f1216",
+  "iconColor": "#4da3ff",
+  "requiredPermissions": ["time.query"],
+  "disableBackHistoryAPI": true,
+  "supportTouchMode": "none"
+}

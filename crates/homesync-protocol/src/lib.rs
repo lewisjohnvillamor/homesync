@@ -70,7 +70,12 @@ pub enum Payload {
     // ---- room state ------------------------------------------------------
     /// Authoritative view of the room. Broadcast on every membership or
     /// transport change, and sent once immediately after a successful join.
-    RoomSnapshot(RoomSnapshot),
+    ///
+    /// Boxed because it is by far the largest variant, and an enum is as big
+    /// as its biggest member: without the box, every clock exchange — the
+    /// most frequent message in the protocol — would carry a snapshot-sized
+    /// hole.
+    RoomSnapshot(Box<RoomSnapshot>),
     /// Client updates its own mutable properties (name, role, compensation).
     ClientUpdate(ClientUpdate),
 
@@ -83,7 +88,7 @@ pub enum Payload {
     ClockReport(ClockReport),
 
     // ---- media and transport --------------------------------------------
-    /// Controller selects the media every receiver should preload.
+    /// Controller selects the source mode and what to play.
     SelectSource(SelectSource),
     /// Catalogue of media the coordinator can serve.
     MediaManifest(MediaManifest),
@@ -104,6 +109,37 @@ pub enum Payload {
     Volume(Volume),
     /// Controller command: mute or unmute a receiver.
     Mute(Mute),
+
+    // ---- live system audio (Mode C) --------------------------------------
+    /// Controller starts capturing and distributing system audio.
+    StreamStart(StreamStart),
+    /// Controller stops the live stream.
+    StreamStop,
+    /// Format and buffering parameters of the running stream. Receivers build
+    /// their playout buffer from this before any audio frame arrives.
+    StreamInfo(StreamInfo),
+    /// Receiver's playout buffer health.
+    BufferReport(BufferReport),
+
+    // ---- YouTube Together (Mode B) ---------------------------------------
+    /// Receiver's view of its own YouTube player.
+    YoutubeState(YoutubeState),
+    /// Coordinator's instruction to converge on a position at a future time.
+    YoutubeRendezvous(YoutubeRendezvous),
+
+    // ---- acoustic calibration --------------------------------------------
+    /// Controller starts a calibration run.
+    CalibrationStart(CalibrationStart),
+    /// Controller aborts a calibration run.
+    CalibrationCancel,
+    /// Coordinator tells one receiver to emit a chirp at a future instant.
+    CalibrationPlay(CalibrationPlay),
+    /// Coordinator tells the microphone device to record a window.
+    CalibrationRecord(CalibrationRecord),
+    /// Progress narration, so the user knows why the room is making noises.
+    CalibrationProgress(CalibrationProgress),
+    /// Final measurements and the compensation derived from them.
+    CalibrationResult(CalibrationResult),
 
     // ---- diagnostics -----------------------------------------------------
     /// Periodic receiver telemetry (spec section 19).
@@ -193,6 +229,9 @@ pub struct ClientUpdate {
     /// emits sound late, schedule it earlier by this much" (spec section 3.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manual_offset_ms: Option<f64>,
+    /// Whether this device has a usable microphone for calibration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone_available: Option<bool>,
     /// Linear gain in `0.0..=1.0`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub volume: Option<f32>,
@@ -265,11 +304,261 @@ pub struct ClockReport {
     pub quality: ClockQuality,
 }
 
-/// Controller's media selection.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Where the room's audio comes from (specification section 5.2).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceMode {
+    /// Nothing selected.
+    #[default]
+    Idle,
+    /// Mode A: a local file every receiver preloads and schedules. The
+    /// reference mode, and the only one with a guaranteed timing story.
+    ControlledAudio,
+    /// Mode B: every device runs its own YouTube player, rendezvousing on a
+    /// position and a start instant. Best effort; see the caveats in
+    /// `docs/protocol.md`.
+    Youtube,
+    /// Mode C: the host captures system audio and streams timestamped PCM.
+    SystemAudio,
+}
+
+impl SourceMode {
+    /// Whether receivers must preload and hash-verify media before playback.
+    pub fn requires_preload(self) -> bool {
+        matches!(self, SourceMode::ControlledAudio)
+    }
+
+    /// Whether the coordinator's [`Transport`] timeline drives playback.
+    /// Live system audio is driven by per-frame presentation times instead.
+    pub fn uses_transport_timeline(self) -> bool {
+        matches!(self, SourceMode::ControlledAudio | SourceMode::Youtube)
+    }
+}
+
+/// Controller's source selection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SelectSource {
-    /// Media identifier from [`MediaManifest`], or `None` to clear the source.
+    /// Which mode to switch to.
+    pub mode: SourceMode,
+    /// Media identifier from [`MediaManifest`], for [`SourceMode::ControlledAudio`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_id: Option<String>,
+    /// Video identifier, for [`SourceMode::Youtube`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub youtube_video_id: Option<String>,
+}
+
+/// Controller's request to start live system-audio capture.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct StreamStart {
+    /// Latency profile name: `live`, `movie` or `music`.
+    pub profile: String,
+    /// Use the built-in synthetic test signal instead of real system audio.
+    /// The synthetic source works on every platform, so a room can be proven
+    /// before trusting it with real audio.
+    #[serde(default)]
+    pub synthetic: bool,
+}
+
+/// Parameters of the running live stream.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct StreamInfo {
+    /// Incremented whenever the stream restarts, so receivers rebuild their
+    /// buffers rather than mixing two streams.
+    pub epoch: u64,
+    /// Samples per second, per channel.
+    pub sample_rate: u32,
+    /// Channel count.
+    pub channels: u16,
+    /// Payload encoding: `s16le` or `f32le`.
+    pub format: String,
+    /// Latency profile in force.
+    pub profile: String,
+    /// Target playout buffer depth, in milliseconds.
+    pub target_depth_ms: f64,
+    /// Whether the source is the synthetic test signal.
+    pub synthetic: bool,
+    /// Human-readable description of what is being captured.
+    pub source_description: String,
+}
+
+/// Receiver's playout buffer health (specification section 11.2, step 7).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct BufferReport {
+    /// Current buffered audio, in milliseconds.
+    pub depth_ms: f64,
+    /// Target depth, in milliseconds.
+    pub target_ms: f64,
+    /// Whether the buffer has primed and is rendering.
+    pub primed: bool,
+    /// Render calls that ran out of audio.
+    pub underruns: u32,
+    /// Frames dropped because the buffer was over its ceiling.
+    pub overruns: u32,
+    /// Frames that arrived after their presentation time.
+    pub late_frames: u32,
+    /// Duplicate or reordered frames dropped.
+    pub duplicate_frames: u32,
+    /// Times the buffer emptied and had to re-prime.
+    pub reprimes: u32,
+}
+
+/// A receiver's view of its own YouTube player.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct YoutubeState {
+    /// Video the player is loaded with.
+    #[serde(default)]
+    pub video_id: String,
+    /// IFrame API player state: `unstarted`, `ended`, `playing`, `paused`,
+    /// `buffering` or `cued`.
+    pub player_state: String,
+    /// Player position, in seconds.
+    pub current_time_s: f64,
+    /// Video duration in seconds, once known.
+    #[serde(default)]
+    pub duration_s: f64,
+    /// Fraction of the video buffered, `0.0..=1.0`.
+    #[serde(default)]
+    pub buffered_fraction: f64,
+    /// Whether the player has reported ready.
+    #[serde(default)]
+    pub ready: bool,
+    /// Measured delay between calling `playVideo()` and playback actually
+    /// starting, in milliseconds. The coordinator maintains a bounded moving
+    /// average of this per device and starts each device early by that much.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_start_latency_ms: Option<f64>,
+}
+
+/// Instruction to converge every player on one position at one instant.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct YoutubeRendezvous {
+    /// Incremented per rendezvous attempt.
+    pub epoch: u64,
+    /// Video everyone should be playing.
+    pub video_id: String,
+    /// Position to be at when the rendezvous instant arrives, in seconds.
+    pub target_position_s: f64,
+    /// Coordinator instant at which playback should be running.
+    pub start_server_ns: u64,
+    /// This device's learned start latency, in milliseconds. It should call
+    /// `playVideo()` this far ahead of `start_server_ns`.
+    pub start_latency_ms: f64,
+}
+
+/// Controller's request to begin acoustic calibration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalibrationStart {
+    /// Device whose microphone will listen. Normally a phone, held where the
+    /// listener will actually sit.
+    pub microphone_client_id: String,
+    /// Chirps per device. More repetitions reject more noise; five is the
+    /// specification's minimum.
+    #[serde(default = "default_repetitions")]
+    pub repetitions: u32,
+}
+
+fn default_repetitions() -> u32 {
+    5
+}
+
+/// Instruction to one receiver to emit a chirp.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalibrationPlay {
+    /// Calibration run this belongs to. Stale runs are ignored.
+    pub session_id: String,
+    /// Chirp assigned to this device; also selects the audio to fetch.
+    pub chirp_code: u32,
+    /// URL of the chirp audio.
+    pub chirp_url: String,
+    /// Coordinator instant at which the chirp should be *heard*. The receiver
+    /// applies its usual compensation, so a calibration measures the same
+    /// scheduling path that ordinary playback uses.
+    pub start_server_ns: u64,
+    /// Repetition index, from zero.
+    pub repetition: u32,
+}
+
+/// Instruction to the microphone device to record a window.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalibrationRecord {
+    /// Calibration run this belongs to.
+    pub session_id: String,
+    /// Device being measured.
+    pub target_client_id: String,
+    /// Chirp code the target will emit.
+    pub chirp_code: u32,
+    /// Coordinator instant the target is scheduled to be heard at. The
+    /// recording starts slightly before this and the coordinator subtracts the
+    /// difference, so a measured delay is relative to the scheduled instant.
+    pub start_server_ns: u64,
+    /// How long to record, in milliseconds.
+    pub duration_ms: f64,
+    /// Repetition index, from zero.
+    pub repetition: u32,
+}
+
+/// Narration of a calibration run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalibrationProgress {
+    /// Calibration run this belongs to.
+    pub session_id: String,
+    /// What is happening: `preparing`, `measuring`, `analysing`, `done`,
+    /// `cancelled` or `failed`.
+    pub stage: String,
+    /// Device currently being measured, when one is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// Measurements completed so far.
+    pub completed: u32,
+    /// Measurements planned in total.
+    pub total: u32,
+    /// Human-readable detail.
+    #[serde(default)]
+    pub detail: String,
+}
+
+/// One device's calibration outcome.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalibrationMeasurement {
+    /// Device measured.
+    pub client_id: String,
+    /// Friendly name at the time of measurement.
+    pub name: String,
+    /// Median acoustic arrival delay relative to the scheduled instant, in
+    /// milliseconds.
+    pub measured_delay_ms: f64,
+    /// Spread across repetitions, in milliseconds. A large value means the
+    /// device's latency is not stable and no fixed compensation will hold.
+    pub deviation_ms: f64,
+    /// Repetitions kept.
+    pub accepted: u32,
+    /// Repetitions discarded.
+    pub rejected: u32,
+    /// The device's latency with no compensation at all, in milliseconds.
+    pub intrinsic_latency_ms: f64,
+    /// Compensation the coordinator applied, in milliseconds.
+    pub applied_compensation_ms: f64,
+    /// Whether the repetitions agreed closely enough to trust.
+    pub stable: bool,
+    /// Set when an earlier, quieter arrival was preferred over a louder later
+    /// one — a sign of a reflective room, and worth telling the user.
+    #[serde(default)]
+    pub reflective_room: bool,
+}
+
+/// Result of a calibration run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CalibrationResult {
+    /// Calibration run this belongs to.
+    pub session_id: String,
+    /// Whether compensation was actually applied.
+    pub applied: bool,
+    /// Per-device outcomes.
+    pub measurements: Vec<CalibrationMeasurement>,
+    /// Explanation, especially when nothing was applied.
+    #[serde(default)]
+    pub detail: String,
 }
 
 /// Catalogue of everything the coordinator can serve.
@@ -358,9 +647,15 @@ pub struct Transport {
     pub epoch: u64,
     /// Current state.
     pub state: TransportState,
+    /// Which source mode this timeline drives.
+    #[serde(default)]
+    pub mode: SourceMode,
     /// Selected media, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_id: Option<String>,
+    /// Selected YouTube video, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub youtube_video_id: Option<String>,
     /// Coordinator monotonic nanoseconds the timeline is anchored to.
     pub anchor_server_ns: u64,
     /// Media position, in nanoseconds, at `anchor_server_ns`.
@@ -434,6 +729,15 @@ pub struct RoomSnapshot {
     /// How far ahead of "now" the coordinator schedules playback starts, in
     /// milliseconds (spec section 10, step 4).
     pub start_lead_ms: f64,
+    /// Live stream parameters, when one is running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamInfo>,
+    /// Calibration progress, when a run is in flight.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<CalibrationProgress>,
+    /// Source modes this coordinator build actually implements.
+    #[serde(default)]
+    pub supported_modes: Vec<SourceMode>,
 }
 
 /// One participant, as published to every other participant.
@@ -447,19 +751,40 @@ pub struct ClientInfo {
     pub name: String,
     /// Current role.
     pub role: Role,
-    /// Manual timing compensation in milliseconds.
+    /// Manual timing compensation in milliseconds, set by the user.
     pub manual_offset_ms: f64,
+    /// Timing compensation in milliseconds derived from acoustic calibration.
+    /// Kept separate from the manual value so a calibration run never silently
+    /// discards a human's adjustment, and so the UI can show which is which.
+    #[serde(default)]
+    pub acoustic_offset_ms: f64,
     /// Linear gain.
     pub volume: f32,
     /// Mute state.
     pub muted: bool,
     /// Whether this client has verified and decoded the selected media.
     pub ready: bool,
+    /// Whether this device can act as a calibration microphone.
+    #[serde(default)]
+    pub microphone_available: bool,
     /// Latest clock estimate the client published.
     pub clock: ClockReport,
     /// Latest telemetry the client published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<DiagnosticReport>,
+    /// Latest live-stream buffer health, when streaming.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffer: Option<BufferReport>,
+    /// Latest YouTube player state, in YouTube mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub youtube: Option<YoutubeState>,
+}
+
+impl ClientInfo {
+    /// Total timing compensation this device applies, in milliseconds.
+    pub fn total_offset_ms(&self) -> f64 {
+        self.manual_offset_ms + self.acoustic_offset_ms
+    }
 }
 
 /// Periodic receiver telemetry.
@@ -550,8 +875,44 @@ mod tests {
         roundtrip(Payload::ClockPing(ClockPing { t0: 1.5, seq: 3 }));
         roundtrip(Payload::ClockPong(ClockPong { t0: 1.5, t1: 2, t2: 3, seq: 3 }));
         roundtrip(Payload::ClockReport(ClockReport::default()));
-        roundtrip(Payload::SelectSource(SelectSource { media_id: Some("m".into()) }));
+        roundtrip(Payload::SelectSource(SelectSource {
+            mode: SourceMode::ControlledAudio,
+            media_id: Some("m".into()),
+            youtube_video_id: None,
+        }));
         roundtrip(Payload::Transport(Transport::default()));
+        roundtrip(Payload::StreamStart(StreamStart { profile: "music".into(), synthetic: true }));
+        roundtrip(Payload::StreamStop);
+        roundtrip(Payload::StreamInfo(StreamInfo::default()));
+        roundtrip(Payload::BufferReport(BufferReport::default()));
+        roundtrip(Payload::YoutubeState(YoutubeState::default()));
+        roundtrip(Payload::YoutubeRendezvous(YoutubeRendezvous::default()));
+        roundtrip(Payload::CalibrationStart(CalibrationStart { microphone_client_id: "c1".into(), repetitions: 5 }));
+        roundtrip(Payload::CalibrationCancel);
+        roundtrip(Payload::CalibrationPlay(CalibrationPlay {
+            session_id: "s".into(),
+            chirp_code: 1,
+            chirp_url: "/api/v1/calibration/chirp/1.wav".into(),
+            start_server_ns: 5,
+            repetition: 0,
+        }));
+        roundtrip(Payload::CalibrationRecord(CalibrationRecord {
+            session_id: "s".into(),
+            target_client_id: "c1".into(),
+            chirp_code: 1,
+            start_server_ns: 5,
+            duration_ms: 900.0,
+            repetition: 0,
+        }));
+        roundtrip(Payload::CalibrationProgress(CalibrationProgress {
+            session_id: "s".into(),
+            stage: "measuring".into(),
+            client_id: Some("c1".into()),
+            completed: 1,
+            total: 10,
+            detail: String::new(),
+        }));
+        roundtrip(Payload::CalibrationResult(CalibrationResult::default()));
         roundtrip(Payload::Play(PlayCommand { force: true }));
         roundtrip(Payload::Pause);
         roundtrip(Payload::Seek(Seek { position_ns: 5 }));
@@ -577,11 +938,49 @@ mod tests {
     }
 
     #[test]
+    fn source_modes_declare_what_they_need() {
+        assert!(SourceMode::ControlledAudio.requires_preload());
+        assert!(!SourceMode::Youtube.requires_preload(), "YouTube media is never ours to preload");
+        assert!(!SourceMode::SystemAudio.requires_preload(), "live audio has nothing to preload");
+
+        assert!(SourceMode::ControlledAudio.uses_transport_timeline());
+        assert!(SourceMode::Youtube.uses_transport_timeline());
+        assert!(
+            !SourceMode::SystemAudio.uses_transport_timeline(),
+            "live audio is driven by per-frame presentation times"
+        );
+    }
+
+    #[test]
+    fn total_compensation_combines_manual_and_acoustic() {
+        // Calibration must never silently discard a human's adjustment.
+        let client = ClientInfo {
+            client_id: "c".into(),
+            device_id: "d".into(),
+            name: "n".into(),
+            role: Role::Speaker,
+            manual_offset_ms: 12.0,
+            acoustic_offset_ms: -140.0,
+            volume: 1.0,
+            muted: false,
+            ready: true,
+            microphone_available: false,
+            clock: ClockReport::default(),
+            diagnostics: None,
+            buffer: None,
+            youtube: None,
+        };
+        assert_eq!(client.total_offset_ms(), -128.0);
+    }
+
+    #[test]
     fn position_advances_only_while_playing() {
         let t = Transport {
             epoch: 1,
             state: TransportState::Playing,
+            mode: SourceMode::ControlledAudio,
             media_id: Some("m".into()),
+            youtube_video_id: None,
             anchor_server_ns: 1_000,
             anchor_media_ns: 500,
         };

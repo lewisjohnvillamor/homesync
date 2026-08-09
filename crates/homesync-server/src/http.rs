@@ -1,12 +1,13 @@
 //! HTTP surface: the embedded web app, media delivery and read-only APIs.
 
+use crate::calibration::{self, RecordingUpload};
 use crate::media;
 use crate::state::App;
-use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::body::{Body, Bytes};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_embed::RustEmbed;
 use serde::Serialize;
@@ -26,6 +27,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/rooms/{code}", get(room_info))
         .route("/api/v1/media/{id}", get(media_bytes))
         .route("/api/v1/media/{id}/manifest", get(media_item_manifest))
+        .route("/api/v1/calibration/chirp/{code}", get(calibration_chirp))
+        .route("/api/v1/calibration/recording", post(calibration_recording))
         .route("/ws", get(crate::ws::ws_handler))
         .fallback(static_asset)
         .with_state(app)
@@ -57,7 +60,7 @@ async fn info(State(app): State<Arc<App>>) -> impl IntoResponse {
         server_ns: app.now_ns(),
         start_lead_ms: app.config.start_lead_ms,
         max_clients: app.config.max_clients,
-        modes: vec!["controlled_audio"],
+        modes: vec!["controlled_audio", "youtube", "system_audio"],
     })
 }
 
@@ -142,6 +145,85 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
 fn insert(response: &mut Response, name: header::HeaderName, value: String) {
     if let Ok(value) = HeaderValue::from_str(&value) {
         response.headers_mut().insert(name, value);
+    }
+}
+
+/// Serves a calibration chirp as a WAV file.
+///
+/// Rendered on demand rather than kept in the media catalogue: chirps are
+/// measurement signals, not something anyone should be able to select and
+/// play to a room.
+async fn calibration_chirp(Path(code): Path<u32>) -> Response {
+    // Any code is renderable, but a bound stops a client from asking for an
+    // arbitrarily high one and getting a chirp outside the audible band.
+    if code > 64 {
+        return (StatusCode::NOT_FOUND, "no such chirp").into_response();
+    }
+    let spec = homesync_dsp::ChirpSpec::for_code(code, calibration::CHIRP_RATE);
+    let wav = homesync_audio::wav::write_f32_as_s16(&spec.render(), calibration::CHIRP_RATE, 1);
+
+    let mut response = Body::from(wav).into_response();
+    insert(&mut response, header::CONTENT_TYPE, "audio/wav".to_string());
+    insert(&mut response, header::CACHE_CONTROL, "public, max-age=3600".to_string());
+    response
+}
+
+/// Query parameters accompanying an uploaded calibration recording.
+#[derive(Debug, serde::Deserialize)]
+struct RecordingQuery {
+    session: String,
+    target: String,
+    repetition: u32,
+    rate: u32,
+    /// Coordinator time of the first recorded sample, as the microphone
+    /// device estimates it.
+    first_sample_server_ns: u64,
+}
+
+/// Largest calibration recording accepted: about 30 seconds of 48 kHz mono
+/// float. Recordings are around a second, so anything near this is a mistake
+/// or an attack.
+const MAX_RECORDING_BYTES: usize = 48_000 * 4 * 30;
+
+/// Receives a recorded window from the microphone device.
+///
+/// The body is raw little-endian `f32` mono samples. This goes over HTTP
+/// rather than the control socket so a megabyte of audio cannot delay a clock
+/// exchange queued behind it.
+async fn calibration_recording(
+    State(app): State<Arc<App>>,
+    Query(query): Query<RecordingQuery>,
+    body: Bytes,
+) -> Response {
+    if body.len() > MAX_RECORDING_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "recording is too long").into_response();
+    }
+    if !app.calibration.is_active(&query.session) {
+        return (StatusCode::NOT_FOUND, "no such calibration session").into_response();
+    }
+    if query.rate == 0 {
+        return (StatusCode::BAD_REQUEST, "sample rate must be positive").into_response();
+    }
+
+    let samples: Vec<f32> = body
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        // A NaN or infinity would poison the correlation for the whole run.
+        .map(|sample| if sample.is_finite() { sample } else { 0.0 })
+        .collect();
+
+    let delivered = app.calibration.deliver(RecordingUpload {
+        session_id: query.session,
+        target_client_id: query.target,
+        repetition: query.repetition,
+        sample_rate: query.rate,
+        first_sample_server_ns: query.first_sample_server_ns,
+        samples,
+    });
+    if delivered {
+        (StatusCode::ACCEPTED, "accepted").into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "no such calibration session").into_response()
     }
 }
 

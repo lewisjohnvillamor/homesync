@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, initial-scale=1" />
+    <title>HomeSync Receiver</title>
+    <style>
+      /* Deliberately self-contained: this shell must work before it can reach
+         the coordinator, so it cannot depend on anything the coordinator
+         serves. Sizes are for a television viewed from a sofa. */
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f1216;
+        color: #e8edf3;
+        font: 28px/1.5 system-ui, sans-serif;
+      }
+      .card {
+        width: min(1100px, 90vw);
+        padding: 48px;
+        border: 1px solid #262d36;
+        border-radius: 18px;
+        background: #171c22;
+      }
+      h1 { margin: 0 0 8px; font-size: 44px; }
+      p { color: #9aa7b4; margin: 0 0 24px; }
+      label { display: block; margin-bottom: 24px; }
+      input {
+        width: 100%;
+        margin-top: 8px;
+        padding: 16px 20px;
+        font: inherit;
+        color: inherit;
+        background: #0f1216;
+        border: 2px solid #262d36;
+        border-radius: 12px;
+      }
+      /* The remote moves focus; it must be obvious where focus is. */
+      input:focus, button:focus {
+        outline: none;
+        border-color: #4da3ff;
+        box-shadow: 0 0 0 4px rgba(77, 163, 255, 0.35);
+      }
+      .row { display: flex; gap: 16px; flex-wrap: wrap; }
+      button {
+        flex: 1 1 220px;
+        padding: 18px 24px;
+        font: inherit;
+        font-weight: 600;
+        color: #06131f;
+        background: #4da3ff;
+        border: 2px solid #4da3ff;
+        border-radius: 12px;
+        cursor: pointer;
+      }
+      button.secondary { color: #e8edf3; background: transparent; border-color: #262d36; }
+      .note { font-size: 20px; color: #9aa7b4; margin-top: 24px; }
+      .error { color: #e2624c; min-height: 1.5em; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>HomeSync Receiver</h1>
+      <p>Enter the address shown by the HomeSync coordinator on your PC or Raspberry Pi.</p>
+
+      <label>
+        Coordinator address
+        <input id="address" value="http://homesync.local:8080" autocomplete="off" spellcheck="false" />
+      </label>
+      <label>
+        Room code
+        <input id="room" placeholder="ABC123" autocomplete="off" spellcheck="false" maxlength="6" />
+      </label>
+      <label>
+        Room secret
+        <input id="secret" placeholder="from the coordinator's invite link" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <div class="row">
+        <button id="connect">Connect</button>
+        <button id="probe" class="secondary">Check this TV first</button>
+      </div>
+
+      <p class="error" id="error"></p>
+      <p class="note">
+        This app is a HomeSync receiver. It plays what HomeSync sends it. It
+        cannot capture or synchronise audio from Netflix, YouTube or any other
+        app on this television — webOS does not give one app another app's
+        audio, so no version of this app can do it.
+      </p>
+    </main>
+
+    <script>
+      // Settings persist so the TV reconnects without the remote-control
+      // typing ordeal a second time.
+      const store = {
+        get(key, fallback) {
+          try {
+            return window.localStorage.getItem(`homesync.${key}`) ?? fallback;
+          } catch {
+            return fallback;
+          }
+        },
+        set(key, value) {
+          try {
+            window.localStorage.setItem(`homesync.${key}`, value);
+          } catch {
+            // Private mode, or storage disabled. Not fatal.
+          }
+        },
+      };
+
+      const address = document.getElementById('address');
+      const room = document.getElementById('room');
+      const secret = document.getElementById('secret');
+      const error = document.getElementById('error');
+
+      address.value = store.get('address', address.value);
+      room.value = store.get('room', '');
+      secret.value = store.get('secret', '');
+
+      /** Normalises whatever was typed into a usable origin. */
+      function origin() {
+        let text = address.value.trim();
+        if (!text) return null;
+        if (!/^https?:\/\//i.test(text)) text = `http://${text}`;
+        try {
+          const url = new URL(text);
+          return `${url.protocol}//${url.host}`;
+        } catch {
+          return null;
+        }
+      }
+
+      function go(path) {
+        const base = origin();
+        if (!base) {
+          error.textContent = 'That address does not look right. Example: http://192.168.1.50:8080';
+          return;
+        }
+        store.set('address', address.value.trim());
+        store.set('room', room.value.trim().toUpperCase());
+        store.set('secret', secret.value.trim());
+        window.location.href = base + path;
+      }
+
+      document.getElementById('connect').addEventListener('click', () => {
+        const code = room.value.trim().toUpperCase();
+        const key = secret.value.trim();
+        if (!code || !key) {
+          error.textContent = 'Enter the room code and secret shown by the coordinator.';
+          return;
+        }
+        // The secret travels in the fragment, which is never sent to the
+        // coordinator as part of the request.
+        go(`/#room=${encodeURIComponent(code)}&secret=${encodeURIComponent(key)}`);
+      });
+
+      document.getElementById('probe').addEventListener('click', () => go('/probe.html'));
+
+      // Remote-friendly: Enter activates, Back leaves the app.
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && document.activeElement?.tagName === 'INPUT') {
+          document.getElementById('connect').focus();
+        }
+        if (event.keyCode === 461 || event.key === 'Backspace') {
+          if (document.activeElement?.tagName !== 'INPUT' && window.webOS?.platformBack) {
+            window.webOS.platformBack();
+          }
+        }
+      });
+
+      address.focus();
+    </script>
+  </body>
+</html>

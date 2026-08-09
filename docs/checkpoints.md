@@ -97,23 +97,102 @@ each run has unstable output latency and is a poor receiver.
 
 ## Checkpoint 4 — automatic calibration
 
-Not implemented. Requires chirps, microphone capture, cross-correlation and a
-secure context for `getUserMedia`. Do not start it until checkpoints 2 and 3
-have passed on real hardware — if the schedule cannot be held, measuring it
+*A microphone detects the actual delay and HomeSync aligns the devices.*
+
+Implemented; never run against a real microphone. Do not start it until
+checkpoints 2 and 3 have passed — if the schedule cannot be held, measuring it
 more precisely will not help.
+
+**Microphone access needs a secure context.** Over plain HTTP on a LAN address
+`getUserMedia` is usually unavailable, so either serve HTTPS (a local Caddy or
+a self-signed certificate) or run the microphone device against `localhost`.
+The calibration panel shows which devices reported a usable microphone.
+
+1. Get two devices audibly misaligned — undo any manual compensation.
+2. Choose a microphone device and put it where you will actually listen.
+3. Quiet the room. Press **Calibrate**. Each device chirps five times.
+4. Read the results table.
+
+Pass: the flam disappears without anyone touching a slider, and re-running
+produces roughly the same numbers.
+
+Read the table honestly:
+
+- **Spread** above 5 ms means that device's latency wanders; no fixed
+  compensation will hold it, and it is excluded from setting the room's target.
+- **Reflective room** means an earlier, quieter arrival was preferred over a
+  louder later one. Expected in a hard-surfaced room; worth knowing.
+- Absolute delays include the microphone's own input latency and are inflated
+  by it. The *differences* are the real result. See `docs/calibration.md`.
+
+If nothing is measured at all: check the microphone permission, raise the
+volume, move the microphone closer, and confirm the devices are actually
+audible where it is sitting.
 
 ---
 
-## Checkpoints 5 and 6 — YouTube and LG webOS
+## Checkpoint 5 — YouTube Together
 
-Not implemented. Both depend on the controlled-audio path being trustworthy
-first, and both carry device-specific risk that no amount of coordinator work
-removes:
+*Three independent players stay acceptably synchronised for 30 minutes,
+including pause, seek and a buffering event.*
 
-- YouTube: ads and buffering diverge per device, and the IFrame API offers no
-  sample-accurate scheduling.
-- webOS: documented Web Audio latency that may not be stable during playback.
-  Stable latency can be compensated; varying latency cannot.
+Implemented. Verified only in headless browsers, which proves the rendezvous
+messages flow — not that anything sounded right.
+
+1. Switch the source to **YouTube together** and load a video.
+2. Press Play. Each device seeks to the target and starts early by its own
+   learned latency; the first attempt is the worst, since the estimate has not
+   been measured yet.
+3. Watch the diagnostics. Let it run, then pause, seek, and let one device
+   buffer (throttle its network) to see it re-converge.
+
+Pass: under 100 ms apart on the watch-party target, recovering automatically
+after buffering.
+
+Expect ads to break it outright on some accounts — they are inserted per
+viewer, so two devices are watching different content and no scheduling fixes
+that. Record it as an observation, not a bug.
+
+---
+
+## Checkpoint 6 — LG webOS
+
+*At least one real LG TV maintains stable output latency.*
+
+1. Open `http://<coordinator>:8080/probe.html` in the TV browser, or install
+   the receiver app (`webos/receiver-app`) and use **Check this TV first**.
+2. Record the results in `docs/compatibility.md` — including the failures.
+3. If the probe looks usable, join the TV as a receiver and run checkpoints 2
+   and 3 with it.
+
+The decisive question is not how *large* the TV's latency is. Latency that is
+large but stable is compensable, by calibration or by hand. Latency that varies
+during playback cannot be compensated by any fixed value, and a TV that behaves
+that way should be recorded as unsupported rather than worked around.
+
+---
+
+## Live system audio
+
+*Four receivers play host audio for 30 minutes without underruns in Music
+profile.*
+
+The synthetic source makes this runnable anywhere, and is the right place to
+start because it removes capture from the equation:
+
+1. Source → **Live system audio**, profile **Music**, **built-in test signal**
+   ticked, then **Start**.
+2. Watch the Buffer column: depth should settle near the target and underruns
+   should stay at zero.
+3. The test signal clicks once a second, so two receivers can be judged by ear
+   exactly as with the click track.
+
+Then untick the test signal on a Windows host to capture real system audio.
+That path is compile-checked but has never been run — expect to find problems,
+and record them.
+
+Remember that video on the host will lead the room by the whole buffer depth.
+This mode is for music.
 
 ---
 

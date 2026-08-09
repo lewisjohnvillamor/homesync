@@ -85,7 +85,12 @@ async function makeClient(label) {
   const page = await browser.newPage();
   page.on('pageerror', (error) => errors.push(`${label} pageerror: ${error.message}`));
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(`${label} console: ${message.text()}`);
+    if (message.type() !== 'error') return;
+    // Only our own code. YouTube's iframe logs plenty of its own errors, and
+    // failing this test on those would make it a test of YouTube.
+    const url = message.location()?.url ?? '';
+    if (url && !url.includes('127.0.0.1')) return;
+    errors.push(`${label} console: ${message.text()}`);
   });
   await page.goto(`${BASE}/#room=${ROOM}&secret=${SECRET}`);
   await page.fill('#device-name', label);
@@ -97,7 +102,12 @@ async function waitFor(client, predicate, what, timeout = 60000) {
   const start = Date.now();
   for (;;) {
     if (await client.page.evaluate(predicate)) return;
-    if (Date.now() - start > timeout) throw new Error(`timeout waiting for ${what} on ${client.label}`);
+    if (Date.now() - start > timeout) {
+      // The in-page log carries the coordinator's own error messages, which
+      // are almost always the reason a wait timed out.
+      const log = await client.page.evaluate(() => document.getElementById('log').textContent.slice(0, 900));
+      throw new Error(`timeout waiting for ${what} on ${client.label}\n--- ${client.label} log ---\n${log}`);
+    }
     await sleep(200);
   }
 }
@@ -109,10 +119,19 @@ try {
   const beta = await makeClient('beta');
   const clients = [alpha, beta];
 
+  // Waiting on the coordinator's view, not each client's own pill: the
+  // readiness barrier is gated on what the coordinator has been told.
   for (const client of clients) {
-    await waitFor(client, () => document.getElementById('clock-quality').textContent.includes('stable'), 'a stable clock');
+    await waitFor(
+      client,
+      () => {
+        const rows = [...document.querySelectorAll('#clients tbody tr')];
+        return rows.length >= 2 && rows.every((row) => row.textContent.includes('stable'));
+      },
+      'every clock stable in the room snapshot',
+    );
   }
-  ok('both clients reached a stable clock');
+  ok('both clients reached a stable clock, as seen by the coordinator');
 
   await alpha.page.selectOption('#media-select', 'builtin-click');
   for (const client of clients) {
@@ -154,6 +173,86 @@ try {
     'compensation visible to the room',
   );
   ok('manual compensation propagated to the other device');
+
+  // --- live system audio -------------------------------------------------
+  // The synthetic source, so this runs on any platform. It exercises the whole
+  // live path: capture, framing, binary distribution, worklet buffering.
+  await alpha.page.selectOption('#mode-select', 'system_audio');
+  await alpha.page.selectOption('#stream-profile', 'live');
+  await alpha.page.click('#stream-start');
+  for (const client of clients) {
+    await waitFor(client, () => document.getElementById('log').textContent.includes('Live stream:'), 'stream info');
+  }
+  ok('both clients built a playout worklet for the live stream');
+
+  for (const client of clients) {
+    await waitFor(
+      client,
+      () => {
+        const row = document.querySelector('#clients tr.self');
+        const cell = row?.children?.[11];
+        return Boolean(cell && cell.textContent.includes('ms') && !cell.textContent.startsWith('0/'));
+      },
+      'a primed playout buffer',
+    );
+  }
+  const depths = [];
+  for (const client of clients) {
+    depths.push(
+      await client.page.evaluate(() => document.querySelector('#clients tr.self').children[11].textContent),
+    );
+  }
+  console.log(`    buffer depth: ${depths.join('  |  ')}`);
+  ok('live PCM frames arrived and the buffers filled to target');
+
+  await alpha.page.click('#stream-stop');
+  await waitFor(alpha, () => document.getElementById('media-state').textContent === 'idle', 'stream stopped');
+  ok('the live stream stopped cleanly');
+
+  // --- YouTube -----------------------------------------------------------
+  // Depends on reaching youtube.com, so a failure to actually start playing is
+  // reported rather than failing the run. A JavaScript error in our own code
+  // still fails, which is the part we control.
+  await alpha.page.selectOption('#mode-select', 'youtube');
+  await alpha.page.fill('#youtube-input', 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+  await alpha.page.click('#youtube-load');
+  try {
+    for (const client of clients) {
+      await waitFor(
+        client,
+        () => document.getElementById('media-state').textContent === 'ready',
+        'the room to accept the video',
+        20000,
+      );
+    }
+    ok('the coordinator distributed the video to every device');
+
+    await alpha.page.click('#play');
+    for (const client of clients) {
+      await waitFor(
+        client,
+        () => document.getElementById('media-state').textContent === 'playing',
+        'the YouTube transport',
+        20000,
+      );
+    }
+    ok('the YouTube rendezvous reached every device');
+
+    for (const client of clients) {
+      await waitFor(
+        client,
+        () => {
+          const rows = [...document.querySelectorAll('#clients tr')];
+          return rows.length > 1;
+        },
+        'room state',
+        20000,
+      );
+    }
+    console.log('    note: whether YouTube actually produced sound needs a real device and ears');
+  } catch (error) {
+    console.log(`SKIP  YouTube phase did not complete: ${error.message}`);
+  }
 } finally {
   await browser.close();
   stopServer();

@@ -2,6 +2,8 @@
 members = [
     "crates/homesync-protocol",
     "crates/homesync-clock",
+    "crates/homesync-dsp",
+    "crates/homesync-audio",
     "crates/homesync-server",
 ]
 resolver = "2"

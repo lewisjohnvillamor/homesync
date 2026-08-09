@@ -13,6 +13,8 @@ path = "src/main.rs"
 [dependencies]
 homesync-protocol = { path = "../homesync-protocol" }
 homesync-clock = { path = "../homesync-clock" }
+homesync-audio = { path = "../homesync-audio" }
+homesync-dsp = { path = "../homesync-dsp" }
 
 axum = { version = "0.8", features = ["ws", "macros"] }
 tokio.workspace = true

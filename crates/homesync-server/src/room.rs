@@ -5,14 +5,36 @@
 //! of already-serialised frames.
 
 use homesync_protocol::{
-    ClientInfo, ClockQuality, ClockReport, DiagnosticReport, Envelope, ErrorMessage, MediaManifest, Payload, Role,
-    RoomSnapshot, Transport, TransportState,
+    BufferReport, CalibrationProgress, ClientInfo, ClockQuality, ClockReport, DiagnosticReport, Envelope, ErrorMessage,
+    MediaManifest, Payload, Role, RoomSnapshot, SourceMode, StreamInfo, Transport, TransportState, YoutubeState,
 };
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// Starting assumption for a device's YouTube start latency, in milliseconds.
+/// Replaced by measurement as soon as the device reports one.
+pub const DEFAULT_YOUTUBE_START_LATENCY_MS: f64 = 300.0;
+
+/// Ceiling on a single observed YouTube start latency, in milliseconds.
+pub const MAX_YOUTUBE_START_LATENCY_MS: f64 = 3_000.0;
+
+/// Weight given to each new YouTube start-latency observation.
+const YOUTUBE_LATENCY_SMOOTHING: f64 = 0.3;
+
+/// One outbound frame on a client's socket.
+#[derive(Debug, Clone)]
+pub enum OutFrame {
+    /// A JSON control frame.
+    Text(String),
+    /// A binary PCM frame. Held behind an `Arc` because one captured frame is
+    /// sent to every receiver, and copying two kilobytes per receiver per
+    /// 10 ms is pure waste.
+    Binary(Arc<Vec<u8>>),
+}
+
 /// Outbound frames for one connection.
-pub type ClientSender = mpsc::UnboundedSender<String>;
+pub type ClientSender = mpsc::UnboundedSender<OutFrame>;
 
 /// A connected participant.
 #[derive(Debug)]
@@ -25,6 +47,10 @@ pub struct Client {
     pub ready_media_id: Option<String>,
     /// Outbound channel to this client's socket writer.
     pub tx: ClientSender,
+    /// Exponential moving average of this device's YouTube start latency, in
+    /// milliseconds. Learned from what the player actually does rather than
+    /// assumed (specification section 12.2, step 9).
+    pub youtube_start_latency_ms: f64,
 }
 
 /// One room.
@@ -44,6 +70,10 @@ pub struct Room {
     /// fresh snapshot. Telemetry arrives once per second per client, so
     /// snapshots are coalesced by a ticker rather than sent per report.
     pub dirty: bool,
+    /// Live stream parameters, when one is running.
+    pub stream: Option<StreamInfo>,
+    /// Calibration progress, when a run is in flight.
+    pub calibration: Option<CalibrationProgress>,
     start_lead_ns: u64,
     max_clients: usize,
 }
@@ -58,6 +88,8 @@ impl Room {
             clients: BTreeMap::new(),
             transport: Transport::default(),
             dirty: false,
+            stream: None,
+            calibration: None,
             start_lead_ns,
             max_clients,
         }
@@ -81,13 +113,20 @@ impl Room {
             name,
             role,
             manual_offset_ms: 0.0,
+            acoustic_offset_ms: 0.0,
             volume: 1.0,
             muted: false,
             ready: false,
+            microphone_available: false,
             clock: ClockReport::default(),
             diagnostics: None,
+            buffer: None,
+            youtube: None,
         };
-        self.clients.insert(client_id.clone(), Client { info, ready_media_id: None, tx });
+        self.clients.insert(
+            client_id.clone(),
+            Client { info, ready_media_id: None, tx, youtube_start_latency_ms: DEFAULT_YOUTUBE_START_LATENCY_MS },
+        );
         if self.owner.is_none() {
             self.owner = Some(client_id);
         }
@@ -103,16 +142,40 @@ impl Room {
         }
     }
 
-    /// Selects the media everyone should preload, clearing stale readiness.
-    pub fn select_source(&mut self, media_id: Option<String>, now_ns: u64) {
+    /// Switches source mode and selects what to play, clearing stale readiness.
+    ///
+    /// Modes that have nothing to preload go straight to `Ready`: making a
+    /// YouTube room wait for a readiness barrier it can never satisfy would
+    /// simply prevent playback.
+    pub fn select_source(
+        &mut self,
+        mode: SourceMode,
+        media_id: Option<String>,
+        youtube_video_id: Option<String>,
+        now_ns: u64,
+    ) {
         for client in self.clients.values_mut() {
             client.info.ready = false;
             client.ready_media_id = None;
+            client.info.youtube = None;
         }
+        let selected = match mode {
+            SourceMode::Idle => false,
+            SourceMode::ControlledAudio => media_id.is_some(),
+            SourceMode::Youtube => youtube_video_id.is_some(),
+            SourceMode::SystemAudio => true,
+        };
+        let state = match (selected, mode.requires_preload()) {
+            (false, _) => TransportState::Idle,
+            (true, true) => TransportState::Loading,
+            (true, false) => TransportState::Ready,
+        };
         self.transport = Transport {
             epoch: self.transport.epoch + 1,
-            state: if media_id.is_some() { TransportState::Loading } else { TransportState::Idle },
+            state,
+            mode,
             media_id,
+            youtube_video_id,
             anchor_server_ns: now_ns,
             anchor_media_ns: 0,
         };
@@ -140,7 +203,13 @@ impl Room {
     /// hear, and reporting readiness would be misleading.
     pub fn all_receivers_ready(&self) -> bool {
         let mut receivers = self.clients.values().filter(|c| c.info.role.renders_audio()).peekable();
-        receivers.peek().is_some() && receivers.all(|c| c.info.ready)
+        if receivers.peek().is_none() {
+            return false;
+        }
+        if !self.transport.mode.requires_preload() {
+            return true;
+        }
+        receivers.all(|c| c.info.ready)
     }
 
     /// Clients that are not yet safe to start, with the reason.
@@ -150,8 +219,9 @@ impl Room {
         if receivers.is_empty() {
             reasons.push("no receivers have joined".to_string());
         }
+        let needs_media = self.transport.mode.requires_preload();
         for client in receivers {
-            if !client.info.ready {
+            if needs_media && !client.info.ready {
                 reasons.push(format!("{} has not verified the media", client.info.name));
             } else if client.info.clock.quality != ClockQuality::Stable {
                 reasons.push(format!("{} clock is {:?}", client.info.name, client.info.clock.quality));
@@ -167,8 +237,14 @@ impl Room {
     /// Refuses unless every receiver is ready with a stable clock, unless
     /// `force` is set (spec section 9.4).
     pub fn play(&mut self, now_ns: u64, force: bool) -> Result<(), ErrorMessage> {
-        if self.transport.media_id.is_none() {
-            return Err(ErrorMessage::new("no_source", "select media before starting playback"));
+        if !self.has_source() {
+            return Err(ErrorMessage::new("no_source", "select a source before starting playback"));
+        }
+        if !self.transport.mode.uses_transport_timeline() {
+            return Err(ErrorMessage::new(
+                "not_applicable",
+                "live system audio has no timeline to start; use stream_start",
+            ));
         }
         if self.transport.state == TransportState::Playing {
             return Ok(());
@@ -203,7 +279,7 @@ impl Room {
     /// re-anchors the timeline into the future so receivers restart together
     /// rather than each jumping at its own moment.
     pub fn seek(&mut self, position_ns: u64, now_ns: u64) {
-        if self.transport.media_id.is_none() {
+        if !self.has_source() || !self.transport.mode.uses_transport_timeline() {
             return;
         }
         self.transport.anchor_media_ns = position_ns;
@@ -216,13 +292,61 @@ impl Room {
 
     /// Stops and rewinds, keeping the media selected and everyone's readiness.
     pub fn stop(&mut self, now_ns: u64) {
-        if self.transport.media_id.is_none() {
+        if !self.has_source() {
             return;
         }
         self.transport.state = if self.all_receivers_ready() { TransportState::Ready } else { TransportState::Loading };
         self.transport.anchor_media_ns = 0;
         self.transport.anchor_server_ns = now_ns;
         self.transport.epoch += 1;
+    }
+
+    /// Whether a playable source is currently selected.
+    pub fn has_source(&self) -> bool {
+        match self.transport.mode {
+            SourceMode::Idle => false,
+            SourceMode::ControlledAudio => self.transport.media_id.is_some(),
+            SourceMode::Youtube => self.transport.youtube_video_id.is_some(),
+            SourceMode::SystemAudio => true,
+        }
+    }
+
+    /// Receivers that should render audio, in a stable order.
+    pub fn receiver_ids(&self) -> Vec<String> {
+        self.clients.values().filter(|c| c.info.role.renders_audio()).map(|c| c.info.client_id.clone()).collect()
+    }
+
+    /// Records a client's live-stream buffer health.
+    pub fn set_buffer_report(&mut self, client_id: &str, report: BufferReport) {
+        if let Some(client) = self.clients.get_mut(client_id) {
+            client.info.buffer = Some(report);
+        }
+    }
+
+    /// Records a client's YouTube player state and folds any newly observed
+    /// start latency into that device's moving average.
+    pub fn set_youtube_state(&mut self, client_id: &str, state: YoutubeState) {
+        let Some(client) = self.clients.get_mut(client_id) else { return };
+        if let Some(observed) = state.observed_start_latency_ms {
+            // Bounded, because a single pathological measurement — an ad, a
+            // stall — must not poison the estimate for the rest of the session.
+            let clamped = observed.clamp(0.0, MAX_YOUTUBE_START_LATENCY_MS);
+            client.youtube_start_latency_ms = client.youtube_start_latency_ms * (1.0 - YOUTUBE_LATENCY_SMOOTHING)
+                + clamped * YOUTUBE_LATENCY_SMOOTHING;
+        }
+        client.info.youtube = Some(state);
+    }
+
+    /// This device's learned YouTube start latency, in milliseconds.
+    pub fn youtube_start_latency_ms(&self, client_id: &str) -> f64 {
+        self.clients.get(client_id).map(|c| c.youtube_start_latency_ms).unwrap_or(DEFAULT_YOUTUBE_START_LATENCY_MS)
+    }
+
+    /// Sets a device's calibration-derived compensation.
+    pub fn set_acoustic_offset_ms(&mut self, client_id: &str, offset_ms: f64) {
+        if let Some(client) = self.clients.get_mut(client_id) {
+            client.info.acoustic_offset_ms = offset_ms.clamp(-1000.0, 1000.0);
+        }
     }
 
     /// Records a client's published clock estimate.
@@ -248,6 +372,9 @@ impl Room {
             transport: self.transport.clone(),
             media,
             start_lead_ms: self.start_lead_ns as f64 / 1e6,
+            stream: self.stream.clone(),
+            calibration: self.calibration.clone(),
+            supported_modes: vec![SourceMode::ControlledAudio, SourceMode::Youtube, SourceMode::SystemAudio],
         }
     }
 
@@ -260,7 +387,29 @@ impl Room {
             return;
         };
         for client in self.clients.values() {
-            let _ = client.tx.send(text.clone());
+            let _ = client.tx.send(OutFrame::Text(text.clone()));
+        }
+    }
+
+    /// Sends one frame to a single member.
+    pub fn send_to(&self, client_id: &str, payload: Payload, now_ns: u64) {
+        let Some(client) = self.clients.get(client_id) else { return };
+        let envelope = Envelope::new(payload).stamped(now_ns);
+        if let Ok(text) = serde_json::to_string(&envelope) {
+            let _ = client.tx.send(OutFrame::Text(text));
+        }
+    }
+
+    /// Sends one binary PCM frame to every audio-rendering member.
+    ///
+    /// Controllers are skipped: they render nothing, and sending them
+    /// 1.5 Mbit/s of audio they will discard is bandwidth taken from the
+    /// devices that need it.
+    pub fn broadcast_audio(&self, bytes: Arc<Vec<u8>>) {
+        for client in self.clients.values() {
+            if client.info.role.renders_audio() {
+                let _ = client.tx.send(OutFrame::Binary(Arc::clone(&bytes)));
+            }
         }
     }
 }
@@ -279,14 +428,14 @@ mod tests {
         Room::new("ABC123".into(), "secret".into(), LEAD, 4)
     }
 
-    fn add(room: &mut Room, id: &str, role: Role) -> mpsc::UnboundedReceiver<String> {
+    fn add(room: &mut Room, id: &str, role: Role) -> mpsc::UnboundedReceiver<OutFrame> {
         let (tx, rx) = mpsc::unbounded_channel();
         room.join(id.into(), format!("dev-{id}"), id.into(), role, tx).expect("join");
         rx
     }
 
     /// Adds a receiver that has verified `media` and holds a stable clock.
-    fn add_ready(room: &mut Room, id: &str, media: &str) -> mpsc::UnboundedReceiver<String> {
+    fn add_ready(room: &mut Room, id: &str, media: &str) -> mpsc::UnboundedReceiver<OutFrame> {
         let rx = add(room, id, Role::Speaker);
         room.set_ready(id, media);
         room.set_clock_report(id, stable_clock());
@@ -321,7 +470,7 @@ mod tests {
     fn play_is_refused_until_every_receiver_is_ready() {
         let mut room = room();
         add(&mut room, "ctrl", Role::Controller);
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
 
         // No receivers at all: refuse, rather than pretending to be in sync.
         assert_eq!(room.play(0, false).unwrap_err().code, "not_ready");
@@ -343,7 +492,7 @@ mod tests {
     #[test]
     fn a_warming_up_clock_blocks_play_but_force_overrides_it() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add(&mut room, "a", Role::Speaker);
         room.set_ready("a", "m1");
         // Clock left at its default: warming_up.
@@ -361,7 +510,7 @@ mod tests {
     #[test]
     fn playback_starts_in_the_future_by_the_configured_lead() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
 
         let now = 5_000_000_000;
@@ -377,7 +526,7 @@ mod tests {
     #[test]
     fn pause_freezes_the_position_and_resume_continues_from_it() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
         room.play(0, false).expect("play");
 
@@ -398,7 +547,7 @@ mod tests {
     #[test]
     fn seeking_while_playing_re_anchors_into_the_future() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
         room.play(0, false).expect("play");
 
@@ -412,7 +561,7 @@ mod tests {
     #[test]
     fn seeking_while_stopped_moves_the_position_without_starting_playback() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
         room.seek(7_000_000_000, 100);
         assert_eq!(room.transport.state, TransportState::Ready);
@@ -422,7 +571,7 @@ mod tests {
     #[test]
     fn stop_rewinds_but_keeps_the_media_and_readiness() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
         room.play(0, false).expect("play");
         room.stop(LEAD + 5_000_000_000);
@@ -436,11 +585,11 @@ mod tests {
     #[test]
     fn changing_source_clears_readiness() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
         assert_eq!(room.transport.state, TransportState::Ready);
 
-        room.select_source(Some("m2".into()), 1);
+        room.select_source(SourceMode::ControlledAudio, Some("m2".into()), None, 1);
         assert!(!room.clients["a"].info.ready);
         assert_eq!(room.transport.state, TransportState::Loading);
     }
@@ -449,7 +598,7 @@ mod tests {
     fn readiness_for_stale_media_is_ignored() {
         let mut room = room();
         add(&mut room, "a", Role::Speaker);
-        room.select_source(Some("m2".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m2".into()), None, 0);
         // A report for the previous selection arrives late.
         room.set_ready("a", "m1");
         assert!(!room.clients["a"].info.ready);
@@ -459,7 +608,7 @@ mod tests {
     #[test]
     fn controllers_do_not_hold_up_the_readiness_barrier() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add(&mut room, "ctrl", Role::Controller);
         add_ready(&mut room, "a", "m1");
         assert!(room.all_receivers_ready());
@@ -475,7 +624,7 @@ mod tests {
             last = room.transport.epoch;
         };
 
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         bumped(&room, "select_source");
         add_ready(&mut room, "a", "m1");
         bumped(&room, "readiness barrier");
@@ -492,7 +641,7 @@ mod tests {
     #[test]
     fn a_second_play_while_already_playing_does_not_restart_the_timeline() {
         let mut room = room();
-        room.select_source(Some("m1".into()), 0);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add_ready(&mut room, "a", "m1");
         room.play(0, false).expect("play");
         let before = room.transport.clone();
@@ -506,10 +655,125 @@ mod tests {
         let mut a = add(&mut room, "a", Role::Speaker);
         let mut b = add(&mut room, "b", Role::Speaker);
         room.broadcast(Payload::Stop, 123);
-        let text = a.try_recv().expect("a receives");
+        let OutFrame::Text(text) = a.try_recv().expect("a receives") else {
+            panic!("control frames must be text");
+        };
         assert!(text.contains("\"type\":\"stop\""));
         assert!(text.contains("\"sent_server_ns\":123"));
         assert!(b.try_recv().is_ok(), "b receives");
+    }
+
+    #[test]
+    fn youtube_mode_skips_the_readiness_barrier() {
+        // There is nothing for a receiver to preload and hash-verify, so
+        // requiring readiness would block playback permanently.
+        let mut room = room();
+        room.select_source(SourceMode::Youtube, None, Some("dQw4w9WgXcQ".into()), 0);
+        assert_eq!(room.transport.state, TransportState::Ready);
+
+        add(&mut room, "a", Role::Speaker);
+        room.set_clock_report("a", stable_clock());
+        assert!(room.all_receivers_ready());
+        assert!(room.play(0, false).is_ok());
+    }
+
+    #[test]
+    fn youtube_mode_still_requires_a_stable_clock() {
+        let mut room = room();
+        room.select_source(SourceMode::Youtube, None, Some("dQw4w9WgXcQ".into()), 0);
+        add(&mut room, "a", Role::Speaker);
+        assert_eq!(room.play(0, false).unwrap_err().code, "not_ready");
+    }
+
+    #[test]
+    fn live_audio_has_no_timeline_to_start() {
+        // Live system audio is driven by per-frame presentation times, so
+        // 'play' is meaningless: the stream itself is the transport.
+        let mut room = room();
+        room.select_source(SourceMode::SystemAudio, None, None, 0);
+        add_ready(&mut room, "a", "m1");
+        room.set_clock_report("a", stable_clock());
+        assert_eq!(room.play(0, false).unwrap_err().code, "not_applicable");
+    }
+
+    #[test]
+    fn selecting_a_mode_without_a_target_leaves_the_room_idle() {
+        let mut room = room();
+        room.select_source(SourceMode::Youtube, None, None, 0);
+        assert_eq!(room.transport.state, TransportState::Idle);
+        assert!(!room.has_source());
+        assert_eq!(room.play(0, true).unwrap_err().code, "no_source");
+    }
+
+    #[test]
+    fn youtube_start_latency_is_learned_and_bounded() {
+        let mut room = room();
+        add(&mut room, "a", Role::Speaker);
+        assert_eq!(room.youtube_start_latency_ms("a"), DEFAULT_YOUTUBE_START_LATENCY_MS);
+
+        let report = |ms: f64| YoutubeState {
+            video_id: "dQw4w9WgXcQ".into(),
+            player_state: "playing".into(),
+            current_time_s: 1.0,
+            duration_s: 100.0,
+            buffered_fraction: 1.0,
+            ready: true,
+            observed_start_latency_ms: Some(ms),
+        };
+
+        // Repeated agreeing observations pull the estimate towards them.
+        for _ in 0..20 {
+            room.set_youtube_state("a", report(120.0));
+        }
+        assert!((room.youtube_start_latency_ms("a") - 120.0).abs() < 5.0);
+
+        // A single absurd observation — an ad, a stall — must not poison it.
+        room.set_youtube_state("a", report(60_000.0));
+        assert!(
+            room.youtube_start_latency_ms("a") < 1_100.0,
+            "one outlier moved the estimate to {}",
+            room.youtube_start_latency_ms("a")
+        );
+    }
+
+    #[test]
+    fn changing_source_clears_stale_youtube_state() {
+        let mut room = room();
+        add(&mut room, "a", Role::Speaker);
+        room.select_source(SourceMode::Youtube, None, Some("dQw4w9WgXcQ".into()), 0);
+        room.set_youtube_state("a", YoutubeState { ready: true, ..YoutubeState::default() });
+        assert!(room.clients["a"].info.youtube.is_some());
+
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 1);
+        assert!(room.clients["a"].info.youtube.is_none(), "stale player state must not linger");
+    }
+
+    #[test]
+    fn acoustic_and_manual_compensation_are_tracked_separately() {
+        let mut room = room();
+        add(&mut room, "a", Role::Speaker);
+        room.clients.get_mut("a").expect("client").info.manual_offset_ms = 15.0;
+        room.set_acoustic_offset_ms("a", -140.0);
+
+        let info = &room.clients["a"].info;
+        assert_eq!(info.manual_offset_ms, 15.0, "calibration must not overwrite the user's value");
+        assert_eq!(info.acoustic_offset_ms, -140.0);
+        assert_eq!(info.total_offset_ms(), -125.0);
+    }
+
+    #[test]
+    fn audio_is_broadcast_only_to_devices_that_render_it() {
+        let mut room = room();
+        let mut speaker = add(&mut room, "a", Role::Speaker);
+        let mut controller = add(&mut room, "ctrl", Role::Controller);
+
+        room.broadcast_audio(Arc::new(vec![1, 2, 3]));
+
+        assert!(matches!(speaker.try_recv(), Ok(OutFrame::Binary(_))));
+        assert!(
+            controller.try_recv().is_err(),
+            "a controller renders nothing and must not be sent 1.5 Mbit/s of audio"
+        );
     }
 
     #[test]

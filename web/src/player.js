@@ -1,7 +1,7 @@
 /**
  * Controlled-audio receiver.
  *
- * The whole synchronisation idea lives in `#audioTimeForServerNs` and
+ * The whole synchronisation idea lives in `audioTimeForServerNs` and
  * `applyTransport`: translate one coordinator instant into this device's audio
  * clock, then hand that instant to `AudioBufferSourceNode.start`. Everything
  * else is bookkeeping.
@@ -41,6 +41,8 @@ export class Player {
 
     /** Manual compensation in ms. Positive means "this device is late". */
     this.manualOffsetMs = 0;
+    /** Compensation in ms derived from acoustic calibration. */
+    this.acousticOffsetMs = 0;
     this.volume = 1;
     this.muted = false;
 
@@ -157,7 +159,7 @@ export class Player {
 
     this.#refreshLatency();
 
-    let startAudioTime = this.#audioTimeForServerNs(transport.anchor_server_ns) - this.compensationSeconds();
+    let startAudioTime = this.audioTimeForServerNs(transport.anchor_server_ns) - this.compensationSeconds();
     let mediaOffsetNs = transport.anchor_media_ns;
 
     // Late join, or a start instant that has already passed. Move the start
@@ -219,24 +221,39 @@ export class Player {
    */
   compensationSeconds() {
     const reported = this.latencyMode === LatencyMode.ReportedLatency ? this.reportedLatencyMs : 0;
-    return (reported + this.manualOffsetMs) / 1000;
+    return (reported + this.manualOffsetMs + this.acousticOffsetMs) / 1000;
+  }
+
+  /** Compensation that software could not have derived on its own, in ms. */
+  unmeasurableCompensationMs() {
+    return this.manualOffsetMs + this.acousticOffsetMs;
   }
 
   /**
    * Position of the audio currently reaching the speaker, in nanoseconds, or
    * null when nothing is playing.
    *
-   * Manual compensation is excluded on purpose: it exists precisely because
-   * software cannot measure that part of the latency, so counting it here
+   * Manual and acoustic compensation are both excluded on purpose. They exist
+   * precisely because software could not derive them, so counting them here
    * would report a device as perfectly aligned merely because someone moved a
-   * slider.
+   * slider or ran a calibration.
    */
   heardPositionNs() {
     if (!this.playing || !this.ctx) return null;
     const heardContextTime = this.#heardContextTime();
     const elapsed = heardContextTime - this.startAudioTime;
     if (elapsed < 0) return this.startMediaOffsetNs;
-    return this.startMediaOffsetNs + elapsed * 1e9 - this.manualOffsetMs * 1e6;
+    return this.startMediaOffsetNs + elapsed * 1e9 - this.unmeasurableCompensationMs() * 1e6;
+  }
+
+  /** Sets calibration-derived compensation and reschedules if playing. */
+  setAcousticOffsetMs(ms, transport) {
+    if (this.acousticOffsetMs === ms) return;
+    this.acousticOffsetMs = ms;
+    if (this.playing && transport) {
+      this.resyncCount += 1;
+      this.applyTransport(transport, { force: true });
+    }
   }
 
   /** Sets manual compensation and reschedules if audio is already running. */
@@ -327,12 +344,15 @@ export class Player {
   /**
    * Converts a coordinator instant into this device's audio clock.
    *
+   * Public because calibration schedules chirps through exactly this path:
+   * measuring any other path would measure something nothing else uses.
+   *
    * Two hops: coordinator time to `performance.now()` via the clock estimator,
    * then `performance.now()` to `AudioContext` time via an anchor pair. When
    * `getOutputTimestamp()` supplies that pair, the result is the audio time
    * whose sound is *heard* at the requested instant.
    */
-  #audioTimeForServerNs(serverNs) {
+  audioTimeForServerNs(serverNs) {
     const ts = this.#outputTimestamp();
     const contextTime = ts ? ts.contextTime : this.ctx.currentTime;
     const performanceTime = ts ? ts.performanceTime : performance.now();

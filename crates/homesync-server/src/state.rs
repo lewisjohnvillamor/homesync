@@ -1,9 +1,11 @@
 //! Process-wide shared state.
 
+use crate::calibration::CalibrationRegistry;
 use crate::clock::ServerClock;
 use crate::config::Config;
 use crate::media::MediaLibrary;
 use crate::room::Room;
+use crate::stream::StreamHandle;
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
@@ -24,6 +26,10 @@ pub struct App {
     pub config: Config,
     /// Coordinator build version.
     pub version: &'static str,
+    /// Running live streams, keyed by room code.
+    streams: Mutex<HashMap<String, StreamHandle>>,
+    /// In-flight calibration runs.
+    pub calibration: CalibrationRegistry,
 }
 
 impl App {
@@ -31,7 +37,15 @@ impl App {
     pub fn new(config: Config, media: MediaLibrary, room: Room) -> Self {
         let mut rooms = HashMap::new();
         rooms.insert(room.code.clone(), room);
-        Self { clock: ServerClock::new(), media, rooms: Mutex::new(rooms), config, version: env!("CARGO_PKG_VERSION") }
+        Self {
+            clock: ServerClock::new(),
+            media,
+            rooms: Mutex::new(rooms),
+            config,
+            version: env!("CARGO_PKG_VERSION"),
+            streams: Mutex::new(HashMap::new()),
+            calibration: CalibrationRegistry::default(),
+        }
     }
 
     /// Locks the room table.
@@ -47,5 +61,33 @@ impl App {
     /// Coordinator monotonic nanoseconds.
     pub fn now_ns(&self) -> u64 {
         self.clock.now_ns()
+    }
+
+    /// Registers a running stream, stopping any previous one for that room.
+    pub fn set_stream(&self, room_code: &str, handle: StreamHandle) {
+        let mut streams = self.streams.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(previous) = streams.insert(room_code.to_string(), handle) {
+            previous.stop();
+        }
+    }
+
+    /// Stops and forgets a room's stream. Returns whether one was running.
+    pub fn stop_stream(&self, room_code: &str) -> bool {
+        let mut streams = self.streams.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match streams.remove(room_code) {
+            Some(handle) => {
+                handle.stop();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Stops every running stream, for shutdown.
+    pub fn stop_all_streams(&self) {
+        let mut streams = self.streams.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (_, handle) in streams.drain() {
+            handle.stop();
+        }
     }
 }

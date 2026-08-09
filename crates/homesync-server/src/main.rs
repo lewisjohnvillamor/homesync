@@ -1,5 +1,6 @@
 //! HomeSync coordinator entry point.
 
+mod calibration;
 mod clock;
 mod config;
 mod http;
@@ -7,6 +8,7 @@ mod media;
 mod room;
 mod simulate;
 mod state;
+mod stream;
 mod ws;
 
 use clap::Parser;
@@ -88,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let passed = outcome.unwrap_or(false);
                 if exit_after {
                     flusher.abort();
+                    app.stop_all_streams();
                     return if passed {
                         Ok(())
                     } else {
@@ -104,6 +107,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     flusher.abort();
+    // Capture threads outlive the socket they feed, so they are stopped
+    // explicitly rather than left running until the process exits.
+    app.stop_all_streams();
     tracing::info!("coordinator stopped");
     Ok(())
 }

@@ -231,13 +231,14 @@ test('a device on schedule reports no timeline drift', () => {
   globalThis.performance = { now: () => NOW_MS };
 });
 
-test('manual compensation is excluded from the reported drift', () => {
+test('user and calibration compensation are excluded from the reported drift', () => {
   // Otherwise moving the slider would make a device look better aligned than
   // it is, which defeats the point of the diagnostics view.
   const ts = { contextTime: 9.9, performanceTime: NOW_MS };
   const ctx = new FakeContext({ currentTime: 10, outputTimestamp: ts });
   const player = makePlayer(ctx);
-  player.manualOffsetMs = 40;
+  player.manualOffsetMs = 15;
+  player.acousticOffsetMs = 25; // 40 ms of compensation in total
   const transport = playing(serverNsIn(2));
   player.applyTransport(transport);
 

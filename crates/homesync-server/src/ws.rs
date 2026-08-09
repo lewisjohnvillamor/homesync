@@ -3,13 +3,16 @@
 //! One socket per client carries the whole control protocol: the clock
 //! exchange, room state, transport commands and telemetry.
 
+use crate::room::OutFrame;
 use crate::state::App;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
+use homesync_audio::LatencyProfile;
 use homesync_protocol::{
-    ClockPong, Envelope, ErrorMessage, Payload, RoomSnapshot, Welcome, MAX_CONTROL_FRAME_BYTES, PROTOCOL_VERSION,
+    ClockPong, Envelope, ErrorMessage, Payload, RoomSnapshot, SourceMode, TransportState, Welcome, YoutubeRendezvous,
+    MAX_CONTROL_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -25,7 +28,7 @@ struct Session {
     client_id: String,
     device_id: String,
     room_code: Option<String>,
-    tx: mpsc::UnboundedSender<String>,
+    tx: mpsc::UnboundedSender<OutFrame>,
 }
 
 impl Session {
@@ -33,7 +36,7 @@ impl Session {
     fn send(&self, app: &App, payload: Payload, request_id: Option<String>) {
         let envelope = Envelope::new(payload).with_request_id(request_id).stamped(app.now_ns());
         if let Ok(text) = serde_json::to_string(&envelope) {
-            let _ = self.tx.send(text);
+            let _ = self.tx.send(OutFrame::Text(text));
         }
     }
 
@@ -47,13 +50,17 @@ impl Session {
 
 async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     let (mut sink, mut stream) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<OutFrame>();
 
     // A dedicated writer task keeps a slow socket from blocking room updates
     // for everyone else: broadcasts only ever push into an unbounded channel.
     let writer = tokio::spawn(async move {
-        while let Some(text) = rx.recv().await {
-            if sink.send(Message::Text(text.into())).await.is_err() {
+        while let Some(frame) = rx.recv().await {
+            let message = match frame {
+                OutFrame::Text(text) => Message::Text(text.into()),
+                OutFrame::Binary(bytes) => Message::Binary(bytes.as_ref().clone().into()),
+            };
+            if sink.send(message).await.is_err() {
                 break;
             }
         }
@@ -77,9 +84,9 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
                 handle_text(&app, &mut session, text.as_str());
             }
             Message::Close(_) => break,
-            // Binary frames are reserved for live PCM streaming, which this
-            // build does not implement.
-            Message::Binary(_) => session.error(&app, "unsupported", "binary frames are not accepted", None),
+            // Binary frames flow coordinator to receiver only. A client has
+            // nothing to say that needs them.
+            Message::Binary(_) => session.error(&app, "unsupported", "clients may not send binary frames", None),
             Message::Ping(_) | Message::Pong(_) => {}
         }
     }
@@ -90,7 +97,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     let _ = writer.await;
 }
 
-fn handle_text(app: &App, session: &mut Session, text: &str) {
+fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
     // Stamp receipt before any other work so the clock exchange measures the
     // network path rather than this process's parsing time.
     let t1 = app.now_ns();
@@ -168,7 +175,7 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
 
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
-            room.broadcast(Payload::RoomSnapshot(snapshot), now);
+            room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
         }
 
@@ -195,7 +202,7 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
             }
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
-            room.broadcast(Payload::RoomSnapshot(snapshot), now);
+            room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
         }),
@@ -222,23 +229,45 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
             room.set_ready(&session.client_id, &ready.media_id);
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
-            room.broadcast(Payload::RoomSnapshot(snapshot), now);
+            room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
         }),
 
-        Payload::SelectSource(select) => with_room(app, session, request_id, |app, session, room| {
+        Payload::SelectSource(select) => {
+            let Some(code) = session.room_code.clone() else {
+                session.error(app, "not_in_room", "join a room before sending that message", request_id);
+                return;
+            };
+            // Switching source mode always ends any live stream: two sources
+            // feeding one room would interleave audio from both.
+            app.stop_stream(&code);
+
+            let mut rooms = app.rooms();
+            let Some(room) = rooms.get_mut(&code) else { return };
             if let Some(id) = &select.media_id {
                 if !app.media.contains(id) {
-                    return Some(ErrorMessage::new("no_such_media", "media id is not in the catalogue"));
+                    drop(rooms);
+                    session.error(app, "no_such_media", "media id is not in the catalogue", request_id);
+                    return;
+                }
+            }
+            if select.mode == SourceMode::Youtube {
+                match select.youtube_video_id.as_deref().map(valid_video_id) {
+                    Some(true) => {}
+                    _ => {
+                        drop(rooms);
+                        session.error(app, "bad_video_id", "that is not a YouTube video id", request_id);
+                        return;
+                    }
                 }
             }
             let now = app.now_ns();
-            room.select_source(select.media_id, now);
-            tracing::info!(client = %session.client_id, media = ?room.transport.media_id, "source selected");
+            room.stream = None;
+            room.select_source(select.mode, select.media_id, select.youtube_video_id, now);
+            tracing::info!(client = %session.client_id, mode = ?select.mode, "source selected");
             broadcast_transport_and_snapshot(app, room, now);
-            None
-        }),
+        }
 
         Payload::Play(command) => with_room(app, session, request_id, |app, _session, room| {
             let now = app.now_ns();
@@ -246,6 +275,7 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
                 return Some(error);
             }
             broadcast_transport_and_snapshot(app, room, now);
+            send_youtube_rendezvous(app, room, now);
             None
         }),
 
@@ -260,6 +290,7 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
             let now = app.now_ns();
             room.seek(seek.position_ns, now);
             broadcast_transport_and_snapshot(app, room, now);
+            send_youtube_rendezvous(app, room, now);
             None
         }),
 
@@ -277,7 +308,7 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
             }
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
-            room.broadcast(Payload::RoomSnapshot(snapshot), now);
+            room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
         }),
@@ -289,8 +320,124 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
             }
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
-            room.broadcast(Payload::RoomSnapshot(snapshot), now);
+            room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
+            None
+        }),
+
+        Payload::StreamStart(start) => {
+            let Some(code) = session.room_code.clone() else {
+                session.error(app, "not_in_room", "join a room before sending that message", request_id);
+                return;
+            };
+            let Some(profile) = LatencyProfile::parse(&start.profile) else {
+                session.error(app, "bad_profile", "profile must be live, movie or music", request_id);
+                return;
+            };
+
+            // Restarting means a fresh epoch, so receivers rebuild their
+            // buffers instead of mixing two streams on one timeline.
+            app.stop_stream(&code);
+            let epoch = {
+                let mut rooms = app.rooms();
+                let Some(room) = rooms.get_mut(&code) else { return };
+                room.transport.epoch += 1;
+                room.transport.epoch
+            };
+
+            match crate::stream::start(Arc::clone(app), code.clone(), profile, start.synthetic, epoch) {
+                Ok(handle) => {
+                    let info = handle.info.clone();
+                    app.set_stream(&code, handle);
+                    let now = app.now_ns();
+                    let mut rooms = app.rooms();
+                    let Some(room) = rooms.get_mut(&code) else { return };
+                    room.stream = Some(info.clone());
+                    room.select_source(SourceMode::SystemAudio, None, None, now);
+                    room.transport.state = TransportState::Playing;
+                    room.broadcast(Payload::StreamInfo(info), now);
+                    broadcast_transport_and_snapshot(app, room, now);
+                }
+                Err(error) => session.error(app, "capture_unavailable", error, request_id),
+            }
+        }
+
+        Payload::StreamStop => with_room(app, session, request_id, |app, _session, room| {
+            let code = room.code.clone();
+            app.stop_stream(&code);
+            room.stream = None;
+            let now = app.now_ns();
+            room.select_source(SourceMode::Idle, None, None, now);
+            broadcast_transport_and_snapshot(app, room, now);
+            None
+        }),
+
+        Payload::BufferReport(report) => with_room(app, session, request_id, |_app, session, room| {
+            room.set_buffer_report(&session.client_id, report);
+            room.dirty = true;
+            None
+        }),
+
+        Payload::YoutubeState(state) => with_room(app, session, request_id, |app, session, room| {
+            room.set_youtube_state(&session.client_id, state);
+            room.dirty = true;
+            // A player that has drifted beyond what a listener would tolerate
+            // gets a fresh rendezvous rather than being left to wander.
+            if room.transport.mode == SourceMode::Youtube && room.transport.state == TransportState::Playing {
+                let now = app.now_ns();
+                if youtube_drift_ms(room, &session.client_id, now)
+                    .is_some_and(|drift| drift.abs() > YOUTUBE_RESYNC_THRESHOLD_MS)
+                {
+                    tracing::info!(client = %session.client_id, "YouTube drift exceeded; re-converging");
+                    room.seek(room.transport.position_at(now), now);
+                    let now = app.now_ns();
+                    room.broadcast(Payload::Transport(room.transport.clone()), now);
+                    send_youtube_rendezvous(app, room, now);
+                }
+            }
+            None
+        }),
+
+        Payload::CalibrationStart(start) => {
+            let Some(code) = session.room_code.clone() else {
+                session.error(app, "not_in_room", "join a room before sending that message", request_id);
+                return;
+            };
+            let session_id = Ulid::new().to_string();
+            let repetitions = start.repetitions.clamp(3, 15);
+
+            {
+                let rooms = app.rooms();
+                let Some(room) = rooms.get(&code) else { return };
+                if room.calibration.is_some() {
+                    drop(rooms);
+                    session.error(app, "busy", "a calibration run is already in progress", request_id);
+                    return;
+                }
+                if !room.clients.contains_key(&start.microphone_client_id) {
+                    drop(rooms);
+                    session.error(app, "no_such_client", "the microphone device is not in the room", request_id);
+                    return;
+                }
+            }
+
+            let (uploads, cancel) = app.calibration.open(&session_id);
+            let app_for_run = Arc::clone(app);
+            tokio::spawn(crate::calibration::run(
+                app_for_run,
+                code,
+                session_id,
+                start.microphone_client_id,
+                repetitions,
+                uploads,
+                cancel,
+            ));
+        }
+
+        Payload::CalibrationCancel => with_room(app, session, request_id, |app, _session, room| {
+            if let Some(progress) = &room.calibration {
+                app.calibration.cancel(&progress.session_id);
+            }
             None
         }),
 
@@ -300,10 +447,73 @@ fn handle_text(app: &App, session: &mut Session, text: &str) {
         | Payload::ClockPong(_)
         | Payload::MediaManifest(_)
         | Payload::Transport(_)
+        | Payload::StreamInfo(_)
+        | Payload::YoutubeRendezvous(_)
+        | Payload::CalibrationPlay(_)
+        | Payload::CalibrationRecord(_)
+        | Payload::CalibrationProgress(_)
+        | Payload::CalibrationResult(_)
         | Payload::Error(_) => {
             session.error(app, "unexpected_type", "that message type is server-originated", request_id);
         }
     }
+}
+
+/// Drift beyond which a YouTube player is re-converged rather than left to
+/// wander, in milliseconds. Well inside the "under 100 ms watch-party" target
+/// of specification section 20.3, and far above ordinary reporting noise.
+const YOUTUBE_RESYNC_THRESHOLD_MS: f64 = 250.0;
+
+/// Whether a string looks like a YouTube video id.
+///
+/// Not a security control — the id goes into an iframe the browser fetches
+/// from YouTube — but it stops a mistyped URL from being distributed to every
+/// device in the room as if it were a video.
+fn valid_video_id(id: &str) -> bool {
+    id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// A client's YouTube position error against the room timeline, in
+/// milliseconds. `None` unless the player is actually playing and has reported
+/// a position.
+fn youtube_drift_ms(room: &crate::room::Room, client_id: &str, now_ns: u64) -> Option<f64> {
+    let client = room.clients.get(client_id)?;
+    let state = client.info.youtube.as_ref()?;
+    if state.player_state != "playing" {
+        return None;
+    }
+    let expected_s = room.transport.position_at(now_ns) as f64 / 1e9;
+    Some((state.current_time_s - expected_s) * 1000.0)
+}
+
+/// Tells every receiver where to be, and when, in YouTube mode.
+///
+/// Each device gets its own learned start latency so it can call
+/// `playVideo()` early by however long its player actually takes to begin.
+fn send_youtube_rendezvous(app: &App, room: &mut crate::room::Room, now_ns: u64) {
+    if room.transport.mode != SourceMode::Youtube || room.transport.state != TransportState::Playing {
+        return;
+    }
+    let Some(video_id) = room.transport.youtube_video_id.clone() else { return };
+    let epoch = room.transport.epoch;
+    let target_position_s = room.transport.anchor_media_ns as f64 / 1e9;
+    let start_server_ns = room.transport.anchor_server_ns;
+
+    for client_id in room.receiver_ids() {
+        let start_latency_ms = room.youtube_start_latency_ms(&client_id);
+        room.send_to(
+            &client_id,
+            Payload::YoutubeRendezvous(YoutubeRendezvous {
+                epoch,
+                video_id: video_id.clone(),
+                target_position_s,
+                start_server_ns,
+                start_latency_ms,
+            }),
+            now_ns,
+        );
+    }
+    let _ = app;
 }
 
 /// Runs `f` against the session's room, reporting an error frame if the client
@@ -335,7 +545,7 @@ where
 fn broadcast_transport_and_snapshot(app: &App, room: &mut crate::room::Room, now_ns: u64) {
     room.broadcast(Payload::Transport(room.transport.clone()), now_ns);
     let snapshot = room.snapshot(app.media.manifest());
-    room.broadcast(Payload::RoomSnapshot(snapshot), now_ns);
+    room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now_ns);
     room.dirty = false;
 }
 
@@ -347,7 +557,7 @@ fn leave_room(app: &App, session: &mut Session) {
     tracing::info!(client = %session.client_id, room = %code, "client left");
     let now = app.now_ns();
     let snapshot = room.snapshot(app.media.manifest());
-    room.broadcast(Payload::RoomSnapshot(snapshot), now);
+    room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
     room.dirty = false;
 }
 
@@ -375,7 +585,7 @@ pub fn flush_dirty_rooms(app: &App) {
             continue;
         }
         let snapshot: RoomSnapshot = room.snapshot(manifest.clone());
-        room.broadcast(Payload::RoomSnapshot(snapshot), now);
+        room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
         room.dirty = false;
     }
 }

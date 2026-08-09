@@ -34,6 +34,8 @@ export class Connection {
     this.seq = 0;
     this.reconnectDelay = RECONNECT_MIN_MS;
     this.closedByUser = false;
+    /** Last clock quality published, so only transitions are sent eagerly. */
+    this.reportedQuality = null;
 
     /** Callbacks, assigned by the app. */
     this.onStatus = () => {};
@@ -41,8 +43,17 @@ export class Connection {
     this.onTransport = () => {};
     this.onError = () => {};
     this.onWelcome = () => {};
+    this.onStreamInfo = () => {};
+    this.onYoutubeRendezvous = () => {};
+    this.onCalibration = () => {};
+    /** Receives raw binary PCM frames. */
+    this.onAudioFrame = () => {};
     /** Returns the current telemetry payload, or null. */
     this.diagnosticsProvider = () => null;
+    /** Returns the current live-stream buffer report, or null. */
+    this.bufferProvider = () => null;
+    /** Returns the current YouTube player state, or null. */
+    this.youtubeProvider = () => null;
 
     this.timers = [];
   }
@@ -51,6 +62,9 @@ export class Connection {
     this.closedByUser = false;
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+    // Live PCM frames arrive as binary messages; without this they would be
+    // delivered as Blobs and need an async read on the hot path.
+    socket.binaryType = 'arraybuffer';
     this.socket = socket;
     this.onStatus('connecting');
 
@@ -72,6 +86,10 @@ export class Connection {
     };
 
     socket.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        this.onAudioFrame(event.data);
+        return;
+      }
       // Stamp arrival before parsing so the clock exchange measures the
       // network, not JSON parsing on a slow phone.
       const t3 = clientNow();
@@ -122,6 +140,15 @@ export class Connection {
       case 'clock_pong': {
         const { t0, t1, t2 } = envelope.payload;
         this.clock.push(t0, t1, t2, t3);
+        // The coordinator gates playback on clock quality, so it must hear
+        // about a change immediately rather than up to one report interval
+        // later. Only transitions are sent; the steady state stays on the
+        // timer.
+        const quality = this.clock.quality();
+        if (quality !== this.reportedQuality) {
+          this.reportedQuality = quality;
+          this.send('clock_report', this.clock.report());
+        }
         break;
       }
       case 'welcome': {
@@ -137,6 +164,18 @@ export class Connection {
       case 'transport':
         this.onTransport(envelope.payload);
         break;
+      case 'stream_info':
+        this.onStreamInfo(envelope.payload);
+        break;
+      case 'youtube_rendezvous':
+        this.onYoutubeRendezvous(envelope.payload);
+        break;
+      case 'calibration_play':
+      case 'calibration_record':
+      case 'calibration_progress':
+      case 'calibration_result':
+        this.onCalibration(envelope.type, envelope.payload);
+        break;
       case 'error':
         this.onError(envelope.payload);
         break;
@@ -148,6 +187,7 @@ export class Connection {
   #startLoops() {
     this.#stopLoops();
     this.seq = 0;
+    this.reportedQuality = null;
     let sent = 0;
 
     const ping = () => {
@@ -166,6 +206,10 @@ export class Connection {
       if (this.clock.haveEstimate) this.send('clock_report', this.clock.report());
       const diagnostics = this.diagnosticsProvider();
       if (diagnostics) this.send('diagnostic_report', diagnostics);
+      const buffer = this.bufferProvider();
+      if (buffer) this.send('buffer_report', buffer);
+      const youtube = this.youtubeProvider();
+      if (youtube) this.send('youtube_state', youtube);
     }, REPORT_INTERVAL_MS);
   }
 

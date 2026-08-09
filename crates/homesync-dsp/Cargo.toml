@@ -1,0 +1,8 @@
+[package]
+name = "homesync-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Chirp generation and cross-correlation delay estimation for acoustic calibration"
+
+[dependencies]

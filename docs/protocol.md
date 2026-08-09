@@ -1,8 +1,8 @@
 # HomeSync control protocol v1
 
 Implemented by `crates/homesync-protocol` (Rust) and `web/src/net.js` (browser).
-Every message is one JSON text frame on the `/ws` WebSocket. Binary frames are
-reserved for live PCM streaming and are rejected by this build.
+Control messages are JSON text frames on the `/ws` WebSocket. Live audio uses
+binary frames on the same socket, coordinator to receiver only.
 
 ## Envelope
 
@@ -66,6 +66,10 @@ The estimator (identical in `homesync-clock` and `web/src/clock.js`):
 Quality states: `warming_up`, `stable` (≥ 8 accepted samples and ≤ 5 ms
 uncertainty), `degraded`, `resync_required`, `suspended`.
 
+A client publishes `clock_report` on a two-second timer *and* immediately on
+any quality transition. The coordinator gates playback on quality, so it must
+learn about a change at once rather than up to one interval later.
+
 **Known limit.** A fixed one-way asymmetry is invisible to this method and
 biases the offset by exactly half of it. There is a test asserting that
 (`asymmetric_paths_bias_the_estimate_by_half_the_asymmetry`). Only an acoustic
@@ -80,6 +84,7 @@ One message carries the whole playback timeline:
 {
   "epoch": 7,
   "state": "playing",
+  "mode": "controlled_audio",
   "media_id": "builtin-click",
   "anchor_server_ns": 42000000000,
   "anchor_media_ns": 3000000000
@@ -101,6 +106,92 @@ late joiner lands on the room's timeline rather than trailing it.
 
 States: `idle` → `loading` → `ready` → `playing` ⇄ `paused`.
 
+## Source modes
+
+`select_source` carries a `mode`, and the mode decides what the rest of the
+protocol means:
+
+| Mode | What plays | Timeline | Readiness barrier |
+| --- | --- | --- | --- |
+| `controlled_audio` | A file every receiver preloads | `transport` | Yes: hash verified and decoded |
+| `youtube` | Each device's own YouTube player | `transport` + `youtube_rendezvous` | No: nothing to preload |
+| `system_audio` | Live PCM from the host | Per-frame presentation times | No |
+
+`controlled_audio` is the reference mode and the only one with a guaranteed
+timing story. The other two are best-effort by construction; the reasons are
+below.
+
+## Binary PCM frames (mode C)
+
+Live audio travels as binary WebSocket messages, coordinator to receiver only.
+A client sending a binary frame gets `error: unsupported`.
+
+All integer fields are network byte order. Header is 34 bytes:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| Magic | 4 bytes | `HSYN` |
+| Version | `u8` | `1` |
+| Flags | `u8` | `1` discontinuity, `2` silence, `4` calibration |
+| Format | `u8` | `1` s16le, `2` f32le, `3` Opus (not implemented) |
+| Channels | `u8` | 1–8 |
+| Sample rate | `u32` | 8 000–192 000 |
+| Sequence | `u64` | Monotonic |
+| Presentation time | `u64` | Coordinator monotonic nanoseconds |
+| Frame samples | `u16` | Per channel; 480 at 48 kHz, so 10 ms |
+| Payload length | `u32` | Must match the sample count exactly |
+
+A frame flagged `silence` may carry no payload at all: it still occupies its
+place on the timeline, but costs one header instead of two kilobytes. Since a
+host is silent most of the time, this is most of the traffic.
+
+Every field is validated before the payload is touched. Receivers render
+straight into an audio callback, so a malformed frame must be dropped, not
+turned into a burst of noise at full volume.
+
+Frames are laid on a timeline derived from one anchor and a sample count, not
+from the moment each capture callback happened to fire — otherwise every
+receiver inherits the host's callback jitter. When the sound card's clock has
+drifted far enough from the coordinator's, the stream re-anchors and marks the
+frame as a discontinuity rather than pretending nothing happened.
+
+## YouTube rendezvous (mode B)
+
+The coordinator distributes a video id, a target position and an instant. No
+YouTube audio or video passes through it.
+
+Each device is told its own `start_latency_ms` and calls `playVideo()` that far
+ahead of the rendezvous instant. The device measures how long the player
+actually took to begin — a position that has advanced, not merely a "playing"
+state — and reports it; the coordinator folds it into a bounded moving average.
+A single pathological observation cannot poison the estimate.
+
+A device whose reported position drifts more than 250 ms from the room timeline
+triggers a fresh rendezvous.
+
+Structural limits, which no amount of coordinator work removes:
+
+- **Ads are inserted per viewer.** Two devices can be watching genuinely
+  different content.
+- The IFrame API offers `seekTo` and `playVideo`, not sample-accurate
+  scheduling.
+- Independent buffering interrupts one device and not another.
+- Some videos prohibit embedding.
+
+## Calibration
+
+Chirps are served from `GET /api/v1/calibration/chirp/{code}` and are **not**
+in the media catalogue — they are measurement signals, not something anyone
+should be able to select and play to a room.
+
+Recordings are uploaded to `POST /api/v1/calibration/recording` as raw
+little-endian `f32` mono samples, with `session`, `target`, `repetition`,
+`rate` and `first_sample_server_ns` as query parameters. This goes over HTTP
+rather than the control socket so a megabyte of audio cannot delay a clock
+exchange queued behind it.
+
+See `docs/calibration.md` for what the measurements mean.
+
 ## Messages
 
 | Type | Direction | Purpose |
@@ -119,6 +210,16 @@ States: `idle` → `loading` → `ready` → `playing` ⇄ `paused`.
 | `play` / `pause` / `seek` / `stop` | → | Transport commands |
 | `volume` / `mute` | → | Per-device output |
 | `diagnostic_report` | → | Periodic telemetry |
+| `stream_start` / `stream_stop` | → | Begin or end live system audio |
+| `stream_info` | ← | Format and buffering parameters of the live stream |
+| `buffer_report` | → | Receiver playout buffer health |
+| `youtube_state` | → | This device's player state and measured start latency |
+| `youtube_rendezvous` | ← | Converge on a position at an instant |
+| `calibration_start` / `calibration_cancel` | → | Run control |
+| `calibration_play` | ← | Emit a chirp at an instant |
+| `calibration_record` | ← | Record a window |
+| `calibration_progress` | ← | Narration during a run |
+| `calibration_result` | ← | Measurements and applied compensation |
 | `error` | ← | Failure notice; never closes the socket |
 
 Server-originated types sent by a client are rejected with
@@ -127,7 +228,8 @@ Server-originated types sent by a client are rejected with
 ### Readiness barrier
 
 `play` is refused with `error: not_ready` unless every audio-rendering client
-has verified the selected media *and* holds a `stable` clock. The error message
+holds a `stable` clock, and — in `controlled_audio` mode only — has verified
+the selected media. The error message
 names the blocking devices. `play` with `{"force": true}` overrides it, which
 is the "best-effort start" of spec section 9.4. A room with no receivers is not
 ready — there would be nothing to hear.
@@ -156,7 +258,10 @@ network, not an authenticated system.
 | `GET` | `/api/v1/rooms/{code}` | Room metadata, never the secret |
 | `GET` | `/api/v1/media/{id}` | Media bytes, single-range support |
 | `GET` | `/api/v1/media/{id}/manifest` | Hash, size, type, duration |
-| `GET` | `/ws` | Control socket |
+| `GET` | `/api/v1/calibration/chirp/{code}` | Chirp audio for one device |
+| `POST` | `/api/v1/calibration/recording` | Raw recorded samples |
+| `GET` | `/probe.html` | Device capability probe |
+| `GET` | `/ws` | Control socket and binary PCM |
 
 Media ids are content hashes and only resolve to files already in the
 catalogue, so no request can name an arbitrary path on disk.
