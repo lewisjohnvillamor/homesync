@@ -1,0 +1,649 @@
+/**
+ * HomeSync browser client: wiring between the control socket, the player and
+ * the DOM.
+ */
+
+import { Connection } from './net.js';
+import { Player, LatencyMode, positionAtServerNs } from './player.js';
+import { usingFallbackDigest } from './sha256.js';
+import { LiveReceiver } from './live.js';
+import { YoutubePlayer, parseVideoId } from './youtube.js';
+import { CalibrationMicrophone, ChirpEmitter } from './calibration.js';
+
+const $ = (id) => document.getElementById(id);
+
+/** UI refresh rate. Fast enough to look live, slow enough to stay cheap. */
+const UI_INTERVAL_MS = 250;
+
+const state = {
+  /** @type {Connection|null} */ connection: null,
+  /** @type {Player|null} */ player: null,
+  /** @type {LiveReceiver|null} */ live: null,
+  /** @type {YoutubePlayer|null} */ youtube: null,
+  /** @type {CalibrationMicrophone|null} */ microphone: null,
+  /** @type {ChirpEmitter|null} */ chirps: null,
+  /** @type {object|null} */ snapshot: null,
+  /** @type {object|null} */ transport: null,
+  /** @type {object|null} */ selectedItem: null,
+  /** Live stream epoch currently being rendered. */
+  streamEpoch: -1,
+  role: 'speaker',
+  seeking: false,
+  loadToken: 0,
+};
+
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
+
+function readInvite() {
+  // The secret lives in the fragment, which browsers never send to the server.
+  const params = new URLSearchParams(location.hash.replace(/^#/, ''));
+  return { room: params.get('room') ?? '', secret: params.get('secret') ?? '' };
+}
+
+function init() {
+  const invite = readInvite();
+  $('room-code').value = invite.room || localStorage.getItem('homesync.roomCode') || '';
+  $('room-secret').value = invite.secret || localStorage.getItem('homesync.roomSecret') || '';
+  $('device-name').value = localStorage.getItem('homesync.name') || defaultDeviceName();
+  $('device-role').value = localStorage.getItem('homesync.role') || 'speaker';
+
+  const savedOffset = Number(localStorage.getItem('homesync.offsetMs') || '0');
+  $('offset').value = String(clampOffset(savedOffset));
+  $('offset-number').value = String(clampOffset(savedOffset));
+
+  $('join').addEventListener('click', join);
+  wireControls();
+
+  if (usingFallbackDigest()) {
+    log('Page is not a secure context: media hashes are verified in JavaScript (slower).');
+  }
+  setInterval(refreshUi, UI_INTERVAL_MS);
+}
+
+function defaultDeviceName() {
+  const ua = navigator.userAgent;
+  if (/android/i.test(ua)) return 'Android phone';
+  if (/iphone|ipad/i.test(ua)) return 'iOS device';
+  if (/mac os/i.test(ua)) return 'Mac';
+  if (/windows/i.test(ua)) return 'Windows PC';
+  return 'Browser';
+}
+
+async function join() {
+  const roomCode = $('room-code').value.trim().toUpperCase();
+  const secret = $('room-secret').value.trim();
+  const name = $('device-name').value.trim();
+  const role = $('device-role').value;
+  if (!roomCode || !secret) {
+    log('Enter the room code and secret, or open the invite link from the coordinator.');
+    return;
+  }
+
+  localStorage.setItem('homesync.roomCode', roomCode);
+  localStorage.setItem('homesync.roomSecret', secret);
+  localStorage.setItem('homesync.name', name);
+  localStorage.setItem('homesync.role', role);
+
+  const connection = new Connection({ roomCode, secret, name, role });
+  const player = new Player(connection.clock);
+  player.onLog = log;
+  state.connection = connection;
+  state.player = player;
+  state.role = role;
+
+  if (role !== 'controller') {
+    try {
+      // Inside the click handler, so the gesture still counts.
+      const audioState = await player.unlock();
+      log(`Audio context ${audioState} at ${Math.round(player.ctx.sampleRate)} Hz.`);
+    } catch (error) {
+      log(`Could not start audio: ${error.message}`);
+      return;
+    }
+    player.setManualOffsetMs(Number($('offset').value));
+    state.live = new LiveReceiver(player.ctx, player.gain, connection.clock);
+    state.chirps = new ChirpEmitter(player);
+  }
+  state.youtube = new YoutubePlayer($('youtube-player'), connection.clock);
+  state.youtube.onLog = log;
+  if (CalibrationMicrophone.available()) {
+    state.microphone = new CalibrationMicrophone(connection.clock);
+    state.microphone.onLog = log;
+  } else {
+    log('No microphone API here, so this device cannot be the calibration microphone.');
+  }
+
+  connection.onStatus = (status) => setPill($('status'), status, status === 'connected' ? 'ok' : 'idle');
+  connection.onWelcome = () => log('Connected to the coordinator.');
+  connection.onError = (error) => log(`Coordinator: ${error.message}`);
+  connection.onSnapshot = onSnapshot;
+  connection.onTransport = onTransport;
+  connection.diagnosticsProvider = () => (player.ctx ? player.diagnostics(state.transport) : null);
+  connection.bufferProvider = () => state.live?.bufferReport() ?? null;
+  connection.youtubeProvider = () =>
+    state.transport?.mode === 'youtube' && state.youtube?.player ? state.youtube.state() : null;
+  connection.onAudioFrame = (buffer) => state.live?.acceptFrame(buffer);
+  connection.onStreamInfo = onStreamInfo;
+  connection.onYoutubeRendezvous = (message) => state.youtube?.rendezvous(message).catch((e) => log(e.message));
+  connection.onCalibration = onCalibration;
+  connection.send('client_update', { microphone_available: CalibrationMicrophone.available() });
+  connection.connect();
+
+  $('join-panel').classList.add('hidden');
+  for (const id of ['room-panel', 'device-panel', 'calibration-panel', 'diagnostics-panel', 'log-panel']) {
+    $(id).classList.remove('hidden');
+  }
+  if (role === 'controller') $('device-panel').classList.add('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// Server events
+// ---------------------------------------------------------------------------
+
+function onSnapshot(snapshot) {
+  state.snapshot = snapshot;
+  $('room-code-label').textContent = snapshot.room_code;
+  renderMediaOptions(snapshot.media.items);
+  renderMicrophoneOptions();
+
+  // The coordinator owns acoustic compensation, so it arrives here rather than
+  // being decided locally.
+  const me = snapshot.clients.find((c) => c.client_id === state.connection?.clientId);
+  if (me && state.player) {
+    state.player.setAcousticOffsetMs(me.acoustic_offset_ms || 0, state.transport);
+    state.live?.setCompensationMs(totalCompensationMs());
+  }
+
+  onTransport(snapshot.transport);
+  renderClients();
+}
+
+function onTransport(transport) {
+  const previous = state.transport;
+  state.transport = transport;
+  setPill($('media-state'), transport.state, transport.state === 'playing' ? 'ok' : 'idle');
+  showModeControls(transport.mode);
+
+  const player = state.player;
+  const modeChanged = previous?.mode !== transport.mode;
+
+  // Leaving a mode must tear its machinery down, or a paused YouTube player
+  // keeps buffering and a stale worklet keeps rendering underneath the new
+  // source.
+  if (modeChanged) {
+    if (previous?.mode === 'youtube') state.youtube?.pause();
+    if (previous?.mode === 'system_audio') {
+      state.live?.stop();
+      state.streamEpoch = -1;
+    }
+    if (previous?.mode === 'controlled_audio') player?.stopSource();
+  }
+
+  if (transport.mode === 'youtube') {
+    if (transport.youtube_video_id) {
+      state.youtube?.load(transport.youtube_video_id).catch((error) => log(error.message));
+      $('youtube-stage').classList.remove('hidden');
+    }
+    if (transport.state !== 'playing') state.youtube?.pause();
+    return;
+  }
+  $('youtube-stage').classList.add('hidden');
+
+  if (transport.mode !== 'controlled_audio') return;
+  if (!player || !player.ctx) return;
+
+  if (previous && previous.media_id !== transport.media_id) {
+    player.clearMedia();
+  }
+  if (!transport.media_id) return;
+
+  const item = (state.snapshot?.media.items ?? []).find((m) => m.id === transport.media_id);
+  if (!item) return;
+
+  if (player.bufferMediaId !== item.id) {
+    loadMedia(item);
+    return;
+  }
+  player.applyTransport(transport);
+}
+
+/** Builds (or rebuilds) the live playout worklet for a stream. */
+async function onStreamInfo(info) {
+  if (!state.live) return;
+  if (info.epoch === state.streamEpoch && state.live.active) return;
+  state.streamEpoch = info.epoch;
+  try {
+    await state.live.start(info, totalCompensationMs());
+    log(
+      `Live stream: ${info.source_description}, ${info.sample_rate} Hz ${info.channels}ch, ` +
+        `${info.profile} profile (${info.target_depth_ms.toFixed(0)} ms buffer).`,
+    );
+  } catch (error) {
+    log(`Could not start live playback: ${error.message}`);
+  }
+}
+
+/** Handles the calibration messages addressed to this device. */
+async function onCalibration(type, message) {
+  try {
+    switch (type) {
+      case 'calibration_play': {
+        if (!state.chirps) return;
+        const result = await state.chirps.emit(message);
+        if (result.late) log('A calibration chirp was scheduled late; that repetition may be discarded.');
+        break;
+      }
+      case 'calibration_record': {
+        if (!state.microphone) return;
+        const recording = await state.microphone.record(message.start_server_ns, message.duration_ms);
+        await state.microphone.upload(message, recording);
+        break;
+      }
+      case 'calibration_progress':
+        renderCalibrationProgress(message);
+        break;
+      case 'calibration_result':
+        renderCalibrationResult(message);
+        break;
+      default:
+        break;
+    }
+  } catch (error) {
+    log(`Calibration: ${error.message}`);
+  }
+}
+
+async function loadMedia(item) {
+  const player = state.player;
+  const token = ++state.loadToken;
+  try {
+    await player.load(item, (stage) => log(`${item.title}: ${stage}…`));
+    // The controller may have changed source while this download was running.
+    if (token !== state.loadToken) return;
+    state.connection.send('receiver_ready', {
+      media_id: item.id,
+      hash_verified: true,
+      duration_ns: Math.round(player.buffer.duration * 1e9),
+      sample_rate: Math.round(player.ctx.sampleRate),
+      audio_context_state: player.ctx.state,
+      output_latency_ms: player.reportedLatencyMs,
+    });
+    log(`${item.title}: verified and decoded (${player.buffer.duration.toFixed(1)} s).`);
+    if (state.transport) player.applyTransport(state.transport, { force: true });
+  } catch (error) {
+    if (token !== state.loadToken) return;
+    log(`${item.title}: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
+
+function wireControls() {
+  $('mode-select').addEventListener('change', (event) => {
+    const mode = event.target.value;
+    showModeControls(mode);
+    if (mode === 'controlled_audio') {
+      const mediaId = $('media-select').value || null;
+      if (mediaId) state.connection?.send('select_source', { mode, media_id: mediaId });
+    } else if (mode === 'youtube') {
+      const videoId = parseVideoId($('youtube-input').value);
+      if (videoId) state.connection?.send('select_source', { mode, youtube_video_id: videoId });
+    }
+    // Live audio is not selected here — it begins when a stream starts.
+  });
+
+  $('media-select').addEventListener('change', (event) => {
+    state.connection?.send('select_source', {
+      mode: 'controlled_audio',
+      media_id: event.target.value || null,
+    });
+  });
+
+  $('youtube-load').addEventListener('click', () => {
+    const videoId = parseVideoId($('youtube-input').value);
+    if (!videoId) {
+      log('That does not look like a YouTube video id or link.');
+      return;
+    }
+    state.connection?.send('select_source', { mode: 'youtube', youtube_video_id: videoId });
+  });
+
+  $('stream-start').addEventListener('click', () => {
+    state.connection?.send('stream_start', {
+      profile: $('stream-profile').value,
+      synthetic: $('stream-synthetic').checked,
+    });
+  });
+  $('stream-stop').addEventListener('click', () => state.connection?.send('stream_stop'));
+
+  $('calibration-start').addEventListener('click', () => {
+    const microphoneClientId = $('calibration-mic').value;
+    if (!microphoneClientId) {
+      log('Choose which device should listen first.');
+      return;
+    }
+    if (microphoneClientId === state.connection?.clientId) {
+      state.microphone
+        ?.enable()
+        .then(() => startCalibration(microphoneClientId))
+        .catch((error) => log(`Microphone: ${error.message}`));
+      return;
+    }
+    startCalibration(microphoneClientId);
+  });
+  $('calibration-cancel').addEventListener('click', () => state.connection?.send('calibration_cancel'));
+
+  $('play').addEventListener('click', () => {
+    state.connection?.send('play', { force: $('force').checked });
+  });
+  $('pause').addEventListener('click', () => state.connection?.send('pause'));
+  $('stop').addEventListener('click', () => state.connection?.send('stop'));
+
+  const seek = $('seek');
+  seek.addEventListener('pointerdown', () => {
+    state.seeking = true;
+  });
+  const commitSeek = () => {
+    state.seeking = false;
+    const duration = currentDurationNs();
+    if (!duration) return;
+    const position = (Number(seek.value) / 1000) * duration;
+    state.connection?.send('seek', { position_ns: Math.round(position) });
+  };
+  seek.addEventListener('pointerup', commitSeek);
+  seek.addEventListener('change', commitSeek);
+
+  const applyOffset = (value) => {
+    const ms = clampOffset(Number(value));
+    $('offset').value = String(ms);
+    $('offset-number').value = String(ms);
+    localStorage.setItem('homesync.offsetMs', String(ms));
+    state.player?.setManualOffsetMs(ms, state.transport);
+    state.live?.setCompensationMs(totalCompensationMs());
+    state.connection?.send('client_update', { manual_offset_ms: ms });
+  };
+  $('offset').addEventListener('input', (e) => applyOffset(e.target.value));
+  $('offset-number').addEventListener('change', (e) => applyOffset(e.target.value));
+
+  $('volume').addEventListener('input', (event) => {
+    const volume = Number(event.target.value) / 100;
+    state.player?.setVolume(volume);
+    state.connection?.send('client_update', { volume });
+  });
+  $('mute').addEventListener('change', (event) => {
+    state.player?.setMuted(event.target.checked);
+    state.connection?.send('client_update', { muted: event.target.checked });
+  });
+
+  // Coming back from the background invalidates both the clock estimate and
+  // any running schedule, so both are rebuilt rather than trusted.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const player = state.player;
+    if (!player?.ctx) return;
+    log('Page became visible again: re-measuring the clock and rescheduling.');
+    state.connection?.clock.reset();
+    player.ctx.resume().then(() => {
+      if (state.transport) player.applyTransport(state.transport, { force: true });
+    });
+  });
+}
+
+/** Starts a calibration run with the chosen microphone device. */
+function startCalibration(microphoneClientId) {
+  $('calibration-results').classList.add('hidden');
+  state.connection?.send('calibration_start', {
+    microphone_client_id: microphoneClientId,
+    repetitions: Number($('calibration-reps').value) || 5,
+  });
+}
+
+/** Total compensation this device applies, in milliseconds. */
+function totalCompensationMs() {
+  const player = state.player;
+  if (!player) return 0;
+  return player.compensationSeconds() * 1000;
+}
+
+/** Shows the controls belonging to one source mode. */
+function showModeControls(mode) {
+  if ($('mode-select').value !== mode && mode) $('mode-select').value = mode;
+  $('mode-controlled').classList.toggle('hidden', mode !== 'controlled_audio');
+  $('mode-youtube').classList.toggle('hidden', mode !== 'youtube');
+  $('mode-live').classList.toggle('hidden', mode !== 'system_audio');
+  // Live audio has no timeline to scrub: it is whatever the host is playing.
+  const timeline = mode !== 'system_audio';
+  $('seek').disabled = !timeline;
+  $('play').disabled = !timeline;
+  $('pause').disabled = !timeline;
+}
+
+function clampOffset(ms) {
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(-1000, Math.min(1000, Math.round(ms)));
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+/** Keeps the microphone picker in step with the room. */
+function renderMicrophoneOptions() {
+  const select = $('calibration-mic');
+  const snapshot = state.snapshot;
+  if (!snapshot) return;
+  const candidates = snapshot.clients.filter((c) => c.microphone_available || c.client_id === state.connection?.clientId);
+  const signature = candidates.map((c) => `${c.client_id}:${c.name}`).join(',');
+  if (select.dataset.signature === signature) return;
+
+  const previous = select.value;
+  select.innerHTML = '';
+  if (candidates.length === 0) {
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'No device reported a microphone';
+    select.append(none);
+  }
+  for (const client of candidates) {
+    const option = document.createElement('option');
+    option.value = client.client_id;
+    option.textContent =
+      client.client_id === state.connection?.clientId ? `${client.name} (this device)` : client.name;
+    select.append(option);
+  }
+  select.dataset.signature = signature;
+  if (previous && candidates.some((c) => c.client_id === previous)) select.value = previous;
+}
+
+function renderCalibrationProgress(message) {
+  const status = $('calibration-status');
+  if (message.stage === 'done' || message.stage === 'cancelled') {
+    status.textContent = message.detail || message.stage;
+    return;
+  }
+  const progress = message.total ? ` (${message.completed}/${message.total})` : '';
+  status.textContent = `${message.stage}${progress} — ${message.detail}`;
+}
+
+function renderCalibrationResult(result) {
+  $('calibration-status').textContent = result.detail;
+  const table = $('calibration-results');
+  const tbody = table.querySelector('tbody');
+  tbody.innerHTML = '';
+
+  for (const measurement of result.measurements) {
+    const notes = [];
+    if (!measurement.stable) notes.push('unstable latency');
+    if (measurement.reflective_room) notes.push('reflective room');
+    if (measurement.rejected) notes.push(`${measurement.rejected} rejected`);
+
+    const row = document.createElement('tr');
+    const cells = [
+      measurement.name,
+      fmt(measurement.measured_delay_ms, 'ms', 1),
+      `± ${fmt(measurement.deviation_ms, 'ms', 1)}`,
+      fmt(measurement.intrinsic_latency_ms, 'ms', 1),
+      fmt(measurement.applied_compensation_ms, 'ms', 1),
+      notes.join(', ') || '—',
+    ];
+    for (const [index, value] of cells.entries()) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      if (index > 0 && index < 5) cell.classList.add('mono');
+      row.append(cell);
+    }
+    tbody.append(row);
+  }
+  table.classList.toggle('hidden', result.measurements.length === 0);
+
+  if (result.applied) {
+    log('Calibration finished; compensation applied. Listen again and adjust manually if needed.');
+  }
+}
+
+function renderMediaOptions(items) {
+  const select = $('media-select');
+  const wanted = state.transport?.media_id ?? '';
+  const signature = items.map((i) => i.id).join(',');
+  if (select.dataset.signature !== signature) {
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'Select media…';
+    select.append(none);
+    for (const item of items) {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.title;
+      select.append(option);
+    }
+    select.dataset.signature = signature;
+  }
+  if (select.value !== wanted) select.value = wanted;
+  state.selectedItem = items.find((i) => i.id === wanted) ?? null;
+}
+
+function renderClients() {
+  const tbody = document.querySelector('#clients tbody');
+  const snapshot = state.snapshot;
+  if (!snapshot) return;
+  tbody.innerHTML = '';
+
+  for (const client of snapshot.clients) {
+    const row = document.createElement('tr');
+    if (client.client_id === state.connection?.clientId) row.classList.add('self');
+    const clock = client.clock ?? {};
+    const diagnostics = client.diagnostics ?? {};
+    const buffer = client.buffer;
+    const cells = [
+      client.name + (client.client_id === snapshot.owner_client_id ? ' ★' : ''),
+      client.role,
+      clock.quality ?? '—',
+      fmt(clock.offset_ns / 1e6, 'ms', 2),
+      fmt(clock.rtt_median_ms, 'ms', 1),
+      fmt(clock.offset_uncertainty_ms, 'ms', 2),
+      fmt(clock.drift_ppm, '', 1),
+      client.ready ? 'yes' : 'no',
+      client.role === 'controller' ? '—' : fmt(diagnostics.drift_ms, 'ms', 2),
+      fmt(client.manual_offset_ms, 'ms', 0),
+      client.acoustic_offset_ms ? fmt(client.acoustic_offset_ms, 'ms', 0) : '—',
+      buffer ? `${buffer.depth_ms.toFixed(0)}/${buffer.target_ms.toFixed(0)} ms · ${buffer.underruns} u` : '—',
+    ];
+    for (const [index, value] of cells.entries()) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      if (index >= 3) cell.classList.add('mono');
+      row.append(cell);
+    }
+    tbody.append(row);
+  }
+}
+
+function refreshUi() {
+  const connection = state.connection;
+  if (!connection) return;
+
+  const quality = connection.clock.quality();
+  setPill($('clock-quality'), `clock: ${quality}`, quality === 'stable' ? 'ok' : 'idle');
+  renderClients();
+
+  const duration = currentDurationNs();
+  const position = state.transport ? positionAtServerNs(state.transport, connection.clock.serverNow()) : 0;
+  const shown = Math.min(position, duration || position);
+  $('position').textContent = `${formatTime(shown)} / ${formatTime(duration)}`;
+  if (!state.seeking && duration > 0) {
+    $('seek').value = String(Math.round((shown / duration) * 1000));
+  }
+
+  renderDeviceFacts();
+}
+
+function renderDeviceFacts() {
+  const player = state.player;
+  const list = $('device-facts');
+  if (!player || !player.ctx) {
+    list.innerHTML = '';
+    return;
+  }
+  const latencyExplanation =
+    player.latencyMode === LatencyMode.OutputTimestamp
+      ? 'getOutputTimestamp() (output latency already included)'
+      : 'reported baseLatency + outputLatency';
+
+  const facts = [
+    ['Sample rate', `${Math.round(player.ctx.sampleRate)} Hz`],
+    ['Context state', player.ctx.state],
+    ['Latency source', latencyExplanation],
+    ['Reported output latency', fmt(player.reportedLatencyMs, 'ms', 1)],
+    ['Total compensation applied', fmt(player.compensationSeconds() * 1000, 'ms', 1)],
+    ['Start moved by (late join)', fmt(player.scheduleShiftMs, 'ms', 1)],
+    ['Timeline drift', player.playing ? fmt(player.diagnostics(state.transport).drift_ms, 'ms', 2) : '—'],
+  ];
+
+  list.innerHTML = '';
+  for (const [term, value] of facts) {
+    const dt = document.createElement('dt');
+    dt.textContent = term;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    dd.classList.add('mono');
+    list.append(dt, dd);
+  }
+}
+
+function currentDurationNs() {
+  const player = state.player;
+  if (player?.buffer && player.bufferMediaId === state.transport?.media_id) {
+    return player.buffer.duration * 1e9;
+  }
+  const item = (state.snapshot?.media.items ?? []).find((m) => m.id === state.transport?.media_id);
+  return item?.duration_ns ?? 0;
+}
+
+function fmt(value, unit, digits) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value.toFixed(digits)}${unit ? ` ${unit}` : ''}`;
+}
+
+function formatTime(ns) {
+  if (!Number.isFinite(ns) || ns <= 0) return '0:00';
+  const total = Math.floor(ns / 1e9);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function setPill(element, text, kind) {
+  element.textContent = text;
+  element.className = `pill pill-${kind}`;
+}
+
+function log(message) {
+  const element = $('log');
+  const stamp = new Date().toLocaleTimeString();
+  element.textContent = `${stamp}  ${message}\n${element.textContent}`.slice(0, 8000);
+}
+
+init();

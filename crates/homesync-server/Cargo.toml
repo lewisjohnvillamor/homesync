@@ -1,0 +1,37 @@
+[package]
+name = "homesync-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HomeSync coordinator: rooms, clock service, media delivery and diagnostics"
+default-run = "homesync"
+
+[[bin]]
+name = "homesync"
+path = "src/main.rs"
+
+[dependencies]
+homesync-protocol = { path = "../homesync-protocol" }
+homesync-clock = { path = "../homesync-clock" }
+homesync-audio = { path = "../homesync-audio" }
+homesync-dsp = { path = "../homesync-dsp" }
+
+axum = { version = "0.8", features = ["ws", "macros"] }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+sha2 = "0.10"
+hex = "0.4"
+ulid = "1"
+qrcode = { version = "0.14", default-features = false }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+mime_guess = "2"
+local-ip-address = "0.6"
+tokio-tungstenite = "0.26"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

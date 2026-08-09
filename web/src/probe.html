@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>HomeSync device probe</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .verdict-ok td:first-child::before { content: "✓ "; color: var(--ok); }
+      .verdict-warn td:first-child::before { content: "! "; color: #e0a33e; }
+      .verdict-fail td:first-child::before { content: "✕ "; color: #e2624c; }
+      .verdict-info td:first-child::before { content: "· "; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <h1>HomeSync device probe</h1>
+      <a href="/" class="pill pill-idle">back to HomeSync</a>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>What this device can actually do</h2>
+        <p class="hint">
+          Open this page on any device you are considering as a receiver — a
+          phone, a laptop, or a television browser — and press the button. It
+          reports the audio capabilities that matter for synchronisation, and
+          measures the two that are worth measuring rather than trusting: does
+          the audio clock track real time, and does a scheduled start happen
+          when it was asked to.
+        </p>
+        <p class="hint">
+          A tap is required because browsers will not start audio without one,
+          and an audio context that has never run reports nothing useful.
+        </p>
+        <button id="run" class="primary">Run probe</button>
+      </section>
+
+      <section class="card">
+        <div class="table-scroll">
+          <table id="probe" class="hidden">
+            <thead><tr><th>Capability</th><th>Result</th><th>Notes</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/probe.js"></script>
+  </body>
+</html>

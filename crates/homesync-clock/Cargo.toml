@@ -1,0 +1,8 @@
+[package]
+name = "homesync-clock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+homesync-protocol = { path = "../homesync-protocol" }

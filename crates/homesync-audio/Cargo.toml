@@ -1,0 +1,15 @@
+[package]
+name = "homesync-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PCM framing, playout buffering and system-audio capture for HomeSync"
+
+[dependencies]
+tracing.workspace = true
+
+# System-audio capture. Windows-only on purpose: WASAPI loopback is the only
+# capture backend this project targets, and pulling cpal in elsewhere would add
+# an ALSA build dependency to every Linux and macOS build for no benefit.
+[target.'cfg(windows)'.dependencies]
+cpal = "0.16"
