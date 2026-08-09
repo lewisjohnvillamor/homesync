@@ -15,6 +15,12 @@ const STEADY_INTERVAL_MS = 1000;
 /** How often the client republishes its clock estimate and telemetry. */
 const REPORT_INTERVAL_MS = 2000;
 
+/**
+ * Errors that mean the room will never accept this client, so reconnecting is
+ * pointless and the loops must stop.
+ */
+const JOIN_REJECTIONS = new Set(['no_such_room', 'bad_secret', 'room_full']);
+
 /** Reconnect backoff bounds. */
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 10000;
@@ -36,6 +42,12 @@ export class Connection {
     this.closedByUser = false;
     /** Last clock quality published, so only transitions are sent eagerly. */
     this.reportedQuality = null;
+    /**
+     * Whether the room accepted us. Reports are worthless before that, and
+     * sending them anyway earns one `not_in_room` error each — which drowns
+     * the message explaining why the join failed in the first place.
+     */
+    this.joined = false;
 
     /** Callbacks, assigned by the app. */
     this.onStatus = () => {};
@@ -46,6 +58,8 @@ export class Connection {
     this.onStreamInfo = () => {};
     this.onYoutubeRendezvous = () => {};
     this.onCalibration = () => {};
+    /** Called when the room refused us, with the coordinator's reason. */
+    this.onJoinRejected = () => {};
     /** Receives raw binary PCM frames. */
     this.onAudioFrame = () => {};
     /** Returns the current telemetry payload, or null. */
@@ -70,6 +84,7 @@ export class Connection {
 
     socket.onopen = () => {
       this.reconnectDelay = RECONNECT_MIN_MS;
+      this.joined = false;
       this.onStatus('connected');
       this.send('hello', {
         client_version: 'homesync-web/0.1.0',
@@ -145,7 +160,7 @@ export class Connection {
         // later. Only transitions are sent; the steady state stays on the
         // timer.
         const quality = this.clock.quality();
-        if (quality !== this.reportedQuality) {
+        if (this.joined && quality !== this.reportedQuality) {
           this.reportedQuality = quality;
           this.send('clock_report', this.clock.report());
         }
@@ -159,6 +174,8 @@ export class Connection {
         break;
       }
       case 'room_snapshot':
+        // The first snapshot is the acknowledgement that we are in the room.
+        this.joined = true;
         this.onSnapshot(envelope.payload);
         break;
       case 'transport':
@@ -177,6 +194,16 @@ export class Connection {
         this.onCalibration(envelope.type, envelope.payload);
         break;
       case 'error':
+        if (!this.joined && JOIN_REJECTIONS.has(envelope.payload?.code)) {
+          // Retrying cannot help: the room does not exist, or these
+          // credentials are wrong. Stop rather than emitting an error every
+          // two seconds for as long as the page is open.
+          this.closedByUser = true;
+          this.#stopLoops();
+          this.socket?.close();
+          this.onJoinRejected(envelope.payload);
+          return;
+        }
         this.onError(envelope.payload);
         break;
       default:
@@ -203,6 +230,8 @@ export class Connection {
     ping();
 
     this.timers[1] = setInterval(() => {
+      // Nothing is worth reporting until the room has accepted us.
+      if (!this.joined) return;
       if (this.clock.haveEstimate) this.send('clock_report', this.clock.report());
       const diagnostics = this.diagnosticsProvider();
       if (diagnostics) this.send('diagnostic_report', diagnostics);
