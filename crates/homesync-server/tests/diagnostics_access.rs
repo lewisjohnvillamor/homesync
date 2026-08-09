@@ -6,9 +6,14 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-const PORT: u16 = 18125;
 const ROOM: &str = "DIAGTS";
 const SECRET: &str = "diag-secret";
+
+/// Each test gets its own port. `cargo test` runs test functions in parallel,
+/// and sharing a port means the second coordinator fails to bind while the
+/// first is killed out from under whichever test is still using it.
+const DIAGNOSTICS_PORT: u16 = 18125;
+const PUBLIC_ENDPOINTS_PORT: u16 = 18126;
 
 struct Coordinator(std::process::Child);
 
@@ -19,13 +24,13 @@ impl Drop for Coordinator {
     }
 }
 
-async fn start_coordinator() -> Coordinator {
+async fn start_coordinator(port: u16) -> Coordinator {
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_homesync"))
         .args([
             "--bind",
             "127.0.0.1",
             "--port",
-            &PORT.to_string(),
+            &port.to_string(),
             "--room-code",
             ROOM,
             "--room-secret",
@@ -43,7 +48,7 @@ async fn start_coordinator() -> Coordinator {
     let coordinator = Coordinator(child);
 
     for _ in 0..100 {
-        if TcpStream::connect(("127.0.0.1", PORT)).await.is_ok() {
+        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
             return coordinator;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -52,9 +57,9 @@ async fn start_coordinator() -> Coordinator {
 }
 
 /// Issues a bare GET and returns the whole response.
-async fn get(path: &str) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", PORT)).await.expect("connect");
-    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{PORT}\r\nConnection: close\r\n\r\n");
+async fn get(port: u16, path: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).await.expect("write");
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.expect("read");
@@ -63,20 +68,21 @@ async fn get(path: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn diagnostics_require_the_room_secret() {
-    let _coordinator = start_coordinator().await;
+    let port = DIAGNOSTICS_PORT;
+    let _coordinator = start_coordinator(port).await;
 
-    let without = get("/api/v1/diagnostics").await;
+    let without = get(port, "/api/v1/diagnostics").await;
     assert!(
         without.starts_with("HTTP/1.1 400"),
         "a request with no secret should be rejected: {}",
         &without[..without.len().min(80)]
     );
 
-    let wrong = get("/api/v1/diagnostics?secret=not-the-secret").await;
+    let wrong = get(port, "/api/v1/diagnostics?secret=not-the-secret").await;
     assert!(wrong.starts_with("HTTP/1.1 403"), "a wrong secret should be forbidden: {}", &wrong[..wrong.len().min(80)]);
     assert!(!wrong.contains(ROOM), "a rejected response must not leak room state");
 
-    let correct = get(&format!("/api/v1/diagnostics?secret={SECRET}")).await;
+    let correct = get(port, &format!("/api/v1/diagnostics?secret={SECRET}")).await;
     assert!(correct.starts_with("HTTP/1.1 200"), "the room secret should be accepted");
     assert!(correct.contains(ROOM), "the report should describe the room");
     assert!(correct.contains("homesync-diagnostics.json"), "the report should download as a named file");
@@ -96,13 +102,14 @@ async fn diagnostics_require_the_room_secret() {
 #[tokio::test(flavor = "multi_thread")]
 async fn public_endpoints_do_not_leak_the_secret() {
     // Knowing a room exists must not be enough to join it.
-    let _coordinator = start_coordinator().await;
+    let port = PUBLIC_ENDPOINTS_PORT;
+    let _coordinator = start_coordinator(port).await;
 
-    let info = get("/api/v1/info").await;
+    let info = get(port, "/api/v1/info").await;
     assert!(info.starts_with("HTTP/1.1 200"));
     assert!(!info.contains(SECRET), "/api/v1/info must not carry the room secret");
 
-    let room = get(&format!("/api/v1/rooms/{ROOM}")).await;
+    let room = get(port, &format!("/api/v1/rooms/{ROOM}")).await;
     assert!(room.starts_with("HTTP/1.1 200"));
     assert!(room.contains(ROOM));
     assert!(!room.contains(SECRET), "room metadata must not carry the room secret");
