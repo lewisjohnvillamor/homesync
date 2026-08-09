@@ -306,7 +306,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 return Some(error);
             }
             broadcast_transport_and_snapshot(app, room, now);
-            send_youtube_rendezvous(app, room, now);
+            send_youtube_rendezvous(app, room, now, None);
             None
         }),
 
@@ -321,7 +321,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             let now = app.now_ns();
             room.seek(seek.position_ns, now);
             broadcast_transport_and_snapshot(app, room, now);
-            send_youtube_rendezvous(app, room, now);
+            send_youtube_rendezvous(app, room, now, None);
             None
         }),
 
@@ -414,17 +414,18 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             room.dirty = true;
             // A player that has drifted beyond what a listener would tolerate
             // gets a fresh rendezvous rather than being left to wander.
-            if room.transport.mode == SourceMode::Youtube && room.transport.state == TransportState::Playing {
-                let now = app.now_ns();
-                if youtube_drift_ms(room, &session.client_id, now)
-                    .is_some_and(|drift| drift.abs() > YOUTUBE_RESYNC_THRESHOLD_MS)
-                {
-                    tracing::info!(client = %session.client_id, "YouTube drift exceeded; re-converging");
-                    room.seek(room.transport.position_at(now), now);
-                    let now = app.now_ns();
-                    room.broadcast(Payload::Transport(room.transport.clone()), now);
-                    send_youtube_rendezvous(app, room, now);
-                }
+            //
+            // Only that player, and the room timeline is not touched. Moving
+            // the timeline to chase one device restarts every other device and
+            // — because the anchor is pushed into the future by the start lead
+            // — leaves the ones that were fine looking adrift, which triggers
+            // another correction. That feedback loop is what made playback stop
+            // every few seconds.
+            let now = app.now_ns();
+            if room.youtube_needs_correction(&session.client_id, now) {
+                let drift = room.youtube_drift_ms(&session.client_id, now).unwrap_or_default();
+                tracing::info!(client = %session.client_id, drift_ms = drift, "YouTube drift exceeded; re-converging one device");
+                send_youtube_rendezvous(app, room, now, Some(&session.client_id));
             }
             None
         }),
@@ -490,11 +491,6 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
     }
 }
 
-/// Drift beyond which a YouTube player is re-converged rather than left to
-/// wander, in milliseconds. Well inside the "under 100 ms watch-party" target
-/// of specification section 20.3, and far above ordinary reporting noise.
-const YOUTUBE_RESYNC_THRESHOLD_MS: f64 = 250.0;
-
 /// Whether a string looks like a YouTube video id.
 ///
 /// Not a security control — the id goes into an iframe the browser fetches
@@ -504,33 +500,32 @@ fn valid_video_id(id: &str) -> bool {
     id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// A client's YouTube position error against the room timeline, in
-/// milliseconds. `None` unless the player is actually playing and has reported
-/// a position.
-fn youtube_drift_ms(room: &crate::room::Room, client_id: &str, now_ns: u64) -> Option<f64> {
-    let client = room.clients.get(client_id)?;
-    let state = client.info.youtube.as_ref()?;
-    if state.player_state != "playing" {
-        return None;
-    }
-    let expected_s = room.transport.position_at(now_ns) as f64 / 1e9;
-    Some((state.current_time_s - expected_s) * 1000.0)
-}
-
-/// Tells every receiver where to be, and when, in YouTube mode.
+/// Tells receivers where to be, and when, in YouTube mode.
 ///
 /// Each device gets its own learned start latency so it can call
 /// `playVideo()` early by however long its player actually takes to begin.
-fn send_youtube_rendezvous(app: &App, room: &mut crate::room::Room, now_ns: u64) {
+///
+/// `only` restricts the rendezvous to a single device, which is how a drifting
+/// player is corrected without interrupting the rest of the room.
+///
+/// The meeting point is the room's own anchor whenever that is still ahead of
+/// us — the case when a room has just been told to play — and otherwise a
+/// short hop into the future, read off the *unchanged* timeline. Either way
+/// the timeline itself is never moved by a rendezvous.
+fn send_youtube_rendezvous(app: &App, room: &mut crate::room::Room, now_ns: u64, only: Option<&str>) {
     if room.transport.mode != SourceMode::Youtube || room.transport.state != TransportState::Playing {
         return;
     }
     let Some(video_id) = room.transport.youtube_video_id.clone() else { return };
-    let epoch = room.transport.epoch;
-    let target_position_s = room.transport.anchor_media_ns as f64 / 1e9;
-    let start_server_ns = room.transport.anchor_server_ns;
+    let epoch = room.next_rendezvous_epoch();
+    let start_server_ns = room.transport.anchor_server_ns.max(now_ns + crate::room::YOUTUBE_CORRECTION_LEAD_NS);
+    let target_position_s = room.transport.position_at(start_server_ns) as f64 / 1e9;
 
-    for client_id in room.receiver_ids() {
+    let targets = match only {
+        Some(id) => vec![id.to_string()],
+        None => room.receiver_ids(),
+    };
+    for client_id in targets {
         let start_latency_ms = room.youtube_start_latency_ms(&client_id);
         room.send_to(
             &client_id,
