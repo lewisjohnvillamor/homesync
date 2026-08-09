@@ -35,6 +35,11 @@ pub const YOUTUBE_RESYNC_THRESHOLD_MS: f64 = 400.0;
 /// device that is genuinely adrift.
 pub const YOUTUBE_RESYNC_CONFIRMATIONS: u32 = 2;
 
+/// Drift past which one report is enough. Beyond a second or so the reading
+/// cannot be explained by `getCurrentTime()` granularity, and waiting for
+/// confirmation only prolongs playing the wrong part of the video.
+pub const YOUTUBE_RESYNC_IMMEDIATE_MS: f64 = 1_500.0;
+
 /// Minimum gap between corrections for the same device.
 ///
 /// Correcting a player pauses, seeks and restarts it, which itself takes it
@@ -420,7 +425,15 @@ impl Room {
             return false;
         }
         let Some(drift) = self.youtube_drift_ms(client_id, now_ns) else {
-            self.reset_youtube_strikes(client_id);
+            // Buffering is not a clean bill of health — it is the mechanism by
+            // which a device falls behind, since YouTube resumes from where it
+            // stalled rather than skipping ahead. Leaving the strikes in place
+            // means a device that stutters is corrected as soon as it is
+            // playing again, instead of never accumulating two consecutive
+            // over-threshold reports. Only an explicit pause clears them.
+            if self.youtube_player_state(client_id) == Some("paused") {
+                self.reset_youtube_strikes(client_id);
+            }
             return false;
         };
         let Some(client) = self.clients.get_mut(client_id) else { return false };
@@ -430,7 +443,10 @@ impl Room {
             return false;
         }
         client.youtube_drift_strikes += 1;
-        if client.youtube_drift_strikes < YOUTUBE_RESYNC_CONFIRMATIONS {
+        // A device seconds out of position is not a coarse timestamp, and
+        // waiting for a second report costs another reporting interval of
+        // playing the wrong part of the video.
+        if drift.abs() < YOUTUBE_RESYNC_IMMEDIATE_MS && client.youtube_drift_strikes < YOUTUBE_RESYNC_CONFIRMATIONS {
             return false;
         }
         // Still adrift but corrected recently: stay armed rather than clearing
@@ -441,6 +457,11 @@ impl Room {
         client.youtube_drift_strikes = 0;
         client.youtube_corrected_ns = Some(now_ns);
         true
+    }
+
+    /// A device's reported IFrame player state, if it has reported one.
+    fn youtube_player_state(&self, client_id: &str) -> Option<&str> {
+        Some(self.clients.get(client_id)?.info.youtube.as_ref()?.player_state.as_str())
     }
 
     fn reset_youtube_strikes(&mut self, client_id: &str) {
@@ -1009,6 +1030,49 @@ mod tests {
             report(&mut room, "a", state, now, -5.0);
             assert!(!room.youtube_needs_correction("a", now), "{state} should not be corrected");
         }
+    }
+
+    #[test]
+    fn a_stuttering_device_is_corrected_once_it_is_playing_again() {
+        let mut room = youtube_room("a");
+        let now = LEAD + 5_000_000_000;
+
+        // Buffering is how a device falls behind in the first place: YouTube
+        // resumes from where it stalled rather than skipping ahead. Clearing
+        // the strikes here meant a device that alternated playing/buffering
+        // never accumulated two consecutive over-threshold reports, so it was
+        // never corrected and stayed permanently behind.
+        report(&mut room, "a", "playing", now, -0.8);
+        assert!(!room.youtube_needs_correction("a", now));
+        report(&mut room, "a", "buffering", now, -0.9);
+        assert!(!room.youtube_needs_correction("a", now));
+        report(&mut room, "a", "playing", now, -1.0);
+        assert!(room.youtube_needs_correction("a", now), "a stall must not launder the drift away");
+    }
+
+    #[test]
+    fn pausing_a_device_clears_its_strikes() {
+        let mut room = youtube_room("a");
+        let now = LEAD + 5_000_000_000;
+
+        report(&mut room, "a", "playing", now, -0.8);
+        assert!(!room.youtube_needs_correction("a", now));
+        report(&mut room, "a", "paused", now, -0.8);
+        assert!(!room.youtube_needs_correction("a", now));
+        // Back to a single strike: a deliberate pause is not evidence of drift.
+        report(&mut room, "a", "playing", now, -0.8);
+        assert!(!room.youtube_needs_correction("a", now));
+    }
+
+    #[test]
+    fn a_device_seconds_out_of_position_is_corrected_on_the_first_report() {
+        let mut room = youtube_room("a");
+        let now = LEAD + 5_000_000_000;
+
+        // Two seconds cannot be a coarse timestamp, and waiting for a second
+        // report means two more seconds of the wrong part of the video.
+        report(&mut room, "a", "playing", now, -2.5);
+        assert!(room.youtube_needs_correction("a", now));
     }
 
     #[test]
