@@ -300,7 +300,14 @@ async function onCalibration(type, message) {
         break;
       }
       case 'calibration_record': {
-        if (!state.microphone) return;
+        if (!state.microphone) {
+          // Returning quietly left the run waiting for a recording that was
+          // never going to arrive, so it looked like nothing had happened.
+          log(`Calibration: ${NO_MICROPHONE_HERE} Cancelling the run.`);
+          setCalibrationStatus(NO_MICROPHONE_HERE);
+          state.connection?.send('calibration_cancel');
+          return;
+        }
         const recording = await state.microphone.record(message.start_server_ns, message.duration_ms);
         await state.microphone.upload(message, recording);
         break;
@@ -391,10 +398,22 @@ function wireControls() {
       return;
     }
     if (microphoneClientId === state.connection?.clientId) {
+      if (!state.microphone) {
+        // Optional chaining here used to swallow the whole thing: with no
+        // microphone the promise chain never ran and the button did nothing
+        // at all, with no message anywhere.
+        setCalibrationStatus(NO_MICROPHONE_HERE);
+        log(NO_MICROPHONE_HERE);
+        return;
+      }
+      setCalibrationStatus('asking for microphone permission…');
       state.microphone
-        ?.enable()
+        .enable()
         .then(() => startCalibration(microphoneClientId))
-        .catch((error) => log(`Microphone: ${error.message}`));
+        .catch((error) => {
+          setCalibrationStatus(`microphone unavailable — ${error.message}`);
+          log(`Microphone: ${error.message}`);
+        });
       return;
     }
     startCalibration(microphoneClientId);
@@ -522,9 +541,24 @@ async function downloadDiagnostics() {
   }
 }
 
+/**
+ * Why this device cannot listen. Almost always the secure-context rule:
+ * `getUserMedia` does not exist on `http://192.168.x.x`, so the API is simply
+ * absent rather than refused, and the reason has to be supplied here.
+ */
+const NO_MICROPHONE_HERE = window.isSecureContext
+  ? 'This browser exposes no microphone API, so this device cannot listen.'
+  : 'Microphone access needs a secure context. Restart the coordinator with --tls and reopen this page over https.';
+
+/** Shows one line of calibration state where the button is. */
+function setCalibrationStatus(text) {
+  $('calibration-status').textContent = text;
+}
+
 /** Starts a calibration run with the chosen microphone device. */
 function startCalibration(microphoneClientId) {
   $('calibration-results').classList.add('hidden');
+  setCalibrationStatus('starting…');
   state.connection?.send('calibration_start', {
     microphone_client_id: microphoneClientId,
     repetitions: Number($('calibration-reps').value) || 5,
@@ -580,8 +614,11 @@ function renderMicrophoneOptions() {
   for (const client of candidates) {
     const option = document.createElement('option');
     option.value = client.client_id;
-    option.textContent =
-      client.client_id === state.connection?.clientId ? `${client.name} (this device)` : client.name;
+    const isSelf = client.client_id === state.connection?.clientId;
+    // Say which devices cannot actually listen, rather than offering them as
+    // if they could and failing once the run is under way.
+    const suffix = client.microphone_available ? '' : ' — no microphone';
+    option.textContent = `${client.name}${isSelf ? ' (this device)' : ''}${suffix}`;
     select.append(option);
   }
   select.dataset.signature = signature;

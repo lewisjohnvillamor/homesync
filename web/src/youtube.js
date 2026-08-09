@@ -31,6 +31,32 @@ const STATE_NAMES = {
 const SEEK_TOLERANCE_S = 0.15;
 
 /**
+ * Works out where to seek and when to call `playVideo()` for one rendezvous.
+ *
+ * Pure, because the arithmetic is the whole of the mode and getting it wrong
+ * is inaudible in code review but not in a room.
+ *
+ * `leadMs` is how much earlier than the meeting instant this device must call
+ * `playVideo()`: its learned player start latency plus whatever compensation
+ * the room holds for it. Negative is meaningful — a device that emits sound
+ * early is told to call play *late*.
+ *
+ * When the moment to call play has already passed, the seek target moves
+ * forward by everything that will have elapsed by the time sound emerges:
+ * the lateness *and* the start latency still to come. Both are already
+ * carried by `delayMs`, which is why the correction is exactly `-delayMs` and
+ * adding the lead a second time would land the device a start-latency ahead
+ * of everyone else.
+ */
+export function rendezvousPlan({ startNs, nowNs, leadMs, targetPositionS }) {
+  const delayMs = (startNs - leadMs * 1e6 - nowNs) / 1e6;
+  if (delayMs > 0) {
+    return { immediate: false, delayMs, seekTargetS: targetPositionS };
+  }
+  return { immediate: true, delayMs, seekTargetS: targetPositionS + Math.max(0, -delayMs / 1000) };
+}
+
+/**
  * IFrame API error codes, in language that says what to do about it.
  *
  * 101 and 150 are the same condition reported two ways, and they are the
@@ -219,41 +245,36 @@ export class YoutubePlayer {
     await this.load(message.video_id);
     if (!this.ready) return;
 
-    const startNs = message.start_server_ns;
-    const leadMs = Math.max(0, message.start_latency_ms || 0);
-
-    // Position to seek to: the target, plus however long we will still be
-    // waiting after the seek completes.
-    const nowNs = this.clock.serverNow();
-    const untilStartS = Math.max(0, (startNs - nowNs) / 1e9);
-    const seekTarget = message.target_position_s;
-
     if (typeof this.player.seekTo !== 'function') {
       this.#log('the YouTube player is not ready to seek yet; skipping this rendezvous');
       return;
     }
-    this.player.pauseVideo();
-    this.player.seekTo(seekTarget, true);
 
-    const callAtNs = startNs - leadMs * 1e6;
-    const delayMs = (callAtNs - this.clock.serverNow()) / 1e6;
+    const startNs = message.start_server_ns;
+    const leadMs = message.start_latency_ms || 0;
+    const plan = rendezvousPlan({
+      startNs,
+      nowNs: this.clock.serverNow(),
+      leadMs,
+      targetPositionS: message.target_position_s,
+    });
+
+    this.player.pauseVideo();
+    this.player.seekTo(plan.seekTargetS, true);
     this.pendingStartNs = startNs;
 
-    if (delayMs <= 0) {
-      // Already past the moment to call play: start now and seek forward by
-      // however much of the timeline has elapsed, rather than starting late.
-      const behindS = -delayMs / 1000 + leadMs / 1000;
-      this.player.seekTo(seekTarget + Math.max(0, behindS), true);
+    if (plan.immediate) {
+      // Already past the moment to call play: start now from a target that
+      // accounts for the lateness, rather than starting late.
       this.#play();
       return;
     }
 
     this.#log(
-      `YouTube: seeking to ${seekTarget.toFixed(2)}s, starting in ${(delayMs / 1000).toFixed(2)}s ` +
+      `YouTube: seeking to ${plan.seekTargetS.toFixed(2)}s, starting in ${(plan.delayMs / 1000).toFixed(2)}s ` +
         `(${leadMs.toFixed(0)} ms early for this device)`,
     );
-    this.startTimer = setTimeout(() => this.#play(), delayMs);
-    void untilStartS;
+    this.startTimer = setTimeout(() => this.#play(), plan.delayMs);
   }
 
   #play() {
