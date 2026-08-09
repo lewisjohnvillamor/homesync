@@ -23,6 +23,33 @@ pub const MAX_YOUTUBE_START_LATENCY_MS: f64 = 3_000.0;
 /// Weight given to each new YouTube start-latency observation.
 const YOUTUBE_LATENCY_SMOOTHING: f64 = 0.3;
 
+/// Position error, in milliseconds, past which a YouTube player is corrected.
+///
+/// `getCurrentTime()` is coarse — a few hundred milliseconds of reporting
+/// granularity is normal — so a tight threshold measures the API rather than
+/// the playback.
+pub const YOUTUBE_RESYNC_THRESHOLD_MS: f64 = 400.0;
+
+/// Consecutive over-threshold reports before a player is corrected. One
+/// reading can be a coarse timestamp or a momentary stall; two in a row is a
+/// device that is genuinely adrift.
+pub const YOUTUBE_RESYNC_CONFIRMATIONS: u32 = 2;
+
+/// Minimum gap between corrections for the same device.
+///
+/// Correcting a player pauses, seeks and restarts it, which itself takes it
+/// out of position for a second or two. Without a cooldown a device that
+/// cannot keep up — a television browser, say — corrects itself continuously
+/// and never plays anything.
+pub const YOUTUBE_RESYNC_COOLDOWN_NS: u64 = 10_000_000_000;
+
+/// How far ahead a mid-playback correction is scheduled.
+///
+/// Short, because the device is stopped for this long while it waits: the
+/// two-second lead used to start a room from rest would be a visible stall.
+/// Long enough that the seek has a chance to complete first.
+pub const YOUTUBE_CORRECTION_LEAD_NS: u64 = 500_000_000;
+
 /// One outbound frame on a client's socket.
 #[derive(Debug, Clone)]
 pub enum OutFrame {
@@ -52,6 +79,12 @@ pub struct Client {
     /// milliseconds. Learned from what the player actually does rather than
     /// assumed (specification section 12.2, step 9).
     pub youtube_start_latency_ms: f64,
+    /// Consecutive reports where this player was beyond the drift threshold.
+    pub youtube_drift_strikes: u32,
+    /// Coordinator time this device was last corrected, if it ever has been.
+    /// `None` rather than zero so a device is not held off by the cooldown
+    /// merely because the coordinator started recently.
+    pub youtube_corrected_ns: Option<u64>,
 }
 
 /// One room.
@@ -79,6 +112,10 @@ pub struct Room {
     /// carries the measurements rather than only the compensation they
     /// produced.
     pub last_calibration: Option<CalibrationResult>,
+    /// Counter for YouTube rendezvous messages, independent of the transport
+    /// epoch so a single device can be corrected without telling the whole
+    /// room its timeline changed.
+    rendezvous_epoch: u64,
     start_lead_ns: u64,
     max_clients: usize,
 }
@@ -96,6 +133,7 @@ impl Room {
             stream: None,
             calibration: None,
             last_calibration: None,
+            rendezvous_epoch: 0,
             start_lead_ns,
             max_clients,
         }
@@ -131,7 +169,14 @@ impl Room {
         };
         self.clients.insert(
             client_id.clone(),
-            Client { info, ready_media_id: None, tx, youtube_start_latency_ms: DEFAULT_YOUTUBE_START_LATENCY_MS },
+            Client {
+                info,
+                ready_media_id: None,
+                tx,
+                youtube_start_latency_ms: DEFAULT_YOUTUBE_START_LATENCY_MS,
+                youtube_drift_strikes: 0,
+                youtube_corrected_ns: None,
+            },
         );
         if self.owner.is_none() {
             self.owner = Some(client_id);
@@ -346,6 +391,69 @@ impl Room {
     /// This device's learned YouTube start latency, in milliseconds.
     pub fn youtube_start_latency_ms(&self, client_id: &str) -> f64 {
         self.clients.get(client_id).map(|c| c.youtube_start_latency_ms).unwrap_or(DEFAULT_YOUTUBE_START_LATENCY_MS)
+    }
+
+    /// A device's YouTube position error against the room timeline, in
+    /// milliseconds. `None` unless it is actually playing and has reported a
+    /// position — a buffering or paused player is behind by definition and
+    /// correcting it would only interrupt it again.
+    pub fn youtube_drift_ms(&self, client_id: &str, now_ns: u64) -> Option<f64> {
+        let client = self.clients.get(client_id)?;
+        let state = client.info.youtube.as_ref()?;
+        if state.player_state != "playing" {
+            return None;
+        }
+        let expected_s = self.transport.position_at(now_ns) as f64 / 1e9;
+        Some((state.current_time_s - expected_s) * 1000.0)
+    }
+
+    /// Whether this device has drifted enough, for long enough, to be worth
+    /// interrupting.
+    ///
+    /// Deliberately conservative. Correcting a player pauses, seeks and
+    /// restarts it, so a correction that fires too readily costs more than the
+    /// drift it fixes — and a device that cannot keep up would otherwise
+    /// restart itself forever.
+    pub fn youtube_needs_correction(&mut self, client_id: &str, now_ns: u64) -> bool {
+        if self.transport.mode != SourceMode::Youtube || self.transport.state != TransportState::Playing {
+            self.reset_youtube_strikes(client_id);
+            return false;
+        }
+        let Some(drift) = self.youtube_drift_ms(client_id, now_ns) else {
+            self.reset_youtube_strikes(client_id);
+            return false;
+        };
+        let Some(client) = self.clients.get_mut(client_id) else { return false };
+
+        if drift.abs() <= YOUTUBE_RESYNC_THRESHOLD_MS {
+            client.youtube_drift_strikes = 0;
+            return false;
+        }
+        client.youtube_drift_strikes += 1;
+        if client.youtube_drift_strikes < YOUTUBE_RESYNC_CONFIRMATIONS {
+            return false;
+        }
+        // Still adrift but corrected recently: stay armed rather than clearing
+        // the strikes, so the correction happens as soon as it is allowed.
+        if client.youtube_corrected_ns.is_some_and(|last| now_ns < last + YOUTUBE_RESYNC_COOLDOWN_NS) {
+            return false;
+        }
+        client.youtube_drift_strikes = 0;
+        client.youtube_corrected_ns = Some(now_ns);
+        true
+    }
+
+    fn reset_youtube_strikes(&mut self, client_id: &str) {
+        if let Some(client) = self.clients.get_mut(client_id) {
+            client.youtube_drift_strikes = 0;
+        }
+    }
+
+    /// A fresh rendezvous epoch. Separate from the transport epoch because
+    /// correcting one device must not look like a room-wide transport change.
+    pub fn next_rendezvous_epoch(&mut self) -> u64 {
+        self.rendezvous_epoch += 1;
+        self.rendezvous_epoch
     }
 
     /// Sets a device's calibration-derived compensation.
@@ -788,5 +896,125 @@ mod tests {
         let snapshot = room.snapshot(MediaManifest::default());
         assert_eq!(snapshot.start_lead_ms, 2000.0);
         assert_eq!(snapshot.room_code, "ABC123");
+    }
+
+    /// A YouTube room, playing, with `id` reporting itself `position_s` in.
+    fn youtube_room(id: &str) -> Room {
+        let mut room = room();
+        add(&mut room, id, Role::Speaker);
+        room.set_clock_report(id, stable_clock());
+        room.select_source(SourceMode::Youtube, None, Some("QpJD4K_PLSI".into()), 0);
+        room.play(0, false).expect("youtube play needs no readiness barrier");
+        room
+    }
+
+    /// Reports `id` as `state`, `offset_s` away from where the room expects it.
+    fn report(room: &mut Room, id: &str, state: &str, now_ns: u64, offset_s: f64) {
+        let position_s = expected_s(room, now_ns) + offset_s;
+        room.set_youtube_state(
+            id,
+            YoutubeState {
+                video_id: "QpJD4K_PLSI".into(),
+                player_state: state.into(),
+                current_time_s: position_s,
+                duration_s: 327.0,
+                buffered_fraction: 1.0,
+                ready: true,
+                observed_start_latency_ms: None,
+            },
+        );
+    }
+
+    /// Position, in seconds, the room expects at `now_ns`.
+    fn expected_s(room: &Room, now_ns: u64) -> f64 {
+        room.transport.position_at(now_ns) as f64 / 1e9
+    }
+
+    #[test]
+    fn one_over_threshold_report_is_not_enough_to_interrupt_a_player() {
+        let mut room = youtube_room("a");
+        let now = LEAD + 5_000_000_000;
+
+        // `getCurrentTime()` is coarse enough that a single bad reading means
+        // very little, and a correction costs a pause and a seek.
+        report(&mut room, "a", "playing", now, 1.0);
+        assert!(!room.youtube_needs_correction("a", now));
+        report(&mut room, "a", "playing", now, 1.0);
+        assert!(room.youtube_needs_correction("a", now));
+    }
+
+    #[test]
+    fn a_reading_back_in_position_clears_the_strikes() {
+        let mut room = youtube_room("a");
+        let now = LEAD + 5_000_000_000;
+
+        report(&mut room, "a", "playing", now, 1.0);
+        assert!(!room.youtube_needs_correction("a", now));
+        report(&mut room, "a", "playing", now, 0.0);
+        assert!(!room.youtube_needs_correction("a", now));
+        // Back to a single strike, not the second one.
+        report(&mut room, "a", "playing", now, 1.0);
+        assert!(!room.youtube_needs_correction("a", now));
+    }
+
+    #[test]
+    fn a_device_that_cannot_keep_up_is_corrected_at_most_once_per_cooldown() {
+        let mut room = youtube_room("a");
+        let mut now = LEAD + 5_000_000_000;
+        let mut corrections = 0;
+
+        // A television browser that is permanently a second behind: without a
+        // cooldown this restarts itself on every report and never plays.
+        for _ in 0..200 {
+            report(&mut room, "a", "playing", now, -1.0);
+            if room.youtube_needs_correction("a", now) {
+                corrections += 1;
+            }
+            now += 1_000_000_000;
+        }
+        assert!(corrections <= 21, "corrected {corrections} times in 200 seconds");
+        assert!(corrections >= 18, "a permanently adrift device should still be corrected: {corrections}");
+    }
+
+    #[test]
+    fn correcting_a_device_does_not_move_the_room_timeline() {
+        let mut room = youtube_room("a");
+        add(&mut room, "b", Role::Speaker);
+        room.set_clock_report("b", stable_clock());
+        let now = LEAD + 5_000_000_000;
+        let before = room.transport.clone();
+
+        report(&mut room, "a", "playing", now, 1.0);
+        assert!(!room.youtube_needs_correction("a", now));
+        report(&mut room, "a", "playing", now, 1.0);
+        assert!(room.youtube_needs_correction("a", now));
+
+        // The whole point: one device's trouble must not become everyone's.
+        // Moving the anchor here pushed it `start_lead_ns` into the future,
+        // which made every device that *was* in position look a full two
+        // seconds early — and each of those then asked to be corrected too.
+        assert_eq!(room.transport, before, "a correction must leave the timeline alone");
+        assert_eq!(expected_s(&room, now), before.position_at(now) as f64 / 1e9);
+    }
+
+    #[test]
+    fn a_paused_or_buffering_player_is_left_alone() {
+        let mut room = youtube_room("a");
+        let now = LEAD + 5_000_000_000;
+
+        // Behind by definition, and interrupting it would only set it back.
+        for state in ["paused", "buffering", "cued", "unstarted"] {
+            report(&mut room, "a", state, now, -5.0);
+            assert!(!room.youtube_needs_correction("a", now), "{state} should not be corrected");
+            report(&mut room, "a", state, now, -5.0);
+            assert!(!room.youtube_needs_correction("a", now), "{state} should not be corrected");
+        }
+    }
+
+    #[test]
+    fn rendezvous_epochs_are_distinct_so_a_client_never_ignores_one() {
+        let mut room = youtube_room("a");
+        let first = room.next_rendezvous_epoch();
+        assert!(room.next_rendezvous_epoch() > first);
     }
 }
