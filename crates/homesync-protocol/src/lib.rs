@@ -526,17 +526,18 @@ pub struct CalibrationMeasurement {
     /// Friendly name at the time of measurement.
     pub name: String,
     /// Median acoustic arrival delay relative to the scheduled instant, in
-    /// milliseconds.
-    pub measured_delay_ms: f64,
+    /// milliseconds. `None` when nothing was heard clearly enough to trust —
+    /// which is a real outcome, not an error, and must be reported as one.
+    pub measured_delay_ms: Option<f64>,
     /// Spread across repetitions, in milliseconds. A large value means the
     /// device's latency is not stable and no fixed compensation will hold.
-    pub deviation_ms: f64,
+    pub deviation_ms: Option<f64>,
     /// Repetitions kept.
     pub accepted: u32,
     /// Repetitions discarded.
     pub rejected: u32,
     /// The device's latency with no compensation at all, in milliseconds.
-    pub intrinsic_latency_ms: f64,
+    pub intrinsic_latency_ms: Option<f64>,
     /// Compensation the coordinator applied, in milliseconds.
     pub applied_compensation_ms: f64,
     /// Whether the repetitions agreed closely enough to trust.
@@ -913,6 +914,26 @@ mod tests {
             detail: String::new(),
         }));
         roundtrip(Payload::CalibrationResult(CalibrationResult::default()));
+        // A device that was never heard: every measurement is absent, and the
+        // result must still survive a round trip. `f64::NAN` would serialise
+        // to `null` and then fail to parse back, so these fields are options.
+        roundtrip(Payload::CalibrationResult(CalibrationResult {
+            session_id: "s".into(),
+            applied: false,
+            measurements: vec![CalibrationMeasurement {
+                client_id: "c1".into(),
+                name: "Kitchen".into(),
+                measured_delay_ms: None,
+                deviation_ms: None,
+                accepted: 0,
+                rejected: 3,
+                intrinsic_latency_ms: None,
+                applied_compensation_ms: 0.0,
+                stable: false,
+                reflective_room: false,
+            }],
+            detail: "nothing heard".into(),
+        }));
         roundtrip(Payload::Play(PlayCommand { force: true }));
         roundtrip(Payload::Pause);
         roundtrip(Payload::Seek(Seek { position_ns: 5 }));
