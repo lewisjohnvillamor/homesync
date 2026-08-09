@@ -526,7 +526,7 @@ fn send_youtube_rendezvous(app: &App, room: &mut crate::room::Room, now_ns: u64,
         None => room.receiver_ids(),
     };
     for client_id in targets {
-        let start_latency_ms = room.youtube_start_latency_ms(&client_id);
+        let start_latency_ms = room.youtube_lead_ms(&client_id);
         room.send_to(
             &client_id,
             Payload::YoutubeRendezvous(YoutubeRendezvous {

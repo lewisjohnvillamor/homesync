@@ -394,8 +394,17 @@ impl Room {
     }
 
     /// This device's learned YouTube start latency, in milliseconds.
-    pub fn youtube_start_latency_ms(&self, client_id: &str) -> f64 {
-        self.clients.get(client_id).map(|c| c.youtube_start_latency_ms).unwrap_or(DEFAULT_YOUTUBE_START_LATENCY_MS)
+    /// How much earlier than the meeting instant this device should call
+    /// `playVideo()`, in milliseconds.
+    ///
+    /// Its learned player start latency plus the room's compensation for it.
+    /// Manual and acoustic compensation mean exactly the same thing here as in
+    /// the scheduled-audio path — emit sound this much earlier — and leaving
+    /// them out meant the slider did nothing at all in YouTube mode, which is
+    /// worse than not offering it.
+    pub fn youtube_lead_ms(&self, client_id: &str) -> f64 {
+        let Some(client) = self.clients.get(client_id) else { return DEFAULT_YOUTUBE_START_LATENCY_MS };
+        client.youtube_start_latency_ms + client.info.manual_offset_ms + client.info.acoustic_offset_ms
     }
 
     /// A device's YouTube position error against the room timeline, in
@@ -844,7 +853,7 @@ mod tests {
     fn youtube_start_latency_is_learned_and_bounded() {
         let mut room = room();
         add(&mut room, "a", Role::Speaker);
-        assert_eq!(room.youtube_start_latency_ms("a"), DEFAULT_YOUTUBE_START_LATENCY_MS);
+        assert_eq!(room.youtube_lead_ms("a"), DEFAULT_YOUTUBE_START_LATENCY_MS);
 
         let report = |ms: f64| YoutubeState {
             video_id: "dQw4w9WgXcQ".into(),
@@ -860,15 +869,11 @@ mod tests {
         for _ in 0..20 {
             room.set_youtube_state("a", report(120.0));
         }
-        assert!((room.youtube_start_latency_ms("a") - 120.0).abs() < 5.0);
+        assert!((room.youtube_lead_ms("a") - 120.0).abs() < 5.0);
 
         // A single absurd observation — an ad, a stall — must not poison it.
         room.set_youtube_state("a", report(60_000.0));
-        assert!(
-            room.youtube_start_latency_ms("a") < 1_100.0,
-            "one outlier moved the estimate to {}",
-            room.youtube_start_latency_ms("a")
-        );
+        assert!(room.youtube_lead_ms("a") < 1_100.0, "one outlier moved the estimate to {}", room.youtube_lead_ms("a"));
     }
 
     #[test]

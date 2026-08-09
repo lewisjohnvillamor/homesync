@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseVideoId, isUnembeddable } from '../src/youtube.js';
+import { parseVideoId, isUnembeddable, rendezvousPlan } from '../src/youtube.js';
 
 test('accepts a bare video id', () => {
   assert.equal(parseVideoId('dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
@@ -52,4 +52,40 @@ test('rejects things that are not video ids', () => {
   // A well-formed id on somebody else's site is not a YouTube video.
   assert.equal(parseVideoId('https://example.com/watch?v=dQw4w9WgXcQ'), null);
   assert.equal(parseVideoId('https://evil.example/dQw4w9WgXcQ'), null);
+});
+
+test('waits when the meeting instant is still ahead', () => {
+  // Meet in 2 s, and this player takes 300 ms to start: call play in 1.7 s and
+  // seek straight to the target, because nothing has elapsed yet.
+  const plan = rendezvousPlan({ startNs: 2e9, nowNs: 0, leadMs: 300, targetPositionS: 60 });
+  assert.equal(plan.immediate, false);
+  assert.equal(plan.delayMs, 1700);
+  assert.equal(plan.seekTargetS, 60);
+});
+
+test('a late rendezvous seeks forward by exactly what will have elapsed', () => {
+  // The meeting instant passed 1 s ago and the player still needs 300 ms to
+  // start, so sound emerges 1.3 s after the target — seek 1.3 s in.
+  //
+  // The old code added the lead a second time, landing the device 300 ms
+  // ahead of everyone else: silent in review, a flam in the room, and on a
+  // drift correction it re-triggered the very drift it was fixing.
+  const plan = rendezvousPlan({ startNs: 0, nowNs: 1e9, leadMs: 300, targetPositionS: 60 });
+  assert.equal(plan.immediate, true);
+  assert.equal(plan.seekTargetS, 61.3);
+});
+
+test('a device that emits early is told to call play late', () => {
+  // Negative lead is what manual compensation below zero means. Clamping it
+  // to zero, as the old code did, made the slider a no-op in that direction.
+  const plan = rendezvousPlan({ startNs: 1e9, nowNs: 0, leadMs: -200, targetPositionS: 10 });
+  assert.equal(plan.immediate, false);
+  assert.equal(plan.delayMs, 1200);
+});
+
+test('the seek target never runs backwards', () => {
+  // Exactly on time: no lateness to make up.
+  const plan = rendezvousPlan({ startNs: 300e6, nowNs: 0, leadMs: 300, targetPositionS: 42 });
+  assert.equal(plan.delayMs, 0);
+  assert.equal(plan.seekTargetS, 42);
 });
