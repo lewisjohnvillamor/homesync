@@ -76,11 +76,22 @@ reasons are in [`docs/protocol.md`](docs/protocol.md).
 Runs formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **135 Rust tests.** Clock estimation against synthetic latency, jitter, drift
+- **137 Rust tests.** Clock estimation against synthetic latency, jitter, drift
   and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and clock skew; room state
   machine.
+- **Two integration tests** drive the real coordinator binary over a socket
+  with fake devices:
+  - *Calibration loop* — a fake microphone uploads recordings in which the
+    chirp sits at a **known** delay, so the test asserts against ground truth:
+    40 ms and 180 ms are measured, solved to −140 ms of compensation, and
+    applied to the room. A third device nobody heard is reported as
+    unmeasured rather than guessed.
+  - *Live stream* — a receiver decodes 400 consecutive frames and checks
+    contiguous sequence numbers, exactly 10 ms presentation spacing, no
+    re-anchoring, and a lead over real time that does not shrink. Reverting
+    the capture-pacing fix makes it fail, so it has teeth.
 - **47 browser tests.** `web/test/clock.test.mjs` mirrors the Rust clock tests
   case for case, and `web/test/live.test.mjs` mirrors the playout buffer tests,
   because both algorithms exist twice and must not drift apart.
@@ -114,15 +125,17 @@ This is the part to read before trusting anything.
 - Clock exchange and estimator, in Rust and in the browser.
 - Controlled-audio scheduling: two headless browsers join, verify, and schedule
   against one instant with zero JS errors.
-- Live PCM: frames flow, buffers prime, underruns settle to zero, streams stop
-  cleanly.
+- Live PCM: 400 consecutive frames arrive contiguous and exactly 10 ms apart,
+  holding a 456 ms lead against an expected 460 ms with +11 ms of drift across
+  the run. Buffers prime and underruns settle to zero.
 - YouTube: the rendezvous reaches every device and the transport converges.
 - Checkpoint 1 passes headlessly with ~0.01 ms of cross-client disagreement.
 
 ### Implemented but never run against reality
 
-- **Acoustic calibration has never heard a real microphone.** The DSP is
-  heavily tested against synthetic signals — that is not the same thing.
+- **Acoustic calibration has never heard a real microphone.** The DSP and the
+  whole coordinator loop are tested against synthetic recordings with known
+  ground truth — that is not the same as a speaker, a room and a phone.
 - **WASAPI loopback capture has never been executed.** It compiles for Windows
   and that is all anyone knows. Use the synthetic source to exercise live mode
   on any platform.

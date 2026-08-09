@@ -11,7 +11,10 @@ cargo fmt --all --check
 echo "==> cargo clippy"
 cargo clippy --all-targets -- -D warnings
 
-echo "==> cargo test"
+echo "==> cargo test (unit and integration)"
+# The integration tests drive the real binary over a socket, so the binary has
+# to exist before they run.
+cargo build --quiet
 cargo test
 
 if command -v node >/dev/null 2>&1; then
