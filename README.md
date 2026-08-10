@@ -39,13 +39,18 @@ before trusting it as a receiver.
 
 | Mode | What it does | Timing story |
 | --- | --- | --- |
-| **Local audio file** | Every receiver preloads, verifies and schedules the same file | Guaranteed: one timeline, sample-scheduled |
+| **Music** | Every receiver preloads, verifies and schedules the same file | Guaranteed: one timeline, sample-scheduled |
 | **YouTube together** | Every device runs its own YouTube player; HomeSync distributes a position and an instant | Best effort: learned per-device start latency, drift re-convergence |
-| **Live system audio** | The host captures system audio and streams timestamped PCM | Best effort: buffered playout, host video will lead the room |
 
-Local audio is the reference mode and the only one with a guaranteed timing
-story. The others are best-effort *by construction*, not by omission — the
-reasons are in [`docs/protocol.md`](docs/protocol.md).
+Music is the reference mode and the only one with a guaranteed timing story.
+YouTube is best-effort *by construction*, not by omission — the reasons are in
+[`docs/protocol.md`](docs/protocol.md).
+
+A third mode, **live system audio**, exists in the protocol and the
+coordinator: the host captures its own output and streams timestamped PCM,
+which receivers still know how to play. The interface offers no way to start
+one, because the Windows capture path has never been run against real
+hardware and an unverified mode does not belong next to two that work.
 
 ## What it does
 
@@ -157,8 +162,9 @@ This is the part to read before trusting anything.
   whole coordinator loop are tested against synthetic recordings with known
   ground truth — that is not the same as a speaker, a room and a phone.
 - **WASAPI loopback capture has never been executed.** It compiles for Windows
-  and that is all anyone knows. Use the synthetic source to exercise live mode
-  on any platform.
+  and that is all anyone knows. This is why live system audio no longer has a
+  button: the integration test still exercises the streaming path against a
+  synthetic source, but nothing has captured real audio.
 - **The webOS receiver has never been packaged or installed on a television.**
 - **Nothing has been heard by a human.** Headless Chromium renders into a null
   audio sink: it can prove the client schedules correctly, never that a room
