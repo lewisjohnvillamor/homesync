@@ -827,6 +827,53 @@ input[type="range"]:disabled {
   border-radius: 999px;
 }
 
+.folders {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 10px 14px;
+}
+
+.folders > summary {
+  cursor: pointer;
+  font-size: var(--step--1);
+  font-weight: 550;
+  color: var(--text-dim);
+}
+
+.folders[open] > summary {
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+.folders .field-row {
+  margin-top: 10px;
+}
+
+.folder-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.folder-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: var(--step--1);
+}
+
+.folder-list span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mode-body {
   display: grid;
   gap: 12px;

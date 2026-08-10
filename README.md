@@ -42,8 +42,14 @@ before trusting it as a receiver.
 | **Music** | Every receiver preloads, verifies and schedules the same file, and follows a queue | Guaranteed: one timeline, sample-scheduled |
 | **YouTube together** | Every device runs its own YouTube player; HomeSync distributes a position and an instant | Best effort: learned per-device start latency, drift re-convergence |
 
-Music takes a queue: tracks play in order and the coordinator advances on its
-own. Receivers decode the next track while the current one plays, so the gap
+Music takes a queue: tracks play in order, any entry can be played or moved,
+and the coordinator advances on its own.
+
+The library is a set of folders rather than one hardcoded directory. Repeat
+`--media-dir` for several, or add one from the interface while the coordinator
+is running — a drive plugged in after startup is the ordinary case, and
+restarting to see it would drop every device out of the room. **Rescan** picks
+up whatever changed. Receivers decode the next track while the current one plays, so the gap
 between them is the ordinary scheduling lead rather than a download.
 
 Each device also has its own five-band equaliser, which shapes only that

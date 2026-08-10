@@ -17,10 +17,12 @@ pub struct Config {
     #[arg(long, default_value_t = 8080, env = "HOMESYNC_PORT")]
     pub port: u16,
 
-    /// Directory scanned for playable audio files at startup. The built-in
-    /// click track is always available regardless of this setting.
-    #[arg(long, default_value = "media", env = "HOMESYNC_MEDIA_DIR")]
-    pub media_dir: PathBuf,
+    /// Directory scanned for playable audio files. Repeat the flag for several
+    /// — a music folder and a mounted drive, say — and they are scanned in the
+    /// order given. Folders can also be added later from the interface without
+    /// restarting. The built-in click track is always available regardless.
+    #[arg(long = "media-dir", default_values_os_t = vec![PathBuf::from("media")], env = "HOMESYNC_MEDIA_DIR")]
+    pub media_dirs: Vec<PathBuf>,
 
     /// How far ahead of "now" playback starts are scheduled, in milliseconds.
     /// Must exceed the worst-case download-free scheduling path: control frame
