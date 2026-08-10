@@ -49,7 +49,15 @@ The library is a set of folders rather than one hardcoded directory. Repeat
 `--media-dir` for several, or add one from the interface while the coordinator
 is running — a drive plugged in after startup is the ordinary case, and
 restarting to see it would drop every device out of the room. **Rescan** picks
-up whatever changed. Receivers decode the next track while the current one plays, so the gap
+up whatever changed.
+
+A track can also be fetched from a URL. The coordinator downloads it once and
+then serves it like any local file, so every receiver preloads the same
+verified bytes and the remote host is asked for it once rather than once per
+device. An endless radio stream is refused, and that is not a gap: Music mode
+rests on every device holding the same decoded buffer and starting it at an
+agreed instant, and a stream has no length, no hash and nothing to preload.
+Re-broadcasting one is what live system audio is for. Receivers decode the next track while the current one plays, so the gap
 between them is the ordinary scheduling lead rather than a download.
 
 Each device also has its own five-band equaliser, which shapes only that

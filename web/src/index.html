@@ -133,6 +133,19 @@
                 <button id="folder-add" class="btn">Add</button>
                 <button id="folder-rescan" class="btn">Rescan</button>
               </div>
+              <div class="field-row">
+                <label class="field grow">
+                  <span>Or fetch a track from a URL</span>
+                  <input id="fetch-input" autocomplete="off" spellcheck="false" placeholder="https://example.com/song.flac" />
+                </label>
+                <button id="fetch-add" class="btn">Fetch</button>
+              </div>
+              <p class="note">
+                A <em>file</em> at a URL is downloaded once by the coordinator and
+                then served like any local track, so every device preloads the same
+                verified bytes. An endless radio stream cannot work this way — there
+                is no length to schedule and nothing to preload.
+              </p>
               <p id="folder-note" class="note"></p>
             </details>
           </div>

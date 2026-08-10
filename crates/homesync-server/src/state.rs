@@ -42,6 +42,13 @@ pub struct App {
     pub profiles: ProfileStore,
 }
 
+/// Ceiling on a fetched file.
+///
+/// Every receiver decodes the whole thing into memory — roughly 23 MB per
+/// minute of audio at 48 kHz stereo — so the limit is really about what a
+/// television browser can hold, not about disk.
+pub const MAX_FETCH_BYTES: u64 = 300_000_000;
+
 impl App {
     /// The catalogue as published to clients.
     pub fn media_manifest(&self) -> homesync_protocol::MediaManifest {
@@ -89,6 +96,70 @@ impl App {
     pub fn remove_media_root(&self, root: &std::path::Path) {
         self.media_roots.lock().expect("media roots").retain(|r| r != root);
         self.rescan_media();
+    }
+
+    /// Downloads a track from a URL into the library.
+    ///
+    /// Fetched once, by the coordinator, and then served like any local file.
+    /// That is the point: every receiver preloads the same verified bytes from
+    /// here, so the guaranteed-timing path is unchanged and the remote host is
+    /// asked for the file once instead of once per device.
+    ///
+    /// An endless stream is deliberately not supported. Music mode rests on
+    /// every device holding the same decoded buffer and starting it at an
+    /// agreed instant; a stream has no length, no hash and nothing to preload,
+    /// so there is nothing to schedule. The size cap is what stops one being
+    /// pulled forever.
+    pub async fn fetch_media(&self, url: &str, dir: &std::path::Path) -> Result<String, String> {
+        let parsed = reqwest::Url::parse(url).map_err(|_| "that is not a URL".to_string())?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err("only http and https URLs can be fetched".into());
+        }
+
+        let name = parsed
+            .path_segments()
+            .and_then(|mut s| s.next_back())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "download".to_string());
+        let name = crate::media::safe_download_name(&name);
+        if !crate::media::has_audio_extension(std::path::Path::new(&name)) {
+            return Err("that URL does not end in an audio file this build can decode".into());
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let response = client.get(parsed).send().await.map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("the server answered {}", response.status()));
+        }
+        if let Some(len) = response.content_length() {
+            if len > MAX_FETCH_BYTES {
+                return Err(format!(
+                    "that file is {} MB; the limit is {} MB",
+                    len / 1_000_000,
+                    MAX_FETCH_BYTES / 1_000_000
+                ));
+            }
+        }
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+        // Checked again after the fact: `content-length` is a claim, and a
+        // chunked response does not make one at all.
+        if bytes.len() as u64 > MAX_FETCH_BYTES {
+            return Err(format!("that file is larger than the {} MB limit", MAX_FETCH_BYTES / 1_000_000));
+        }
+
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let path = dir.join(&name);
+        std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+
+        // The download folder becomes a root the first time it is used, so the
+        // file appears in the catalogue like anything else on disk.
+        self.add_media_root(dir.to_path_buf());
+        self.rescan_media();
+        Ok(name)
     }
 
     /// Rebuilds the catalogue from the current roots.

@@ -24,6 +24,12 @@ pub struct Config {
     #[arg(long = "media-dir", default_values_os_t = vec![PathBuf::from("media")], env = "HOMESYNC_MEDIA_DIR")]
     pub media_dirs: Vec<PathBuf>,
 
+    /// Where tracks fetched from a URL are written. Becomes a media root the
+    /// first time one is fetched, so downloads appear in the library like any
+    /// other file on disk.
+    #[arg(long, default_value = "homesync-downloads", env = "HOMESYNC_DOWNLOAD_DIR")]
+    pub download_dir: PathBuf,
+
     /// How far ahead of "now" playback starts are scheduled, in milliseconds.
     /// Must exceed the worst-case download-free scheduling path: control frame
     /// delivery plus one audio callback on the slowest receiver.
