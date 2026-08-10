@@ -57,6 +57,12 @@ pub const HEALTH_DRIFT_WARN_MS: f64 = 50.0;
 /// Timeline error at which a device is not really playing with the others.
 pub const HEALTH_DRIFT_BAD_MS: f64 = 250.0;
 
+/// How long after a start the room re-anchors to what devices actually reached.
+///
+/// Long enough for every player to have begun and reported once, short enough
+/// that the first correction has not already fired.
+pub const YOUTUBE_SETTLE_NS: u64 = 6_000_000_000;
+
 /// How far ahead a mid-playback correction is scheduled.
 ///
 /// Short, because the device is stopped for this long while it waits: the
@@ -99,6 +105,10 @@ pub struct Client {
     pub youtube_start_latency_ms: f64,
     /// Consecutive reports where this player was beyond the drift threshold.
     pub youtube_drift_strikes: u32,
+    /// Coordinator time this device's YouTube position was last reported.
+    /// Needed to age a report forward: a position from two seconds ago is two
+    /// seconds stale, and comparing it against "now" invents drift.
+    pub youtube_reported_ns: Option<u64>,
     /// Coordinator time this device was last corrected, if it ever has been.
     /// `None` rather than zero so a device is not held off by the cooldown
     /// merely because the coordinator started recently.
@@ -146,6 +156,9 @@ pub struct Room {
     /// epoch so a single device can be corrected without telling the whole
     /// room its timeline changed.
     rendezvous_epoch: u64,
+    /// Transport epoch whose timeline has already been re-anchored onto the
+    /// devices. Once per start, never repeatedly.
+    youtube_anchored_epoch: Option<u64>,
     start_lead_ns: u64,
     max_clients: usize,
 }
@@ -167,6 +180,7 @@ impl Room {
             queue_index: 0,
             durations_ns: BTreeMap::new(),
             rendezvous_epoch: 0,
+            youtube_anchored_epoch: None,
             start_lead_ns,
             max_clients,
         }
@@ -232,6 +246,7 @@ impl Room {
                 tx,
                 youtube_start_latency_ms: DEFAULT_YOUTUBE_START_LATENCY_MS,
                 youtube_drift_strikes: 0,
+                youtube_reported_ns: None,
                 youtube_corrected_ns: None,
             },
         );
@@ -533,6 +548,18 @@ impl Room {
 
     /// Records a client's YouTube player state and folds any newly observed
     /// start latency into that device's moving average.
+    pub fn set_youtube_state_at(&mut self, client_id: &str, state: YoutubeState, now_ns: u64) {
+        if let Some(client) = self.clients.get_mut(client_id) {
+            client.youtube_reported_ns = Some(now_ns);
+        }
+        self.set_youtube_state(client_id, state);
+    }
+
+    #[cfg(test)]
+    pub fn set_youtube_state_at_for_test(&mut self, client_id: &str, state: YoutubeState, now_ns: u64) {
+        self.set_youtube_state_at(client_id, state, now_ns);
+    }
+
     pub fn set_youtube_state(&mut self, client_id: &str, state: YoutubeState) {
         let Some(client) = self.clients.get_mut(client_id) else { return };
         if let Some(observed) = state.observed_start_latency_ms {
@@ -564,13 +591,9 @@ impl Room {
     /// position — a buffering or paused player is behind by definition and
     /// correcting it would only interrupt it again.
     pub fn youtube_drift_ms(&self, client_id: &str, now_ns: u64) -> Option<f64> {
-        let client = self.clients.get(client_id)?;
-        let state = client.info.youtube.as_ref()?;
-        if state.player_state != "playing" {
-            return None;
-        }
+        let position_s = self.youtube_position_now_s(client_id, now_ns)?;
         let expected_s = self.transport.position_at(now_ns) as f64 / 1e9;
-        Some((state.current_time_s - expected_s) * 1000.0)
+        Some((position_s - expected_s) * 1000.0)
     }
 
     /// Whether this device has drifted enough, for long enough, to be worth
@@ -629,6 +652,74 @@ impl Room {
         if let Some(client) = self.clients.get_mut(client_id) {
             client.youtube_drift_strikes = 0;
         }
+    }
+
+    /// A device's estimated YouTube position now, in seconds.
+    ///
+    /// The reported figure aged forward by how long ago it was reported.
+    /// Reports arrive every couple of seconds, so using one raw is a couple of
+    /// seconds of drift that nobody actually has.
+    fn youtube_position_now_s(&self, client_id: &str, now_ns: u64) -> Option<f64> {
+        let client = self.clients.get(client_id)?;
+        let state = client.info.youtube.as_ref()?;
+        if state.player_state != "playing" {
+            return None;
+        }
+        let reported_at = client.youtube_reported_ns?;
+        let age_s = now_ns.saturating_sub(reported_at) as f64 / 1e9;
+        Some(state.current_time_s + age_s)
+    }
+
+    /// Re-anchors the room timeline onto what the players actually reached.
+    ///
+    /// A YouTube room starts from a free-running anchor: "at coordinator time
+    /// T the video is at position P". No player ever gets there. Each one loses
+    /// its own start latency and whatever buffering it did, so the whole room
+    /// settles a second or so *behind* a timeline that nothing can reach — and
+    /// then every device is judged against it, found wanting, and corrected on
+    /// a treadmill. A diagnostics export from a two-device room showed exactly
+    /// that: both devices "behind", 1.4 s and 734 ms, while sitting only 700 ms
+    /// apart from each other.
+    ///
+    /// So once the room has settled, the timeline moves to the median of what
+    /// the devices are actually playing. The epoch is deliberately *not* bumped:
+    /// this corrects the coordinator's own bookkeeping, and no device needs to
+    /// do anything about it. After this, drift means "out of step with the rest
+    /// of the room", which is the only version of it a listener can hear.
+    pub fn youtube_reanchor(&mut self, now_ns: u64) -> Option<f64> {
+        if self.transport.mode != SourceMode::Youtube || self.transport.state != TransportState::Playing {
+            return None;
+        }
+        if self.youtube_anchored_epoch == Some(self.transport.epoch) {
+            return None;
+        }
+        if now_ns < self.transport.anchor_server_ns.saturating_add(YOUTUBE_SETTLE_NS) {
+            return None;
+        }
+
+        let mut positions: Vec<f64> =
+            self.clients.keys().filter_map(|id| self.youtube_position_now_s(id, now_ns)).collect();
+        if positions.is_empty() {
+            return None;
+        }
+        positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // Median rather than mean: one device stuck on an advertisement would
+        // drag a mean far enough to make the whole room chase it.
+        let median = positions[positions.len() / 2];
+        let expected = self.transport.position_at(now_ns) as f64 / 1e9;
+        let shift = median - expected;
+
+        self.youtube_anchored_epoch = Some(self.transport.epoch);
+        if shift.abs() < 0.05 {
+            return None;
+        }
+        self.transport.anchor_media_ns = (median.max(0.0) * 1e9) as u64;
+        self.transport.anchor_server_ns = now_ns;
+        // Strikes were counted against the old, unreachable timeline.
+        for client in self.clients.values_mut() {
+            client.youtube_drift_strikes = 0;
+        }
+        Some(shift)
     }
 
     /// A plain-language reading of whether this room is actually in sync.
@@ -1188,7 +1279,7 @@ mod tests {
     /// Reports `id` as `state`, `offset_s` away from where the room expects it.
     fn report(room: &mut Room, id: &str, state: &str, now_ns: u64, offset_s: f64) {
         let position_s = expected_s(room, now_ns) + offset_s;
-        room.set_youtube_state(
+        room.set_youtube_state_at_for_test(
             id,
             YoutubeState {
                 video_id: "QpJD4K_PLSI".into(),
@@ -1199,6 +1290,7 @@ mod tests {
                 ready: true,
                 observed_start_latency_ms: None,
             },
+            now_ns,
         );
     }
 
@@ -1620,5 +1712,88 @@ mod tests {
         let (_, sender) = replaced.first().expect("one replaced tab");
         assert!(sender.send(OutFrame::Text("notice".into())).is_ok(), "the socket must still be reachable");
         assert!(rx1.try_recv().is_ok());
+    }
+
+    #[test]
+    fn the_room_moves_onto_its_devices_rather_than_the_other_way_round() {
+        // The shape of a real export: two devices playing happily within 700 ms
+        // of each other, both reported "behind" a timeline neither can reach.
+        let mut room = youtube_room("pc");
+        add(&mut room, "browser", Role::Speaker);
+        room.set_clock_report("browser", stable_clock());
+
+        let now = LEAD + YOUTUBE_SETTLE_NS + 1_000_000_000;
+        report(&mut room, "pc", "playing", now, -1.43);
+        report(&mut room, "browser", "playing", now, -0.73);
+
+        assert!(room.youtube_drift_ms("pc", now).unwrap() < -1_400.0, "both look badly behind first");
+        let shift = room.youtube_reanchor(now).expect("the room should move");
+        assert!(shift < 0.0, "the timeline was ahead of everything, so it moves back");
+
+        // After: the numbers describe the room rather than an unreachable
+        // clock. The devices are still 700 ms apart — that is real and audible
+        // — but neither is a second and a half out on its own.
+        let pc = room.youtube_drift_ms("pc", now).unwrap();
+        let browser = room.youtube_drift_ms("browser", now).unwrap();
+        assert!(pc.abs() < 800.0, "pc now {pc}");
+        assert!(browser.abs() < 800.0, "browser now {browser}");
+        assert!((browser - pc - 700.0).abs() < 20.0, "the real gap between them survives: {}", browser - pc);
+    }
+
+    #[test]
+    fn the_room_re_anchors_once_per_start_not_continuously() {
+        let mut room = youtube_room("a");
+        let now = LEAD + YOUTUBE_SETTLE_NS + 1_000_000_000;
+        report(&mut room, "a", "playing", now, -1.0);
+
+        assert!(room.youtube_reanchor(now).is_some());
+        // Chasing every report would make the timeline follow the slowest
+        // device down, forever.
+        report(&mut room, "a", "playing", now, -1.0);
+        assert_eq!(room.youtube_reanchor(now), None);
+    }
+
+    #[test]
+    fn a_room_that_has_just_started_is_left_alone() {
+        let mut room = youtube_room("a");
+        // Still inside the settling window: a player that has not begun yet
+        // would drag the whole room back to zero.
+        let early = LEAD + 1_000_000_000;
+        report(&mut room, "a", "playing", early, -1.0);
+        assert_eq!(room.youtube_reanchor(early), None);
+    }
+
+    #[test]
+    fn one_stalled_device_does_not_drag_the_room_back() {
+        let mut room = youtube_room("a");
+        for id in ["b", "c"] {
+            add(&mut room, id, Role::Speaker);
+            room.set_clock_report(id, stable_clock());
+        }
+        let now = LEAD + YOUTUBE_SETTLE_NS + 1_000_000_000;
+        report(&mut room, "a", "playing", now, -0.1);
+        report(&mut room, "b", "playing", now, -0.1);
+        // Stuck on an advertisement, forty seconds adrift.
+        report(&mut room, "c", "playing", now, -40.0);
+
+        room.youtube_reanchor(now);
+        // The median ignores it. A mean would have moved the room thirteen
+        // seconds and made the two healthy devices the outliers.
+        assert!(room.youtube_drift_ms("a", now).unwrap().abs() < 100.0);
+        assert!(room.youtube_drift_ms("c", now).unwrap() < -39_000.0);
+    }
+
+    #[test]
+    fn a_stale_report_is_aged_forward_rather_than_read_as_drift() {
+        let mut room = youtube_room("a");
+        let reported_at = LEAD + 5_000_000_000;
+        report(&mut room, "a", "playing", reported_at, 0.0);
+
+        // Two seconds later the player has kept playing. Comparing the old
+        // figure against the new "now" would invent two seconds of drift and
+        // trigger a correction on a device that is perfectly in step.
+        let now = reported_at + 2_000_000_000;
+        let drift = room.youtube_drift_ms("a", now).expect("drift");
+        assert!(drift.abs() < 50.0, "aged report should still read as in step: {drift}");
     }
 }

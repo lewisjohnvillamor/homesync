@@ -443,7 +443,8 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
         }),
 
         Payload::YoutubeState(state) => with_room(app, session, request_id, |app, session, room| {
-            room.set_youtube_state(&session.client_id, state);
+            let reported_at = app.now_ns();
+            room.set_youtube_state_at(&session.client_id, state, reported_at);
             room.dirty = true;
             // A player that has drifted beyond what a listener would tolerate
             // gets a fresh rendezvous rather than being left to wander.
@@ -644,6 +645,14 @@ pub fn flush_dirty_rooms(app: &App) {
         // timer per track: a timer would have to be cancelled on every pause,
         // seek and source change, and getting that wrong means a track that
         // advances while the room is paused.
+        // Once the players have settled, the room's own timeline moves onto
+        // what they actually reached. Before this, every device was measured
+        // against a position none of them could hit, so all of them read as
+        // "behind" and all of them were corrected forever.
+        if let Some(shift) = room.youtube_reanchor(now) {
+            tracing::info!(room = %room.code, shift_ms = shift * 1000.0, "re-anchored the room onto its devices");
+            room.broadcast(Payload::Transport(room.transport.clone()), now);
+        }
         if let Some(started) = room.advance_queue(now) {
             tracing::info!(room = %room.code, media = %started, "queue advanced");
             room.broadcast(Payload::Transport(room.transport.clone()), now);
