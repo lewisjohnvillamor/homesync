@@ -21,6 +21,16 @@ const REPORT_INTERVAL_MS = 2000;
  */
 const JOIN_REJECTIONS = new Set(['no_such_room', 'bad_secret', 'room_full']);
 
+/**
+ * The coordinator gave this device's seat to a newer tab on the same machine.
+ *
+ * Handled apart from the join rejections because it arrives *after* a
+ * successful join, and because reconnecting is not merely futile here — it
+ * would take the seat back and evict the other tab, leaving the two swapping
+ * places for as long as both are open.
+ */
+const REPLACED = 'device_replaced';
+
 /** Reconnect backoff bounds. */
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 10000;
@@ -194,6 +204,14 @@ export class Connection {
         this.onCalibration(envelope.type, envelope.payload);
         break;
       case 'error':
+        if (envelope.payload?.code === REPLACED) {
+          this.joined = false;
+          this.closedByUser = true;
+          this.#stopLoops();
+          this.socket?.close();
+          this.onJoinRejected(envelope.payload);
+          return;
+        }
         if (!this.joined && JOIN_REJECTIONS.has(envelope.payload?.code)) {
           // Retrying cannot help: the room does not exist, or these
           // credentials are wrong. Stop rather than emitting an error every

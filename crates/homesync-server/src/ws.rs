@@ -164,11 +164,34 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 return;
             }
             let name = sanitise_name(&join.name, &session.device_id);
-            if let Err(error) =
-                room.join(session.client_id.clone(), session.device_id.clone(), name, join.role, session.tx.clone())
-            {
-                session.send(app, Payload::Error(error), request_id);
-                return;
+            let replaced = match room.join(
+                session.client_id.clone(),
+                session.device_id.clone(),
+                name,
+                join.role,
+                session.tx.clone(),
+            ) {
+                Ok(replaced) => replaced,
+                Err(error) => {
+                    session.send(app, Payload::Error(error), request_id);
+                    return;
+                }
+            };
+            // A seat taken by an older tab on the same machine has just been
+            // given away. Say so before its socket goes quiet: dropping it
+            // silently looks like a network fault, and the client would
+            // reconnect, take the seat back, and evict this one — the two tabs
+            // trading places for as long as both stay open.
+            for (id, tx) in &replaced {
+                tracing::info!(device = %session.device_id, client = %id, "device rejoined; releasing its earlier seat");
+                let notice = Envelope::new(Payload::Error(ErrorMessage::new(
+                    "device_replaced",
+                    "this device joined the room again in another tab or window, so this one has left it",
+                )))
+                .stamped(app.now_ns());
+                if let Ok(text) = serde_json::to_string(&notice) {
+                    let _ = tx.send(OutFrame::Text(text));
+                }
             }
             // Restore whatever this device learned last time. Compensation is
             // expensive to obtain — by ear, or by a calibration run with the

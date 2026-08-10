@@ -183,10 +183,17 @@ function onJoinRejected(error) {
     no_such_room: 'That room no longer exists. The coordinator was probably restarted with a new room.',
     bad_secret: 'That room secret is not accepted. It changes if the coordinator is started with a new room.',
     room_full: 'That room is full.',
+    device_replaced:
+      'This device opened HomeSync again in another tab or window, and that one has the room now. Two tabs on one machine would play the track twice out of the same speakers.',
   }[error.code] ?? error.message;
 
-  localStorage.removeItem('homesync.roomCode');
-  localStorage.removeItem('homesync.roomSecret');
+  // A replaced device still holds perfectly good credentials: it lost the seat,
+  // not the right to the room. Clearing them would make the other tab's arrival
+  // look like a bad invite and force a retype.
+  if (error.code !== 'device_replaced') {
+    localStorage.removeItem('homesync.roomCode');
+    localStorage.removeItem('homesync.roomSecret');
+  }
 
   state.connection = null;
   state.snapshot = null;

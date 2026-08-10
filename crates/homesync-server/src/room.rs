@@ -180,7 +180,30 @@ impl Room {
         name: String,
         role: Role,
         tx: ClientSender,
-    ) -> Result<(), ErrorMessage> {
+    ) -> Result<Vec<(String, ClientSender)>, ErrorMessage> {
+        // One device, one seat. A second tab on the same machine carries the
+        // same device id — `homesync.deviceId` is per-origin localStorage — and
+        // without this it takes a second seat in the room. That is not a
+        // cosmetic duplicate in the device list: both tabs decode the media and
+        // both schedule it, so one set of speakers plays the track twice a few
+        // milliseconds apart, the readiness barrier waits for a device that is
+        // already there, and the room's own health count is wrong.
+        //
+        // The newcomer wins. It is the tab the person is actually looking at,
+        // and the one being replaced is a reload or a window they forgot.
+        // The sender comes back with the id: once the client is removed the room
+        // can no longer reach it, and the whole point is to tell it why it is
+        // being dropped.
+        let replaced: Vec<(String, ClientSender)> = self
+            .clients
+            .values()
+            .filter(|c| c.info.device_id == device_id)
+            .map(|c| (c.info.client_id.clone(), c.tx.clone()))
+            .collect();
+        for (id, _) in &replaced {
+            self.remove(id);
+        }
+
         if self.clients.len() >= self.max_clients {
             return Err(ErrorMessage::new("room_full", format!("room is limited to {} clients", self.max_clients)));
         }
@@ -215,7 +238,7 @@ impl Room {
         if self.owner.is_none() {
             self.owner = Some(client_id);
         }
-        Ok(())
+        Ok(replaced)
     }
 
     /// Removes a client. When the owner leaves, ownership passes to whoever
@@ -1535,5 +1558,67 @@ mod tests {
         room.set_clock_report("Laptop", stable_clock());
         // A controller renders no audio, so it has no timeline to be late on.
         assert_eq!(room.health(0).level, HealthLevel::Ok);
+    }
+
+    #[test]
+    fn a_device_holds_one_seat_however_many_tabs_it_opens() {
+        let mut room = room();
+        let (tx1, _rx1) = mpsc::unbounded_channel();
+        room.join("tab-1".into(), "pc".into(), "Windows PC".into(), Role::Speaker, tx1).expect("first tab");
+
+        // Same machine, second tab. `homesync.deviceId` is per-origin
+        // localStorage, so both tabs present the same device id.
+        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let replaced =
+            room.join("tab-2".into(), "pc".into(), "Windows PC".into(), Role::Speaker, tx2).expect("second tab");
+
+        assert_eq!(replaced.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["tab-1"]);
+        assert_eq!(room.clients.len(), 1, "one machine, one seat");
+        assert!(room.clients.contains_key("tab-2"), "the newest tab is the one that keeps it");
+        // Two seats would mean this machine decodes and schedules the track
+        // twice, playing it out of one set of speakers a few milliseconds apart.
+        assert_eq!(room.health(0).summary, "One device, ready.");
+    }
+
+    #[test]
+    fn ownership_passes_to_the_replacing_tab() {
+        let mut room = room();
+        let (tx1, _rx1) = mpsc::unbounded_channel();
+        room.join("tab-1".into(), "pc".into(), "PC".into(), Role::Speaker, tx1).expect("join");
+        assert_eq!(room.owner.as_deref(), Some("tab-1"));
+
+        let (tx2, _rx2) = mpsc::unbounded_channel();
+        room.join("tab-2".into(), "pc".into(), "PC".into(), Role::Speaker, tx2).expect("join");
+        // The owner left as far as the room is concerned, so ownership must not
+        // be stranded on a client that is gone.
+        assert_eq!(room.owner.as_deref(), Some("tab-2"), "the room must stay controllable");
+    }
+
+    #[test]
+    fn different_machines_keep_their_own_seats() {
+        let mut room = room();
+        for (client, device) in [("a", "pc"), ("b", "mac"), ("c", "phone")] {
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let replaced = room.join(client.into(), device.into(), client.into(), Role::Speaker, tx).expect("join");
+            assert!(replaced.is_empty(), "{client} evicted somebody it should not have");
+        }
+        assert_eq!(room.clients.len(), 3);
+    }
+
+    #[test]
+    fn a_replaced_tab_is_told_before_its_seat_is_taken() {
+        let mut room = room();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        room.join("tab-1".into(), "pc".into(), "PC".into(), Role::Speaker, tx1).expect("join");
+        let (tx2, _rx2) = mpsc::unbounded_channel();
+        let replaced = room.join("tab-2".into(), "pc".into(), "PC".into(), Role::Speaker, tx2).expect("join");
+
+        // The sender comes back with the id precisely so the caller can still
+        // reach a client the room has already forgotten. Without it the tab
+        // would just go quiet, look like a network fault, reconnect, and take
+        // the seat back off the tab that just claimed it.
+        let (_, sender) = replaced.first().expect("one replaced tab");
+        assert!(sender.send(OutFrame::Text("notice".into())).is_ok(), "the socket must still be reachable");
+        assert!(rx1.try_recv().is_ok());
     }
 }
