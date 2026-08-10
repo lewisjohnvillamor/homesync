@@ -380,6 +380,11 @@ pub struct SelectSource {
     /// first entry becomes the current track.
     #[serde(default)]
     pub queue: Vec<String>,
+    /// Index in `queue` to start from. Absent means the top, which is what a
+    /// newly-set queue wants; present is somebody picking a track out of a list
+    /// that is already playing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_index: Option<usize>,
 }
 
 /// Controller's request to start live system-audio capture.
@@ -924,6 +929,7 @@ mod tests {
             media_id: Some("m".into()),
             youtube_video_id: None,
             queue: vec!["m".into(), "n".into()],
+            queue_index: Some(1),
         }));
         roundtrip(Payload::Transport(Transport::default()));
         roundtrip(Payload::StreamStart(StreamStart { profile: "music".into(), synthetic: true }));

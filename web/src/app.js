@@ -637,13 +637,29 @@ function applyEq(gainsDb) {
   localStorage.setItem('homesync.eqDb', JSON.stringify(gains));
 }
 
-/** Publishes a queue to the room. An empty list clears the source. */
-function sendQueue(mediaIds) {
+/**
+ * Publishes a queue to the room. An empty list clears the source.
+ *
+ * `startAt` is only sent when somebody picked a track out of a list that is
+ * already there. Sending it on every edit would restart playback each time an
+ * entry moved.
+ */
+function sendQueue(mediaIds, startAt) {
   state.connection?.send('select_source', {
     mode: 'controlled_audio',
     queue: mediaIds,
     media_id: mediaIds[0] ?? null,
+    ...(startAt === undefined ? {} : { queue_index: startAt }),
   });
+}
+
+/** Moves a queue entry, keeping the track that is playing playing. */
+function moveQueued(from, to) {
+  const queue = [...(state.snapshot?.queue ?? [])];
+  if (to < 0 || to >= queue.length) return;
+  const [moved] = queue.splice(from, 1);
+  queue.splice(to, 0, moved);
+  sendQueue(queue);
 }
 
 /**
@@ -965,13 +981,36 @@ function renderQueue() {
     title.className = 'queue-title';
     title.textContent = item?.title ?? id;
 
+    // The title is the control. A queue you can only enter at the top is a
+    // list of things you are going to hear eventually rather than a list of
+    // things you can play.
+    const play = document.createElement('button');
+    play.className = 'queue-play';
+    play.title = `Play ${item?.title ?? id}`;
+    play.append(title);
+    play.addEventListener('click', () => sendQueue(queue, position));
+
+    const up = document.createElement('button');
+    up.className = 'btn btn-sm queue-move';
+    up.textContent = '↑';
+    up.title = 'Move up';
+    up.disabled = position === 0;
+    up.addEventListener('click', () => moveQueued(position, position - 1));
+
+    const down = document.createElement('button');
+    down.className = 'btn btn-sm queue-move';
+    down.textContent = '↓';
+    down.title = 'Move down';
+    down.disabled = position === queue.length - 1;
+    down.addEventListener('click', () => moveQueued(position, position + 1));
+
     const drop = document.createElement('button');
     drop.className = 'btn btn-sm queue-drop';
     drop.textContent = '✕';
     drop.title = `Remove ${item?.title ?? id}`;
     drop.addEventListener('click', () => sendQueue(queue.filter((_, i) => i !== position)));
 
-    row.append(number, title, drop);
+    row.append(number, play, up, down, drop);
     list.append(row);
   }
 }

@@ -324,6 +324,11 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             room.stream = None;
             if select.mode == SourceMode::ControlledAudio && !select.queue.is_empty() {
                 room.set_queue(select.queue, now);
+                // Picking a track out of a queue that is already playing, as
+                // opposed to publishing a new list.
+                if let Some(index) = select.queue_index {
+                    room.play_queued(index, now);
+                }
             } else {
                 room.queue.clear();
                 room.queue_index = 0;

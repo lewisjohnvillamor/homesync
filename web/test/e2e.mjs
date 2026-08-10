@@ -235,6 +235,29 @@ try {
     console.log(`SKIP  queue advance did not complete: ${error.message}`);
   }
 
+  // --- picking and reordering inside the queue ----------------------------
+  // Two entries of the same track, so a jump is observable by which row is
+  // marked current rather than by what is heard.
+  await waitFor(alpha, () => document.querySelectorAll('#queue li').length >= 2, 'a queue to work with');
+  await alpha.page.evaluate(() => document.querySelectorAll('#queue .queue-play')[1].click());
+  await waitFor(
+    alpha,
+    () => document.querySelectorAll('#queue li')[1]?.classList.contains('current'),
+    'the second entry to become the current one',
+  );
+  ok('a track can be played straight out of the middle of the queue');
+
+  const order = await alpha.page.evaluate(() =>
+    [...document.querySelectorAll('#queue .queue-title')].map((e) => e.textContent));
+  await alpha.page.evaluate(() => document.querySelectorAll('#queue .queue-move')[1].click());
+  await sleep(1200);
+  const moved = await alpha.page.evaluate(() =>
+    [...document.querySelectorAll('#queue .queue-title')].map((e) => e.textContent));
+  if (moved.length !== order.length) {
+    throw new Error(`reordering changed the queue length: ${order.length} -> ${moved.length}`);
+  }
+  ok('queue entries can be moved without losing any');
+
   // Live system audio is not exercised here: this build offers no way to start
   // a stream from the interface. The receiver plumbing still has unit coverage
   // in web/test/live.mjs and the Rust integration test.

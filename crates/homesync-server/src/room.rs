@@ -375,6 +375,28 @@ impl Room {
         Some(next)
     }
 
+    /// Jumps to a queued track and plays it from its start.
+    ///
+    /// Without this the queue was a list you could only enter at the top: the
+    /// only way to hear the fourth track was to wait out three others or to
+    /// clear the queue and add it alone.
+    pub fn play_queued(&mut self, index: usize, now_ns: u64) -> Option<String> {
+        let media_id = self.queue.get(index)?.clone();
+        self.queue_index = index;
+        let was_playing = self.transport.state == TransportState::Playing;
+        self.select_source(SourceMode::ControlledAudio, Some(media_id.clone()), None, now_ns);
+        // Carrying on playing is the whole point of picking a track from a
+        // playing queue; a room that was paused stays paused and waits.
+        if was_playing {
+            self.transport.anchor_media_ns = 0;
+            self.transport.anchor_server_ns = now_ns + self.start_lead_ns;
+            self.transport.state = TransportState::Playing;
+            self.transport.epoch += 1;
+        }
+        self.dirty = true;
+        Some(media_id)
+    }
+
     /// Replaces the queue.
     ///
     /// Editing a queue while it plays — appending a track, removing one further
@@ -1795,5 +1817,58 @@ mod tests {
         let now = reported_at + 2_000_000_000;
         let drift = room.youtube_drift_ms("a", now).expect("drift");
         assert!(drift.abs() < 50.0, "aged report should still read as in step: {drift}");
+    }
+
+    #[test]
+    fn a_track_can_be_played_out_of_the_middle_of_the_queue() {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into(), "two".into(), "three".into()], 0);
+        room.set_ready("a", "one");
+        room.play(0, false).expect("play");
+
+        // Without this the queue could only ever be entered at the top: the
+        // only way to hear the third track was to wait out two others.
+        let started = room.play_queued(2, LEAD).expect("jump");
+        assert_eq!(started, "three");
+        assert_eq!(room.queue_index, 2);
+        assert_eq!(room.transport.media_id.as_deref(), Some("three"));
+        assert_eq!(room.transport.anchor_media_ns, 0, "from its beginning");
+        assert_eq!(room.transport.state, TransportState::Playing, "a playing room keeps playing");
+    }
+
+    #[test]
+    fn jumping_in_a_paused_room_does_not_start_it() {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into(), "two".into()], 0);
+
+        room.play_queued(1, 0).expect("jump");
+        assert_ne!(room.transport.state, TransportState::Playing, "picking a track is not pressing play");
+        assert_eq!(room.transport.media_id.as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn a_jump_past_the_end_of_the_queue_changes_nothing() {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into()], 0);
+        assert_eq!(room.play_queued(7, 0), None);
+        assert_eq!(room.queue_index, 0);
+    }
+
+    #[test]
+    fn reordering_the_queue_leaves_the_playing_track_alone() {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into(), "two".into(), "three".into()], 0);
+        room.set_ready("a", "one");
+        room.play(0, false).expect("play");
+        let before = room.transport.clone();
+
+        // Moving a later entry is an edit to the list, not a transport command.
+        room.set_queue(vec!["one".into(), "three".into(), "two".into()], LEAD);
+        assert_eq!(room.transport, before, "the track playing must not restart");
+        assert_eq!(room.next_in_queue(), Some("three"), "but what follows has changed");
     }
 }
