@@ -277,6 +277,20 @@ export class YoutubePlayer {
     this.startTimer = setTimeout(() => this.#play(), plan.delayMs);
   }
 
+  /**
+   * Applies volume and mute to the iframe player.
+   *
+   * The YouTube player's audio never enters our audio graph, so the gain node
+   * that serves every other mode cannot reach it. Without this the volume
+   * slider and the mute box were inert in YouTube mode.
+   */
+  setVolume(volume, muted) {
+    if (typeof this.player?.setVolume !== 'function') return;
+    this.player.setVolume(Math.round(Math.max(0, Math.min(1, volume)) * 100));
+    if (muted) this.player.mute?.();
+    else this.player.unMute?.();
+  }
+
   #play() {
     this.startTimer = null;
     if (typeof this.player?.playVideo !== 'function') return;
