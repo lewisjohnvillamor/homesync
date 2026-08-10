@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-import { sha256HexSync } from '../src/sha256.js';
+import { sha256HexSync, sha256HexChunked } from '../src/sha256.js';
 
 const nodeDigest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -51,4 +51,15 @@ test('a single flipped bit changes the digest', () => {
   const b = new Uint8Array(4096);
   b[2048] = 1;
   assert.notEqual(sha256HexSync(a), sha256HexSync(b));
+});
+
+test('the chunked digest agrees with the one-pass digest', async () => {
+  // Same bytes, same answer — the split into slices must not change where a
+  // block boundary falls. Sizes chosen to straddle the yield interval and the
+  // padding boundary, which are the two places an off-by-one would hide.
+  for (const length of [0, 1, 55, 56, 64, 65, 1024 * 64 - 1, 1024 * 64, 1024 * 64 + 137]) {
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i += 1) bytes[i] = (i * 31 + 7) & 0xff;
+    assert.equal(await sha256HexChunked(bytes), sha256HexSync(bytes), `length ${length}`);
+  }
 });

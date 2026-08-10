@@ -24,6 +24,15 @@ function rotr(x, n) {
 }
 
 /** Lowercase hex SHA-256 of an ArrayBuffer or typed array, computed in JS. */
+/**
+ * Blocks hashed between yields on the slow path.
+ *
+ * 64 KiB of work at a time: long enough that the per-slice overhead is
+ * negligible, short enough that a clock ping waiting behind it is delayed by
+ * about a millisecond rather than by the whole file.
+ */
+const YIELD_EVERY_BLOCKS = 1024;
+
 export function sha256HexSync(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   const bitLength = bytes.length * 8;
@@ -45,7 +54,13 @@ export function sha256HexSync(input) {
   ]);
   const w = new Uint32Array(64);
 
-  for (let offset = 0; offset < paddedLength; offset += 64) {
+  compress(view, h, w, 0, paddedLength);
+  return Array.from(h, (x) => x.toString(16).padStart(8, '0')).join('');
+}
+
+/** Compresses `[from, to)` of an already-padded message into `h`. */
+function compress(view, h, w, from, to) {
+  for (let offset = from; offset < to; offset += 64) {
     for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4, false);
     for (let i = 16; i < 64; i += 1) {
       const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
@@ -79,6 +94,48 @@ export function sha256HexSync(input) {
     h[6] = (h[6] + g) >>> 0;
     h[7] = (h[7] + hh) >>> 0;
   }
+}
+
+/** Pads a message once, so both variants agree byte for byte. */
+function pad(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const bitLength = bytes.length * 8;
+  const paddedLength = (((bytes.length + 8) >> 6) + 1) << 6;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLength - 8, Math.floor(bitLength / 4294967296), false);
+  view.setUint32(paddedLength - 4, bitLength >>> 0, false);
+  return { view, paddedLength };
+}
+
+/**
+ * The same digest, computed in slices with the event loop free in between.
+ *
+ * Hashing a thirty-megabyte FLAC in one synchronous pass takes the main thread
+ * for as long as it takes — and the main thread is where clock pings are sent
+ * and pongs are read. The clock estimator cannot tell "the network was slow"
+ * from "this tab was busy", so a large file being verified looked exactly like
+ * a device losing its clock, and the room said so. Queueing made it worse
+ * rather than causing it: the next track is now decoded while the current one
+ * plays, so the stall happens mid-session instead of before anyone pressed
+ * play.
+ */
+export async function sha256HexChunked(input) {
+  const { view, paddedLength } = pad(input);
+  const h = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ]);
+  const w = new Uint32Array(64);
+  const slice = YIELD_EVERY_BLOCKS * 64;
+
+  for (let offset = 0; offset < paddedLength; offset += slice) {
+    compress(view, h, w, offset, Math.min(offset + slice, paddedLength));
+    // A macrotask, not a microtask: a promise continuation would run before
+    // the socket message that is waiting, which is the thing being protected.
+    if (offset + slice < paddedLength) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 
   return Array.from(h, (x) => x.toString(16).padStart(8, '0')).join('');
 }
@@ -89,7 +146,7 @@ export async function sha256Hex(buffer) {
     const digest = await crypto.subtle.digest('SHA-256', buffer);
     return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
   }
-  return sha256HexSync(buffer);
+  return sha256HexChunked(buffer);
 }
 
 /** Whether verification will fall back to the slower JS implementation. */

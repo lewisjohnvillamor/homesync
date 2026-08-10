@@ -779,6 +779,32 @@ input[type="range"]:disabled {
   font-weight: 600;
 }
 
+.queue-play {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.queue-play:hover .queue-title {
+  color: var(--accent);
+}
+
+.queue-move {
+  flex: none;
+  min-width: 0;
+  padding: 2px 8px;
+  line-height: 1.2;
+  border-radius: 999px;
+}
+
 .queue-index {
   font-family: var(--mono);
   color: var(--text-faint);
