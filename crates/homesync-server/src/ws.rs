@@ -194,7 +194,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             tracing::info!(client = %session.client_id, room = %code, role = ?join.role, "client joined");
 
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest());
+            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
         }
@@ -232,7 +232,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             });
 
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest());
+            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -263,7 +263,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             room.note_duration(&ready.media_id, ready.duration_ns);
             room.set_ready(&session.client_id, &ready.media_id);
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest());
+            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -348,7 +348,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.volume = volume.volume.clamp(0.0, 1.0);
             }
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest());
+            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -360,7 +360,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.muted = mute.muted;
             }
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest());
+            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -580,7 +580,7 @@ where
 /// the diagnostics view stays consistent with the timeline.
 fn broadcast_transport_and_snapshot(app: &App, room: &mut crate::room::Room, now_ns: u64) {
     room.broadcast(Payload::Transport(room.transport.clone()), now_ns);
-    let snapshot = room.snapshot(app.media.manifest());
+    let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now_ns);
     room.dirty = false;
 }
@@ -592,7 +592,7 @@ fn leave_room(app: &App, session: &mut Session) {
     room.remove(&session.client_id);
     tracing::info!(client = %session.client_id, room = %code, "client left");
     let now = app.now_ns();
-    let snapshot = room.snapshot(app.media.manifest());
+    let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
     room.dirty = false;
 }
@@ -628,7 +628,7 @@ pub fn flush_dirty_rooms(app: &App) {
         if !room.dirty || room.clients.is_empty() {
             continue;
         }
-        let snapshot: RoomSnapshot = room.snapshot(manifest.clone());
+        let snapshot: RoomSnapshot = room.snapshot(manifest.clone(), now);
         room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
         room.dirty = false;
     }

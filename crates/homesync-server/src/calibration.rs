@@ -457,7 +457,7 @@ fn finish(app: &App, room_code: &str, result: CalibrationResult) {
     room.calibration = None;
     room.last_calibration = Some(result.clone());
     room.broadcast(Payload::CalibrationResult(result), now);
-    let snapshot = room.snapshot(manifest);
+    let snapshot = room.snapshot(manifest, app.now_ns());
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
     room.dirty = false;
 }

@@ -167,6 +167,11 @@ This is the part to read before trusting anything.
 - Persistence: a device whose browser storage was cleared rejoins and recovers
   its compensation from the coordinator.
 
+The **Devices** panel says in one line whether the room is actually together —
+"2 devices playing together", or "Kitchen TV is 2.4 s behind the room". It is
+computed by the coordinator, which is the only party that sees every device's
+telemetry, and it travels in the diagnostics export unchanged.
+
 ### Implemented but never run against reality
 
 - **Acoustic calibration has never heard a real microphone.** The DSP and the

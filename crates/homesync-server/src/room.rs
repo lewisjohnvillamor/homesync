@@ -6,8 +6,8 @@
 
 use homesync_protocol::{
     BufferReport, CalibrationProgress, CalibrationResult, ClientInfo, ClockQuality, ClockReport, DiagnosticReport,
-    Envelope, ErrorMessage, MediaManifest, Payload, Role, RoomSnapshot, SourceMode, StreamInfo, Transport,
-    TransportState, YoutubeState,
+    Envelope, ErrorMessage, HealthLevel, MediaManifest, Payload, Role, RoomHealth, RoomSnapshot, SourceMode,
+    StreamInfo, Transport, TransportState, YoutubeState,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -47,6 +47,15 @@ pub const YOUTUBE_RESYNC_IMMEDIATE_MS: f64 = 1_500.0;
 /// cannot keep up — a television browser, say — corrects itself continuously
 /// and never plays anything.
 pub const YOUTUBE_RESYNC_COOLDOWN_NS: u64 = 10_000_000_000;
+
+/// Timeline error, in milliseconds, worth telling a listener about.
+///
+/// Well below what anyone would notice as an echo. The point is to surface a
+/// device that is wandering before it becomes audible, not to wait until it is.
+pub const HEALTH_DRIFT_WARN_MS: f64 = 50.0;
+
+/// Timeline error at which a device is not really playing with the others.
+pub const HEALTH_DRIFT_BAD_MS: f64 = 250.0;
 
 /// How far ahead a mid-playback correction is scheduled.
 ///
@@ -599,6 +608,102 @@ impl Room {
         }
     }
 
+    /// A plain-language reading of whether this room is actually in sync.
+    ///
+    /// Exists because the honest answer was previously spread across twelve
+    /// columns of telemetry: a device sitting seconds behind the room looked
+    /// exactly like a device sitting beside it unless you knew which number to
+    /// read. Findings are ordered worst first and name the device at fault,
+    /// because "something is wrong" is not actionable and "the TV is 2.4 s
+    /// behind" is.
+    pub fn health(&self, now_ns: u64) -> RoomHealth {
+        let mut findings: Vec<(HealthLevel, String)> = Vec::new();
+
+        for client in self.clients.values() {
+            let name = &client.info.name;
+
+            match client.info.clock.quality {
+                ClockQuality::ResyncRequired => {
+                    findings.push((HealthLevel::Bad, format!("{name} lost its clock and is re-measuring")));
+                }
+                ClockQuality::Suspended => {
+                    findings.push((HealthLevel::Bad, format!("{name} is asleep or in the background")));
+                }
+                ClockQuality::Degraded => {
+                    findings.push((HealthLevel::Warn, format!("{name} has an unsteady clock")));
+                }
+                ClockQuality::WarmingUp | ClockQuality::Stable => {}
+            }
+
+            if !client.info.role.renders_audio() {
+                continue;
+            }
+
+            // YouTube position is reported by the player itself; the scheduled
+            // path reports its own timeline error. Different sources, same
+            // question: how far from the room is this device?
+            let drift_ms = match self.transport.mode {
+                SourceMode::Youtube => self.youtube_drift_ms(&client.info.client_id, now_ns),
+                _ => client.info.diagnostics.as_ref().map(|d| d.drift_ms).filter(|_| self.is_playing()),
+            };
+            if let Some(drift) = drift_ms {
+                let seconds = drift.abs() / 1000.0;
+                let direction = if drift < 0.0 { "behind" } else { "ahead of" };
+                if drift.abs() >= HEALTH_DRIFT_BAD_MS {
+                    let amount =
+                        if seconds >= 1.0 { format!("{seconds:.1} s") } else { format!("{:.0} ms", drift.abs()) };
+                    findings.push((HealthLevel::Bad, format!("{name} is {amount} {direction} the room")));
+                } else if drift.abs() >= HEALTH_DRIFT_WARN_MS {
+                    findings.push((HealthLevel::Warn, format!("{name} is {:.0} ms {direction} the room", drift.abs())));
+                }
+            }
+
+            if let Some(youtube) = &client.info.youtube {
+                if youtube.player_state == "buffering" && self.is_playing() {
+                    findings.push((HealthLevel::Warn, format!("{name} is buffering")));
+                }
+            }
+
+            if let Some(buffer) = &client.info.buffer {
+                if buffer.underruns > 0 {
+                    findings.push((HealthLevel::Warn, format!("{name} ran out of audio {} times", buffer.underruns)));
+                }
+            }
+        }
+
+        // Worst first, so the summary names the thing most worth fixing.
+        findings.sort_by_key(|(level, _)| match level {
+            HealthLevel::Bad => 0,
+            HealthLevel::Warn => 1,
+            HealthLevel::Ok => 2,
+        });
+
+        let level = findings.first().map(|(level, _)| *level).unwrap_or(HealthLevel::Ok);
+        let summary = match findings.first() {
+            Some((_, first)) if findings.len() == 1 => first.clone(),
+            Some((_, first)) => format!("{first}, and {} other issue(s)", findings.len() - 1),
+            None => self.healthy_summary(),
+        };
+
+        RoomHealth { level, summary, findings: findings.into_iter().map(|(_, text)| text).collect() }
+    }
+
+    /// What to say when there is nothing wrong.
+    fn healthy_summary(&self) -> String {
+        let receivers = self.clients.values().filter(|c| c.info.role.renders_audio()).count();
+        match (receivers, self.is_playing()) {
+            (0, _) => "No speakers have joined yet.".to_string(),
+            (1, true) => "Playing on one device.".to_string(),
+            (1, false) => "One device, ready.".to_string(),
+            (n, true) => format!("{n} devices playing together."),
+            (n, false) => format!("{n} devices, ready."),
+        }
+    }
+
+    fn is_playing(&self) -> bool {
+        self.transport.state == TransportState::Playing
+    }
+
     /// A fresh rendezvous epoch. Separate from the transport epoch because
     /// correcting one device must not look like a room-wide transport change.
     pub fn next_rendezvous_epoch(&mut self) -> u64 {
@@ -628,7 +733,7 @@ impl Room {
     }
 
     /// Full room state for publication.
-    pub fn snapshot(&self, media: MediaManifest) -> RoomSnapshot {
+    pub fn snapshot(&self, media: MediaManifest, now_ns: u64) -> RoomSnapshot {
         RoomSnapshot {
             room_code: self.code.clone(),
             owner_client_id: self.owner.clone(),
@@ -638,6 +743,7 @@ impl Room {
             start_lead_ms: self.start_lead_ns as f64 / 1e6,
             queue: self.queue.clone(),
             queue_index: self.queue_index,
+            health: self.health(now_ns),
             stream: self.stream.clone(),
             calibration: self.calibration.clone(),
             supported_modes: vec![SourceMode::ControlledAudio, SourceMode::Youtube, SourceMode::SystemAudio],
@@ -1041,7 +1147,7 @@ mod tests {
     #[test]
     fn snapshot_reports_the_configured_lead_in_milliseconds() {
         let room = room();
-        let snapshot = room.snapshot(MediaManifest::default());
+        let snapshot = room.snapshot(MediaManifest::default(), 0);
         assert_eq!(snapshot.start_lead_ms, 2000.0);
         assert_eq!(snapshot.room_code, "ABC123");
     }
@@ -1341,5 +1447,93 @@ mod tests {
         room.select_source(SourceMode::Youtube, None, Some("QpJD4K_PLSI".into()), 0);
         room.play(0, false).expect("play");
         assert_eq!(room.advance_queue(LEAD + 60_000_000_000), None);
+    }
+
+    #[test]
+    fn a_quiet_room_says_so_plainly() {
+        let mut room = room();
+        assert_eq!(room.health(0).level, HealthLevel::Ok);
+        assert!(room.health(0).summary.contains("No speakers"), "{}", room.health(0).summary);
+
+        add_ready(&mut room, "a", "m1");
+        add_ready(&mut room, "b", "m1");
+        let health = room.health(0);
+        assert_eq!(health.level, HealthLevel::Ok);
+        assert_eq!(health.summary, "2 devices, ready.");
+        assert!(health.findings.is_empty());
+    }
+
+    #[test]
+    fn a_device_seconds_behind_is_named_and_measured() {
+        let mut room = youtube_room("Kitchen TV");
+        let now = LEAD + 5_000_000_000;
+        report(&mut room, "Kitchen TV", "playing", now, -2.4);
+
+        let health = room.health(now);
+        assert_eq!(health.level, HealthLevel::Bad);
+        // The whole point: a name and a number, not "something is wrong".
+        assert!(health.summary.contains("Kitchen TV"), "{}", health.summary);
+        assert!(health.summary.contains("2.4 s"), "{}", health.summary);
+        assert!(health.summary.contains("behind"), "{}", health.summary);
+    }
+
+    #[test]
+    fn a_device_slightly_ahead_is_a_warning_not_a_failure() {
+        let mut room = youtube_room("Mac");
+        let now = LEAD + 5_000_000_000;
+        report(&mut room, "Mac", "playing", now, 0.12);
+
+        let health = room.health(now);
+        assert_eq!(health.level, HealthLevel::Warn);
+        assert!(health.summary.contains("120 ms"), "{}", health.summary);
+        assert!(health.summary.contains("ahead"), "{}", health.summary);
+    }
+
+    #[test]
+    fn small_errors_are_not_worth_mentioning() {
+        let mut room = youtube_room("Mac");
+        let now = LEAD + 5_000_000_000;
+        // Twenty milliseconds is better than the watch-party target and far
+        // below anything a listener could pick out. Reporting it would train
+        // people to ignore the line.
+        report(&mut room, "Mac", "playing", now, 0.02);
+        assert_eq!(room.health(now).level, HealthLevel::Ok);
+    }
+
+    #[test]
+    fn a_lost_clock_outranks_a_small_drift() {
+        let mut room = youtube_room("TV");
+        add(&mut room, "Phone", Role::Speaker);
+        room.set_clock_report("Phone", ClockReport { quality: ClockQuality::ResyncRequired, ..stable_clock() });
+        let now = LEAD + 5_000_000_000;
+        report(&mut room, "TV", "playing", now, 0.08);
+
+        let health = room.health(now);
+        assert_eq!(health.level, HealthLevel::Bad);
+        assert!(health.summary.starts_with("Phone"), "worst first: {}", health.summary);
+        assert_eq!(health.findings.len(), 2, "both are still reported: {:?}", health.findings);
+        assert!(health.summary.contains("other issue"), "{}", health.summary);
+    }
+
+    #[test]
+    fn buffering_is_reported_only_while_the_room_is_playing() {
+        let mut room = youtube_room("TV");
+        let now = LEAD + 5_000_000_000;
+        report(&mut room, "TV", "buffering", now, 0.0);
+        assert_eq!(room.health(now).level, HealthLevel::Warn);
+
+        room.pause(now);
+        // Paused and buffering is just paused. Saying otherwise would put a
+        // warning on screen for something nobody needs to act on.
+        assert_eq!(room.health(now).level, HealthLevel::Ok);
+    }
+
+    #[test]
+    fn a_controller_is_not_judged_on_drift_it_cannot_have() {
+        let mut room = room();
+        add(&mut room, "Laptop", Role::Controller);
+        room.set_clock_report("Laptop", stable_clock());
+        // A controller renders no audio, so it has no timeline to be late on.
+        assert_eq!(room.health(0).level, HealthLevel::Ok);
     }
 }
