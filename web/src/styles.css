@@ -829,6 +829,7 @@ input[type="range"]:disabled {
 }
 
 .stage {
+  position: relative;
   aspect-ratio: 16 / 9;
   background: #000;
   border-radius: var(--radius);
@@ -841,6 +842,30 @@ input[type="range"]:disabled {
   width: 100%;
   height: 100%;
   border: 0;
+}
+
+/* Sits over the player because the IFrame API owns everything inside the
+   iframe: `controls: 0` is deliberate — a per-device scrubber would let one
+   room member seek their own copy out of the room — so the only control we can
+   add is one of our own, outside it. */
+.stage-fs {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  opacity: 0.85;
+}
+
+.stage-fs:hover {
+  opacity: 1;
+}
+
+/* Fullscreen is the element itself, so the aspect-ratio box must let go. */
+.stage:fullscreen {
+  aspect-ratio: auto;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
 }
 
 .alert {

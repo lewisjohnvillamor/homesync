@@ -244,6 +244,16 @@ try {
   // reported rather than failing the run. A JavaScript error in our own code
   // still fails, which is the part we control.
   await alpha.page.click('label[for="mode-yt"]');
+  // The segment a person pressed must survive the snapshots that arrive before
+  // the room has anything to switch to — there is no video id yet, so the
+  // coordinator is still on the previous mode and used to pull the tab back.
+  await sleep(2500);
+  const stayed = await alpha.page.evaluate(
+    () => !document.getElementById('mode-youtube').classList.contains('hidden'),
+  );
+  if (!stayed) throw new Error('the YouTube tab was pulled back by a snapshot');
+  ok('the source tab stayed where it was put');
+
   await alpha.page.fill('#youtube-input', 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
   await alpha.page.click('#youtube-load');
   try {

@@ -27,6 +27,8 @@ const state = {
   /** @type {object|null} */ selectedItem: null,
   /** Media id currently being decoded ahead of time, if any. */
   preloading: null,
+  /** Last source mode the room reported, to notice a genuine change. */
+  lastRoomMode: null,
   /** Live stream epoch currently being rendered. */
   streamEpoch: -1,
   /** Whether compensation has been reconciled with the coordinator yet. */
@@ -234,7 +236,7 @@ function onTransport(transport) {
   const previous = state.transport;
   state.transport = transport;
   setPill($('media-state'), transport.state, transport.state === 'playing' ? 'ok' : 'idle');
-  showModeControls(transport.mode);
+  showModeControls(transport.mode, { fromRoom: true });
 
   const player = state.player;
   const modeChanged = previous?.mode !== transport.mode;
@@ -463,6 +465,22 @@ function wireControls() {
 
   buildEqualiser();
   $('eq-reset').addEventListener('click', () => applyEq(EQ_BANDS.map(() => 0)));
+
+  // Fullscreen is requested on the stage rather than the iframe: the iframe is
+  // cross-origin, so we cannot call into it, and taking the wrapper full-screen
+  // takes the player with it.
+  $('youtube-fullscreen').addEventListener('click', async () => {
+    const stage = $('youtube-stage');
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await stage.requestFullscreen();
+    } catch (error) {
+      log(`Fullscreen: ${error.message}`);
+    }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    $('youtube-fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+  });
 
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
@@ -751,14 +769,38 @@ function totalCompensationMs() {
 }
 
 /** Shows the controls belonging to one source mode. */
-function showModeControls(mode) {
+/**
+ * Shows the controls for a source mode.
+ *
+ * `fromRoom` marks the calls that come from a snapshot rather than from a
+ * click. The room's mode may lag the segment a person just pressed — picking
+ * YouTube before pasting a link tells the coordinator nothing, because there is
+ * no video yet — and adopting it on every snapshot pulled the segment straight
+ * back to whatever the room still had. From either side that read as a tab
+ * refusing to be clicked. The room now only moves the segment when its own mode
+ * has actually changed.
+ */
+function showModeControls(mode, { fromRoom = false } = {}) {
+  const real = mode === 'controlled_audio' || mode === 'youtube';
+  if (fromRoom) {
+    const changed = mode !== state.lastRoomMode;
+    state.lastRoomMode = mode;
+    if (!changed || !real) {
+      // Keep whatever the person has selected, and only re-sync the panels.
+      const current = checkedMode();
+      $('mode-controlled').classList.toggle('hidden', current !== 'controlled_audio');
+      $('mode-youtube').classList.toggle('hidden', current !== 'youtube');
+      return;
+    }
+  }
+
   for (const radio of modeRadios()) {
     if (radio.value === mode) radio.checked = true;
   }
   // A room with nothing selected reports `idle`, which is not a mode anyone can
   // pick. Falling back to the chosen segment means the picker for that source is
   // on screen — otherwise a fresh room shows two tabs and no way to use either.
-  const shown = mode === 'controlled_audio' || mode === 'youtube' ? mode : checkedMode();
+  const shown = real ? mode : checkedMode();
   $('mode-controlled').classList.toggle('hidden', shown !== 'controlled_audio');
   $('mode-youtube').classList.toggle('hidden', shown !== 'youtube');
   // A live stream has no timeline to scrub: it is whatever the host is playing.
@@ -783,8 +825,10 @@ function checkedMode() {
 function selectMode(mode) {
   showModeControls(mode);
   if (mode === 'controlled_audio') {
-    const mediaId = $('media-select').value || null;
-    if (mediaId) state.connection?.send('select_source', { mode, media_id: mediaId });
+    // Sent even with an empty queue. Staying silent left the room in YouTube
+    // mode, and the next snapshot pushed the segment back to YouTube — which
+    // looked exactly like the Music tab refusing to be clicked.
+    sendQueue(state.snapshot?.queue ?? []);
   } else if (mode === 'youtube') {
     const videoId = parseVideoId($('youtube-input').value);
     if (videoId) state.connection?.send('select_source', { mode, youtube_video_id: videoId });
@@ -1082,6 +1126,15 @@ function renderDeviceFacts() {
 }
 
 function currentDurationNs() {
+  // A YouTube video is not in the media catalogue, so its length is only ever
+  // known by the player. Without this the scrubber read "/ 0:00" and
+  // `commitSeek` returned early on every drag: the timeline was not stuck, it
+  // had no length to seek within.
+  if (state.transport?.mode === 'youtube') {
+    const seconds = state.youtube?.state()?.duration_s ?? 0;
+    return seconds > 0 ? seconds * 1e9 : 0;
+  }
+
   const player = state.player;
   if (player?.buffer && player.bufferMediaId === state.transport?.media_id) {
     return player.buffer.duration * 1e9;
