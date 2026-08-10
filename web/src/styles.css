@@ -148,6 +148,97 @@ hr {
   max-width: 46ch;
 }
 
+/* --- Animated background ------------------------------------------------
+ *
+ * Three large, soft colour fields drifting behind the page.
+ *
+ * Every animated property here is `transform`, which browsers hand to the
+ * compositor thread. That is not a micro-optimisation, it is the requirement:
+ * the YouTube rendezvous fires `playVideo()` from a `setTimeout` on the main
+ * thread, so an effect that repaints or lays out on every frame would push the
+ * start of playback around by however long the frame took. A television
+ * browser is exactly the device where that would show up first.
+ *
+ * No canvas, no WebGL, no blur filter — a blurred layer this size is
+ * genuinely expensive on a TV, and gradients are already soft.
+ */
+
+/* On a browser without `color-mix` the gradient declaration is invalid and the
+   fields simply never paint. That is the intended degradation for an old
+   television, not an oversight. */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.aurora span {
+  position: absolute;
+  display: block;
+  width: 90vmax;
+  height: 90vmax;
+  border-radius: 50%;
+  opacity: 0.85;
+  will-change: transform;
+}
+
+.aurora span:nth-child(1) {
+  top: -40vmax;
+  left: -25vmax;
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--accent) 60%, transparent), transparent 65%);
+  animation: drift-a 34s ease-in-out infinite alternate;
+}
+
+.aurora span:nth-child(2) {
+  top: -10vmax;
+  right: -35vmax;
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--ok) 42%, transparent), transparent 65%);
+  animation: drift-b 46s ease-in-out infinite alternate;
+}
+
+.aurora span:nth-child(3) {
+  bottom: -50vmax;
+  left: 10vmax;
+  background: radial-gradient(circle at center, color-mix(in srgb, #8b5cf6 52%, transparent), transparent 65%);
+  animation: drift-c 58s ease-in-out infinite alternate;
+}
+
+@media (prefers-color-scheme: light) {
+  .aurora span {
+    opacity: 0.45;
+  }
+}
+
+@keyframes drift-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(12vmax, 8vmax, 0) scale(1.18);
+  }
+}
+
+@keyframes drift-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
+  to {
+    transform: translate3d(-14vmax, 12vmax, 0) scale(0.92);
+  }
+}
+
+@keyframes drift-c {
+  from {
+    transform: translate3d(0, 0, 0) scale(0.95);
+  }
+  to {
+    transform: translate3d(16vmax, -10vmax, 0) scale(1.2);
+  }
+}
+
 /* --- Top bar ------------------------------------------------------------ */
 
 .topbar {
@@ -159,9 +250,15 @@ hr {
   justify-content: space-between;
   gap: 12px;
   padding: 12px clamp(14px, 4vw, 28px);
-  background: color-mix(in srgb, var(--bg) 86%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .topbar {
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: blur(12px);
+  }
 }
 
 .brand {
@@ -229,6 +326,17 @@ main {
   gap: 20px;
   max-width: 640px;
   margin: clamp(8px, 6vh, 56px) auto 0;
+}
+
+/* Frosted glass only where the browser can actually frost. `backdrop-filter`
+   post-dates the Chromium frozen into older webOS releases, and a translucent
+   panel *without* the blur would leave the drifting background showing through
+   the text. Solid is the correct fallback, so it is the base rule. */
+@supports (backdrop-filter: blur(1px)) {
+  .panel {
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
+    backdrop-filter: blur(16px) saturate(1.25);
+  }
 }
 
 /* --- Chips -------------------------------------------------------------- */
@@ -868,5 +976,10 @@ td {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+  /* The background still sets the mood when it holds still, so it stays
+     rather than disappearing for anyone who asked motion to stop. */
+  .aurora span {
+    animation: none !important;
   }
 }
