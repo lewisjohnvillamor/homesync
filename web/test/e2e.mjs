@@ -125,8 +125,8 @@ try {
     await waitFor(
       client,
       () => {
-        const rows = [...document.querySelectorAll('#clients tbody tr')];
-        return rows.length >= 2 && rows.every((row) => row.textContent.includes('stable'));
+        const cards = [...document.querySelectorAll('#devices .device')];
+        return cards.length >= 2 && cards.every((card) => card.querySelector('.dot-ok'));
       },
       'every clock stable in the room snapshot',
     );
@@ -148,9 +148,9 @@ try {
 
   await sleep(3000);
   for (const client of clients) {
-    const row = await client.page.evaluate(() =>
-      [...document.querySelectorAll('#clients tr.self td')].map((td) => td.textContent).join(' | '));
-    console.log(`    ${client.label}: ${row}`);
+    const card = await client.page.evaluate(
+      () => document.querySelector('#devices .device-self')?.textContent.replace(/\s+/g, ' ').trim());
+    console.log(`    ${client.label}: ${card}`);
   }
 
   await alpha.page.click('#pause');
@@ -169,51 +169,20 @@ try {
   await beta.page.dispatchEvent('#offset-number', 'change');
   await waitFor(
     alpha,
-    () => [...document.querySelectorAll('#clients tr')].some((row) => row.textContent.includes('35 ms')),
+    () => [...document.querySelectorAll('#devices .device')].some((card) => card.textContent.includes('35 ms')),
     'compensation visible to the room',
   );
   ok('manual compensation propagated to the other device');
 
-  // --- live system audio -------------------------------------------------
-  // The synthetic source, so this runs on any platform. It exercises the whole
-  // live path: capture, framing, binary distribution, worklet buffering.
-  await alpha.page.selectOption('#mode-select', 'system_audio');
-  await alpha.page.selectOption('#stream-profile', 'live');
-  await alpha.page.click('#stream-start');
-  for (const client of clients) {
-    await waitFor(client, () => document.getElementById('log').textContent.includes('Live stream:'), 'stream info');
-  }
-  ok('both clients built a playout worklet for the live stream');
-
-  for (const client of clients) {
-    await waitFor(
-      client,
-      () => {
-        const row = document.querySelector('#clients tr.self');
-        const cell = row?.children?.[11];
-        return Boolean(cell && cell.textContent.includes('ms') && !cell.textContent.startsWith('0/'));
-      },
-      'a primed playout buffer',
-    );
-  }
-  const depths = [];
-  for (const client of clients) {
-    depths.push(
-      await client.page.evaluate(() => document.querySelector('#clients tr.self').children[11].textContent),
-    );
-  }
-  console.log(`    buffer depth: ${depths.join('  |  ')}`);
-  ok('live PCM frames arrived and the buffers filled to target');
-
-  await alpha.page.click('#stream-stop');
-  await waitFor(alpha, () => document.getElementById('media-state').textContent === 'idle', 'stream stopped');
-  ok('the live stream stopped cleanly');
+  // Live system audio is not exercised here: this build offers no way to start
+  // a stream from the interface. The receiver plumbing still has unit coverage
+  // in web/test/live.mjs and the Rust integration test.
 
   // --- YouTube -----------------------------------------------------------
   // Depends on reaching youtube.com, so a failure to actually start playing is
   // reported rather than failing the run. A JavaScript error in our own code
   // still fails, which is the part we control.
-  await alpha.page.selectOption('#mode-select', 'youtube');
+  await alpha.page.click('label[for="mode-yt"]');
   await alpha.page.fill('#youtube-input', 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
   await alpha.page.click('#youtube-load');
   try {
@@ -242,8 +211,7 @@ try {
       await waitFor(
         client,
         () => {
-          const rows = [...document.querySelectorAll('#clients tr')];
-          return rows.length > 1;
+          return document.querySelectorAll('#devices .device').length > 1;
         },
         'room state',
         20000,
@@ -253,6 +221,20 @@ try {
   } catch (error) {
     console.log(`SKIP  YouTube phase did not complete: ${error.message}`);
   }
+  // --- calibration refuses out loud ---------------------------------------
+  // Over plain HTTP there is no microphone API at all, which is the normal case
+  // on a LAN address. This used to be entirely silent: the click evaluated
+  // `state.microphone?.enable()` to undefined and returned, so the button
+  // appeared broken rather than unavailable.
+  await alpha.page.click('.panel-advanced > summary');
+  await alpha.page.click('#calibration-start');
+  await sleep(500);
+  const calibration = await alpha.page.evaluate(() => document.getElementById('calibration-status').textContent);
+  if (!calibration || !/secure context|microphone/i.test(calibration)) {
+    throw new Error(`Calibrate gave no usable reason: ${JSON.stringify(calibration)}`);
+  }
+  ok(`calibration explained itself: "${calibration}"`);
+
   // --- a refused join --------------------------------------------------
   // Stale credentials are the normal case after a coordinator restart, and
   // they used to produce an endless "join a room before sending that message"

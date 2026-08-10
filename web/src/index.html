@@ -4,32 +4,49 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0e13" />
     <title>HomeSync</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="bar">
-      <h1>HomeSync</h1>
-      <div class="bar-right">
-        <span id="status" class="pill pill-idle">disconnected</span>
-        <span id="clock-quality" class="pill pill-idle">clock: —</span>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M6.5 7.5a7 7 0 0 0 0 9M17.5 7.5a7 7 0 0 1 0 9" />
+          <path d="M3.5 4.5a11 11 0 0 0 0 15M20.5 4.5a11 11 0 0 1 0 15" />
+        </svg>
+        <span>HomeSync</span>
+      </div>
+      <div class="status-group">
+        <span id="status" class="chip">disconnected</span>
+        <span id="clock-quality" class="chip">clock: —</span>
       </div>
     </header>
 
     <main>
       <!-- Join ------------------------------------------------------------->
-      <section id="join-panel" class="card">
-        <h2>Join the room</h2>
-        <p class="hint">
-          Audio cannot start without a tap: every browser blocks playback until the
-          user interacts with the page. Joining and enabling audio are the same button
-          for that reason.
+      <section id="join-panel" class="panel panel-hero">
+        <h1>Play everywhere at once</h1>
+        <p class="lede">
+          One room, one timeline. Every device starts at the same instant instead of
+          whenever it happens to be ready.
         </p>
-        <div class="grid">
-          <label>Room code<input id="room-code" autocomplete="off" spellcheck="false" placeholder="ABC123" /></label>
-          <label>Secret<input id="room-secret" autocomplete="off" spellcheck="false" placeholder="from the invite link" /></label>
-          <label>This device<input id="device-name" autocomplete="off" placeholder="Kitchen laptop" /></label>
-          <label>Role
+        <div class="field-grid">
+          <label class="field">
+            <span>Room code</span>
+            <input id="room-code" autocomplete="off" spellcheck="false" placeholder="ABC123" />
+          </label>
+          <label class="field">
+            <span>Secret</span>
+            <input id="room-secret" autocomplete="off" spellcheck="false" placeholder="from the invite link" />
+          </label>
+          <label class="field">
+            <span>This device</span>
+            <input id="device-name" autocomplete="off" placeholder="Kitchen laptop" />
+          </label>
+          <label class="field">
+            <span>Role</span>
             <select id="device-role">
               <option value="speaker">Speaker</option>
               <option value="left">Left speaker</option>
@@ -39,152 +56,176 @@
             </select>
           </label>
         </div>
-        <button id="join" class="primary">Enable audio &amp; join</button>
-      </section>
-
-      <!-- Transport -------------------------------------------------------->
-      <section id="room-panel" class="card hidden">
-        <h2>Room <span id="room-code-label" class="mono"></span></h2>
-
-        <div class="row buttons">
-          <label class="grow">Source
-            <select id="mode-select">
-              <option value="controlled_audio">Local audio file (reference mode)</option>
-              <option value="youtube">YouTube together (experimental)</option>
-              <option value="system_audio">Live system audio (experimental)</option>
-            </select>
-          </label>
-          <span id="media-state" class="pill pill-idle">idle</span>
-        </div>
-
-        <div class="row" id="mode-controlled">
-          <label class="grow">Media
-            <select id="media-select"></select>
-          </label>
-        </div>
-
-        <div class="row hidden" id="mode-youtube">
-          <label class="grow">YouTube video or link
-            <input id="youtube-input" autocomplete="off" spellcheck="false" placeholder="https://youtu.be/… or the 11-character id" />
-          </label>
-          <button id="youtube-load">Load</button>
-        </div>
-
-        <div class="row hidden" id="mode-live">
-          <label class="grow">Latency profile
-            <select id="stream-profile">
-              <option value="music">Music — 400 ms, most resilient</option>
-              <option value="movie">Movie — 200 ms</option>
-              <option value="live">Live — 80 ms, highest dropout risk</option>
-            </select>
-          </label>
-          <label class="check"><input type="checkbox" id="stream-synthetic" checked /> built-in test signal</label>
-          <button id="stream-start" class="primary">Start</button>
-          <button id="stream-stop">Stop</button>
-        </div>
-
-        <p id="youtube-problem" class="problem hidden"></p>
-        <div id="youtube-stage" class="stage hidden"><div id="youtube-player"></div></div>
-
-        <div class="row buttons">
-          <button id="play" class="primary">Play</button>
-          <button id="pause">Pause</button>
-          <button id="stop">Stop</button>
-          <label class="check"><input type="checkbox" id="force" /> start without waiting</label>
-        </div>
-
-        <div class="row">
-          <input type="range" id="seek" min="0" max="1000" value="0" step="1" class="grow" />
-          <span id="position" class="mono">0:00 / 0:00</span>
-        </div>
-      </section>
-
-      <!-- This device ------------------------------------------------------>
-      <section id="device-panel" class="card hidden">
-        <h2>This device</h2>
-        <div class="row">
-          <label class="grow">
-            Manual compensation
-            <input type="range" id="offset" min="-250" max="250" value="0" step="1" />
-          </label>
-          <input type="number" id="offset-number" min="-1000" max="1000" step="1" value="0" class="mono narrow" />
-          <span class="unit">ms</span>
-        </div>
-        <p class="hint">
-          Positive values start this device earlier, for a device that emits sound late.
-          Adjust until the flam between two speakers disappears. Saved per device.
+        <button id="join" class="btn btn-primary btn-lg">Enable audio &amp; join</button>
+        <p class="note">
+          Browsers block playback until you interact with the page, so joining and
+          enabling audio are deliberately the same button.
         </p>
-
-        <div class="row">
-          <label class="grow">Volume<input type="range" id="volume" min="0" max="100" value="100" /></label>
-          <label class="check"><input type="checkbox" id="mute" /> mute</label>
-        </div>
-
-        <dl id="device-facts" class="facts"></dl>
       </section>
 
-      <!-- Calibration ------------------------------------------------------>
-      <section id="calibration-panel" class="card hidden">
-        <h2>Acoustic calibration</h2>
-        <p class="hint">
-          Every other number in this app is measured in software. This one is
-          measured with a microphone: each device chirps in turn, and HomeSync
-          works out when the sound actually arrived where you are sitting.
-          Hold the microphone device where you will listen from, and keep the
-          room quiet.
-        </p>
-        <div class="row buttons">
-          <label class="grow">Microphone device
-            <select id="calibration-mic"></select>
-          </label>
-          <label>Repetitions<input type="number" id="calibration-reps" class="narrow mono" min="3" max="15" value="5" /></label>
-          <button id="calibration-start" class="primary">Calibrate</button>
-          <button id="calibration-cancel">Cancel</button>
-        </div>
-        <p id="calibration-status" class="hint mono"></p>
-        <div class="table-scroll">
-          <table id="calibration-results" class="hidden">
-            <thead>
-              <tr><th>Device</th><th>Measured</th><th>Spread</th><th>Intrinsic</th><th>Applied</th><th>Notes</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
+      <!-- Player ----------------------------------------------------------->
+      <div id="room-panel" class="stack hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Room <code id="room-code-label" class="code"></code></h2>
+            <span id="media-state" class="chip">idle</span>
+          </div>
 
-      <!-- Diagnostics ------------------------------------------------------>
-      <section id="diagnostics-panel" class="card hidden">
-        <h2>Synchronisation diagnostics</h2>
-        <p class="hint">
-          <strong>Clock</strong> is network agreement with the coordinator.
-          <strong>Drift</strong> is player timeline agreement. Neither measures
-          what a microphone in the room would hear — only the
-          <strong>Acoustic</strong> column comes from a real measurement, and
-          only after you run a calibration.
-        </p>
-        <div class="table-scroll">
-          <table id="clients">
-            <thead>
-              <tr>
-                <th>Device</th><th>Role</th><th>Clock</th><th>Offset</th><th>RTT</th>
-                <th>±</th><th>Drift ppm</th><th>Ready</th><th>Timeline drift</th>
-                <th>Manual</th><th>Acoustic</th><th>Buffer</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
+          <div class="segmented" role="group" aria-label="Source">
+            <input type="radio" name="mode" id="mode-music" value="controlled_audio" checked />
+            <label for="mode-music">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="16.5" cy="16" r="2.5" /></svg>
+              Music
+            </label>
+            <input type="radio" name="mode" id="mode-yt" value="youtube" />
+            <label for="mode-yt">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" /><path d="M10 9.5v5l4.5-2.5z" /></svg>
+              YouTube
+            </label>
+          </div>
 
-      <section id="log-panel" class="card hidden">
-        <h2>Log</h2>
-        <p class="hint">
-          Found something odd? <button id="download-diagnostics">Download diagnostics</button>
-          saves a JSON snapshot of every device's clock, telemetry, buffer health
-          and the last calibration — far more useful than describing what you heard.
-        </p>
-        <pre id="log" class="log"></pre>
-      </section>
+          <div id="mode-controlled" class="mode-body">
+            <label class="field">
+              <span>Track</span>
+              <select id="media-select"></select>
+            </label>
+          </div>
+
+          <div id="mode-youtube" class="mode-body hidden">
+            <div class="field-row">
+              <label class="field grow">
+                <span>Video or link</span>
+                <input id="youtube-input" autocomplete="off" spellcheck="false" placeholder="https://youtu.be/… or the 11-character id" />
+              </label>
+              <button id="youtube-load" class="btn">Load</button>
+            </div>
+          </div>
+
+          <p id="youtube-problem" class="alert hidden"></p>
+          <div id="youtube-stage" class="stage hidden"><div id="youtube-player"></div></div>
+
+          <div class="transport">
+            <button id="play" class="btn btn-primary btn-icon" title="Play" aria-label="Play">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
+            </button>
+            <button id="pause" class="btn btn-icon" title="Pause" aria-label="Pause">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="5.5" width="3.5" height="13" rx="1" /><rect x="13.5" y="5.5" width="3.5" height="13" rx="1" /></svg>
+            </button>
+            <button id="stop" class="btn btn-icon" title="Stop" aria-label="Stop">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+            </button>
+            <input type="range" id="seek" class="scrub" min="0" max="1000" value="0" step="1" aria-label="Position" />
+            <span id="position" class="time">0:00 / 0:00</span>
+          </div>
+        </section>
+
+        <!-- Devices ---------------------------------------------------------->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Devices</h2>
+          </div>
+          <div id="devices" class="devices"></div>
+          <p class="note">
+            <strong>Clock</strong> is agreement with the coordinator.
+            <strong>Drift</strong> is how far this device's playback is from where the
+            room says it should be. Neither is what a microphone in the room would hear.
+          </p>
+        </section>
+
+        <!-- This device ------------------------------------------------------>
+        <section id="device-panel" class="panel">
+          <div class="panel-head">
+            <h2>This device</h2>
+          </div>
+          <div class="slider-row">
+            <label class="field grow">
+              <span>Volume</span>
+              <input type="range" id="volume" min="0" max="100" value="100" />
+            </label>
+            <label class="switch">
+              <input type="checkbox" id="mute" />
+              <span>Mute</span>
+            </label>
+          </div>
+          <div class="slider-row">
+            <label class="field grow">
+              <span>Timing compensation</span>
+              <input type="range" id="offset" min="-250" max="250" value="0" step="1" />
+            </label>
+            <div class="stepper">
+              <input type="number" id="offset-number" min="-1000" max="1000" step="1" value="0" />
+              <span class="unit">ms</span>
+            </div>
+          </div>
+          <p class="note">
+            Positive values start this device earlier, for a device that emits sound
+            late. Nudge it until the flam between two speakers disappears. Saved per
+            device.
+          </p>
+        </section>
+
+        <!-- Everything else -------------------------------------------------->
+        <details class="panel panel-advanced">
+          <summary>
+            <span>Advanced</span>
+            <span class="note">Calibration, activity log, diagnostics</span>
+          </summary>
+
+          <div class="advanced-body">
+            <label class="switch">
+              <input type="checkbox" id="force" />
+              <span>Start without waiting for every device</span>
+            </label>
+
+            <hr />
+
+            <h3>Audio path on this device</h3>
+            <dl id="device-facts" class="facts"></dl>
+
+            <hr />
+
+            <h3>Acoustic calibration</h3>
+            <p class="note">
+              Every other number here is measured in software. This one uses a
+              microphone: each device chirps in turn and HomeSync works out when the
+              sound actually arrived where you are sitting. Needs the coordinator
+              started with <code class="code">--tls</code>, because microphone access
+              requires a secure context.
+            </p>
+            <div class="field-row">
+              <label class="field grow">
+                <span>Microphone device</span>
+                <select id="calibration-mic"></select>
+              </label>
+              <label class="field">
+                <span>Repetitions</span>
+                <input type="number" id="calibration-reps" min="3" max="15" value="5" />
+              </label>
+              <button id="calibration-start" class="btn btn-primary">Calibrate</button>
+              <button id="calibration-cancel" class="btn">Cancel</button>
+            </div>
+            <p id="calibration-status" class="note"></p>
+            <div class="table-scroll">
+              <table id="calibration-results" class="hidden">
+                <thead>
+                  <tr><th>Device</th><th>Measured</th><th>Spread</th><th>Intrinsic</th><th>Applied</th><th>Notes</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <hr />
+
+            <h3>Activity</h3>
+            <p class="note">
+              Something looks wrong? <button id="download-diagnostics" class="btn btn-sm">Download diagnostics</button>
+              saves every device's clock, telemetry and buffer health as JSON — far more
+              useful than describing what you heard.
+            </p>
+            <pre id="log" class="log"></pre>
+          </div>
+        </details>
+      </div>
     </main>
 
     <script type="module" src="/app.js"></script>

@@ -146,7 +146,7 @@ including pause, seek and a buffering event.*
 Implemented. Verified only in headless browsers, which proves the rendezvous
 messages flow — not that anything sounded right.
 
-1. Switch the source to **YouTube together** and load a video.
+1. Switch the source to **YouTube** and load a video.
 2. Press Play. Each device seeks to the target and starts early by its own
    learned latency; the first attempt is the worst, since the estimate has not
    been measured yet.
@@ -199,16 +199,15 @@ profile.*
 The synthetic source makes this runnable anywhere, and is the right place to
 start because it removes capture from the equation:
 
-1. Source → **Live system audio**, profile **Music**, **built-in test signal**
-   ticked, then **Start**.
-2. Watch the Buffer column: depth should settle near the target and underruns
-   should stay at zero.
-3. The test signal clicks once a second, so two receivers can be judged by ear
-   exactly as with the click track.
+**The interface no longer offers this mode.** The coordinator and the receivers
+still implement it, and `crates/homesync-server/tests/live_stream.rs` still
+covers the whole path — capture, framing, binary distribution, worklet
+buffering — against the synthetic source. What was removed is the button, on
+the grounds that the Windows capture path has never been run against real
+hardware and an unverified mode does not belong beside two that work.
 
-Then untick the test signal on a Windows host to capture real system audio.
-That path is compile-checked but has never been run — expect to find problems,
-and record them.
+Restoring it is a matter of putting the controls back: send `stream_start` with
+a profile and the `synthetic` flag, and `stream_stop` to end it.
 
 Remember that video on the host will lead the room by the whole buffer depth.
 This mode is for music.

@@ -157,10 +157,9 @@ async function join() {
   connection.connect();
 
   $('join-panel').classList.add('hidden');
-  for (const id of ['room-panel', 'device-panel', 'calibration-panel', 'diagnostics-panel', 'log-panel']) {
-    $(id).classList.remove('hidden');
-  }
-  if (role === 'controller') $('device-panel').classList.add('hidden');
+  $('room-panel').classList.remove('hidden');
+  // A controller has no audio output, so nothing on it is worth compensating.
+  $('device-panel').classList.toggle('hidden', role === 'controller');
 }
 
 // ---------------------------------------------------------------------------
@@ -192,9 +191,7 @@ function onJoinRejected(error) {
 
   // Back to the join screen: nothing else on this page means anything now.
   $('join-panel').classList.remove('hidden');
-  for (const id of ['room-panel', 'device-panel', 'calibration-panel', 'diagnostics-panel']) {
-    $(id).classList.add('hidden');
-  }
+  $('room-panel').classList.add('hidden');
   $('room-secret').value = '';
   setPill($('status'), 'not joined', 'idle');
 
@@ -354,18 +351,9 @@ async function loadMedia(item) {
 // ---------------------------------------------------------------------------
 
 function wireControls() {
-  $('mode-select').addEventListener('change', (event) => {
-    const mode = event.target.value;
-    showModeControls(mode);
-    if (mode === 'controlled_audio') {
-      const mediaId = $('media-select').value || null;
-      if (mediaId) state.connection?.send('select_source', { mode, media_id: mediaId });
-    } else if (mode === 'youtube') {
-      const videoId = parseVideoId($('youtube-input').value);
-      if (videoId) state.connection?.send('select_source', { mode, youtube_video_id: videoId });
-    }
-    // Live audio is not selected here — it begins when a stream starts.
-  });
+  for (const radio of modeRadios()) {
+    radio.addEventListener('change', () => selectMode(radio.value));
+  }
 
   $('media-select').addEventListener('change', (event) => {
     state.connection?.send('select_source', {
@@ -383,13 +371,6 @@ function wireControls() {
     state.connection?.send('select_source', { mode: 'youtube', youtube_video_id: videoId });
   });
 
-  $('stream-start').addEventListener('click', () => {
-    state.connection?.send('stream_start', {
-      profile: $('stream-profile').value,
-      synthetic: $('stream-synthetic').checked,
-    });
-  });
-  $('stream-stop').addEventListener('click', () => state.connection?.send('stream_stop'));
 
   $('calibration-start').addEventListener('click', () => {
     const microphoneClientId = $('calibration-mic').value;
@@ -574,15 +555,43 @@ function totalCompensationMs() {
 
 /** Shows the controls belonging to one source mode. */
 function showModeControls(mode) {
-  if ($('mode-select').value !== mode && mode) $('mode-select').value = mode;
-  $('mode-controlled').classList.toggle('hidden', mode !== 'controlled_audio');
-  $('mode-youtube').classList.toggle('hidden', mode !== 'youtube');
-  $('mode-live').classList.toggle('hidden', mode !== 'system_audio');
-  // Live audio has no timeline to scrub: it is whatever the host is playing.
+  for (const radio of modeRadios()) {
+    if (radio.value === mode) radio.checked = true;
+  }
+  // A room with nothing selected reports `idle`, which is not a mode anyone can
+  // pick. Falling back to the chosen segment means the picker for that source is
+  // on screen — otherwise a fresh room shows two tabs and no way to use either.
+  const shown = mode === 'controlled_audio' || mode === 'youtube' ? mode : checkedMode();
+  $('mode-controlled').classList.toggle('hidden', shown !== 'controlled_audio');
+  $('mode-youtube').classList.toggle('hidden', shown !== 'youtube');
+  // A live stream has no timeline to scrub: it is whatever the host is playing.
+  // The client can still receive one, but this build offers no way to start it.
   const timeline = mode !== 'system_audio';
   $('seek').disabled = !timeline;
   $('play').disabled = !timeline;
   $('pause').disabled = !timeline;
+}
+
+/** The source-mode radio group. */
+function modeRadios() {
+  return document.querySelectorAll('input[name="mode"]');
+}
+
+/** Which source segment the user currently has selected. */
+function checkedMode() {
+  return document.querySelector('input[name="mode"]:checked')?.value ?? 'controlled_audio';
+}
+
+/** Switches source, telling the room only when there is something to play. */
+function selectMode(mode) {
+  showModeControls(mode);
+  if (mode === 'controlled_audio') {
+    const mediaId = $('media-select').value || null;
+    if (mediaId) state.connection?.send('select_source', { mode, media_id: mediaId });
+  } else if (mode === 'youtube') {
+    const videoId = parseVideoId($('youtube-input').value);
+    if (videoId) state.connection?.send('select_source', { mode, youtube_video_id: videoId });
+  }
 }
 
 function clampOffset(ms) {
@@ -693,40 +702,77 @@ function renderMediaOptions(items) {
   state.selectedItem = items.find((i) => i.id === wanted) ?? null;
 }
 
+/**
+ * One card per device: the three numbers that decide whether the room is
+ * actually in sync, and nothing else.
+ *
+ * The wide table this replaces showed twelve columns, most of which only meant
+ * something if you already knew what to look for. Everything it had is still in
+ * the diagnostics export, which is the right place for it.
+ */
 function renderClients() {
-  const tbody = document.querySelector('#clients tbody');
+  const host = $('devices');
   const snapshot = state.snapshot;
   if (!snapshot) return;
-  tbody.innerHTML = '';
 
+  host.replaceChildren();
   for (const client of snapshot.clients) {
-    const row = document.createElement('tr');
-    if (client.client_id === state.connection?.clientId) row.classList.add('self');
     const clock = client.clock ?? {};
     const diagnostics = client.diagnostics ?? {};
-    const buffer = client.buffer;
-    const cells = [
-      client.name + (client.client_id === snapshot.owner_client_id ? ' ★' : ''),
-      client.role,
-      clock.quality ?? '—',
-      fmt(clock.offset_ns / 1e6, 'ms', 2),
-      fmt(clock.rtt_median_ms, 'ms', 1),
-      fmt(clock.offset_uncertainty_ms, 'ms', 2),
-      fmt(clock.drift_ppm, '', 1),
-      client.ready ? 'yes' : 'no',
-      client.role === 'controller' ? '—' : fmt(diagnostics.drift_ms, 'ms', 2),
-      fmt(client.manual_offset_ms, 'ms', 0),
-      client.acoustic_offset_ms ? fmt(client.acoustic_offset_ms, 'ms', 0) : '—',
-      buffer ? `${buffer.depth_ms.toFixed(0)}/${buffer.target_ms.toFixed(0)} ms · ${buffer.underruns} u` : '—',
-    ];
-    for (const [index, value] of cells.entries()) {
-      const cell = document.createElement('td');
-      cell.textContent = value;
-      if (index >= 3) cell.classList.add('mono');
-      row.append(cell);
+    const isSelf = client.client_id === state.connection?.clientId;
+
+    const card = document.createElement('div');
+    card.className = isSelf ? 'device device-self' : 'device';
+
+    const top = document.createElement('div');
+    top.className = 'device-top';
+
+    const dot = document.createElement('span');
+    dot.className = `dot ${clockDotClass(clock.quality)}`;
+    dot.title = `clock: ${clock.quality ?? 'unknown'}`;
+
+    const name = document.createElement('span');
+    name.className = 'device-name';
+    name.textContent = client.name + (client.client_id === snapshot.owner_client_id ? ' ★' : '');
+
+    const role = document.createElement('span');
+    role.className = isSelf ? 'device-role' : 'device-role device-role-role';
+    role.textContent = isSelf ? 'this device' : client.role;
+
+    top.append(dot, name, role);
+
+    const stats = document.createElement('div');
+    stats.className = 'device-stats';
+    const drift = client.role === 'controller' ? '—' : fmt(diagnostics.drift_ms, 'ms', 1);
+    const compensation = (client.manual_offset_ms || 0) + (client.acoustic_offset_ms || 0);
+    for (const [label, value] of [
+      ['Clock', fmt(clock.offset_uncertainty_ms, 'ms', 1)],
+      ['Drift', drift],
+      ['Comp', compensation ? `${Math.round(compensation)} ms` : '—'],
+    ]) {
+      const stat = document.createElement('div');
+      stat.className = 'stat';
+      const key = document.createElement('span');
+      key.className = 'stat-label';
+      key.textContent = label;
+      const val = document.createElement('span');
+      val.className = 'stat-value';
+      val.textContent = value;
+      stat.append(key, val);
+      stats.append(stat);
     }
-    tbody.append(row);
+
+    card.append(top, stats);
+    host.append(card);
   }
+}
+
+/** Traffic light for a device's clock agreement. */
+function clockDotClass(quality) {
+  if (quality === 'stable') return 'dot-ok';
+  if (quality === 'degraded') return 'dot-warn';
+  if (quality === 'resync_required') return 'dot-bad';
+  return '';
 }
 
 function refreshUi() {
@@ -803,7 +849,7 @@ function formatTime(ns) {
 
 function setPill(element, text, kind) {
   element.textContent = text;
-  element.className = `pill pill-${kind}`;
+  element.className = `chip${kind === 'idle' ? '' : ` chip-${kind}`}`;
 }
 
 function log(message) {
