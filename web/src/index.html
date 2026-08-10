@@ -107,10 +107,14 @@
           </div>
 
           <div id="mode-controlled" class="mode-body">
-            <label class="field">
-              <span>Track</span>
-              <select id="media-select"></select>
-            </label>
+            <div class="field-row">
+              <label class="field grow">
+                <span>Library</span>
+                <select id="media-select"></select>
+              </label>
+              <button id="queue-clear" class="btn">Clear</button>
+            </div>
+            <ol id="queue" class="queue"></ol>
           </div>
 
           <div id="mode-youtube" class="mode-body hidden">
@@ -183,6 +187,22 @@
             Positive values start this device earlier, for a device that emits sound
             late. Nudge it until the flam between two speakers disappears. Saved per
             device.
+          </p>
+
+          <hr />
+
+          <div class="panel-head">
+            <h3>Equaliser</h3>
+            <button id="eq-reset" class="btn btn-sm">Flat</button>
+          </div>
+          <div id="eq" class="eq"></div>
+          <p class="note">
+            Shapes this device's own output, so a boomy speaker can be tamed without
+            touching the rest of the room. Saved per device. Applies to
+            <strong>Music</strong> only — a YouTube player's audio never reaches this
+            page, so nothing here can filter it. Calibration chirps deliberately
+            bypass it, so a measurement still hears the speaker rather than the
+            filters.
           </p>
         </section>
 

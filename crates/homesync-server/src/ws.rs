@@ -257,6 +257,10 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                     "downloaded media did not match the manifest hash; refusing to mark ready",
                 ));
             }
+            // The only place a decoded duration is ever known: the coordinator
+            // parses WAV headers and nothing else, so without this the queue
+            // could not tell when an MP3 or a FLAC ends.
+            room.note_duration(&ready.media_id, ready.duration_ns);
             room.set_ready(&session.client_id, &ready.media_id);
             let now = app.now_ns();
             let snapshot = room.snapshot(app.media.manifest());
@@ -276,7 +280,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
 
             let mut rooms = app.rooms();
             let Some(room) = rooms.get_mut(&code) else { return };
-            if let Some(id) = &select.media_id {
+            for id in select.queue.iter().chain(select.media_id.iter()) {
                 if !app.media.contains(id) {
                     drop(rooms);
                     session.error(app, "no_such_media", "media id is not in the catalogue", request_id);
@@ -295,7 +299,13 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             }
             let now = app.now_ns();
             room.stream = None;
-            room.select_source(select.mode, select.media_id, select.youtube_video_id, now);
+            if select.mode == SourceMode::ControlledAudio && !select.queue.is_empty() {
+                room.set_queue(select.queue, now);
+            } else {
+                room.queue.clear();
+                room.queue_index = 0;
+                room.select_source(select.mode, select.media_id, select.youtube_video_id, now);
+            }
             tracing::info!(client = %session.client_id, mode = ?select.mode, "source selected");
             broadcast_transport_and_snapshot(app, room, now);
         }
@@ -607,6 +617,14 @@ pub fn flush_dirty_rooms(app: &App) {
     let manifest = app.media.manifest();
     let mut rooms = app.rooms();
     for room in rooms.values_mut() {
+        // Checked on the same tick as the snapshot flush rather than from a
+        // timer per track: a timer would have to be cancelled on every pause,
+        // seek and source change, and getting that wrong means a track that
+        // advances while the room is paused.
+        if let Some(started) = room.advance_queue(now) {
+            tracing::info!(room = %room.code, media = %started, "queue advanced");
+            room.broadcast(Payload::Transport(room.transport.clone()), now);
+        }
         if !room.dirty || room.clients.is_empty() {
             continue;
         }

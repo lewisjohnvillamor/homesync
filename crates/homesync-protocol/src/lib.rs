@@ -346,6 +346,11 @@ pub struct SelectSource {
     /// Video identifier, for [`SourceMode::Youtube`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub youtube_video_id: Option<String>,
+    /// Media ids to queue, in play order, for [`SourceMode::ControlledAudio`].
+    /// When present it replaces the room's queue and `media_id` is ignored: the
+    /// first entry becomes the current track.
+    #[serde(default)]
+    pub queue: Vec<String>,
 }
 
 /// Controller's request to start live system-audio capture.
@@ -739,6 +744,12 @@ pub struct RoomSnapshot {
     /// Source modes this coordinator build actually implements.
     #[serde(default)]
     pub supported_modes: Vec<SourceMode>,
+    /// Media ids queued for playback, in order. Empty when nothing is queued.
+    #[serde(default)]
+    pub queue: Vec<String>,
+    /// Index into `queue` of the track currently on the transport.
+    #[serde(default)]
+    pub queue_index: usize,
 }
 
 /// One participant, as published to every other participant.
@@ -880,6 +891,7 @@ mod tests {
             mode: SourceMode::ControlledAudio,
             media_id: Some("m".into()),
             youtube_video_id: None,
+            queue: vec!["m".into(), "n".into()],
         }));
         roundtrip(Payload::Transport(Transport::default()));
         roundtrip(Payload::StreamStart(StreamStart { profile: "music".into(), synthetic: true }));

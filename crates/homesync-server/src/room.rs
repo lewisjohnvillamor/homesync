@@ -78,6 +78,10 @@ pub struct Client {
     /// from `info.ready` so a stale readiness report for previous media can be
     /// recognised and ignored.
     pub ready_media_id: Option<String>,
+    /// Media id this client has decoded ahead of time, for the track queued
+    /// after the current one. Kept apart from `ready_media_id` so preloading
+    /// never overwrites the record of being ready for what is playing now.
+    pub preloaded_media_id: Option<String>,
     /// Outbound channel to this client's socket writer.
     pub tx: ClientSender,
     /// Exponential moving average of this device's YouTube start latency, in
@@ -117,6 +121,18 @@ pub struct Room {
     /// carries the measurements rather than only the compensation they
     /// produced.
     pub last_calibration: Option<CalibrationResult>,
+    /// Media ids queued for this room, in play order. Empty means nothing is
+    /// queued; a single entry behaves exactly like selecting one track.
+    pub queue: Vec<String>,
+    /// Index into `queue` of the track the transport is currently on.
+    pub queue_index: usize,
+    /// Decoded durations reported by receivers, keyed by media id.
+    ///
+    /// The coordinator cannot work these out for itself: it only parses WAV
+    /// headers, so an MP3 or a FLAC has no duration in the catalogue. Receivers
+    /// decode the file anyway and already report the exact length in
+    /// `receiver_ready`, which is the only place this is known.
+    pub durations_ns: BTreeMap<String, u64>,
     /// Counter for YouTube rendezvous messages, independent of the transport
     /// epoch so a single device can be corrected without telling the whole
     /// room its timeline changed.
@@ -138,6 +154,9 @@ impl Room {
             stream: None,
             calibration: None,
             last_calibration: None,
+            queue: Vec::new(),
+            queue_index: 0,
+            durations_ns: BTreeMap::new(),
             rendezvous_epoch: 0,
             start_lead_ns,
             max_clients,
@@ -177,6 +196,7 @@ impl Room {
             Client {
                 info,
                 ready_media_id: None,
+                preloaded_media_id: None,
                 tx,
                 youtube_start_latency_ms: DEFAULT_YOUTUBE_START_LATENCY_MS,
                 youtube_drift_strikes: 0,
@@ -240,13 +260,113 @@ impl Room {
     /// Records a receiver's readiness. Reports for anything other than the
     /// currently selected media are ignored, which is what makes a rapid
     /// source change safe.
+    /// Records a duration a receiver measured by decoding the file.
+    ///
+    /// Kept as the shortest report seen. Receivers agree to well within a
+    /// millisecond on the same file, so this is really just a guard against one
+    /// device reporting nonsense and the queue then advancing late for the
+    /// whole room.
+    pub fn note_duration(&mut self, media_id: &str, duration_ns: u64) {
+        if duration_ns == 0 {
+            return;
+        }
+        let entry = self.durations_ns.entry(media_id.to_string()).or_insert(duration_ns);
+        *entry = (*entry).min(duration_ns);
+    }
+
+    /// The media id that should follow the current one, if any.
+    pub fn next_in_queue(&self) -> Option<&str> {
+        self.queue.get(self.queue_index + 1).map(String::as_str)
+    }
+
+    /// Whether the current track has played to its end.
+    ///
+    /// `None` for a track whose length nobody has reported yet: advancing on a
+    /// guess would cut a song short, and waiting costs only the gap until a
+    /// receiver reports.
+    fn track_finished(&self, now_ns: u64) -> Option<bool> {
+        if self.transport.state != TransportState::Playing || self.transport.mode != SourceMode::ControlledAudio {
+            return Some(false);
+        }
+        let media_id = self.transport.media_id.as_deref()?;
+        let duration = *self.durations_ns.get(media_id)?;
+        Some(self.transport.position_at(now_ns) >= duration)
+    }
+
+    /// Moves to the next queued track when the current one ends.
+    ///
+    /// Returns the media id started, so the caller can tell the room. The new
+    /// track begins `start_lead_ns` in the future exactly as a manual start
+    /// does, which is the whole reason receivers preload the next item while
+    /// the current one is still playing: by the time this fires they already
+    /// hold the decoded buffer and can schedule against the same instant.
+    pub fn advance_queue(&mut self, now_ns: u64) -> Option<String> {
+        if self.track_finished(now_ns) != Some(true) {
+            return None;
+        }
+        let next = self.next_in_queue()?.to_string();
+        self.queue_index += 1;
+        self.transport.media_id = Some(next.clone());
+        self.transport.anchor_media_ns = 0;
+        self.transport.anchor_server_ns = now_ns + self.start_lead_ns;
+        self.transport.epoch += 1;
+        // Readiness belonged to the previous track. A receiver that preloaded
+        // this one carries straight over; one that did not is simply late, and
+        // being late is not the same as being unready for ever.
+        for client in self.clients.values_mut() {
+            // Already decoded either because it was preloaded, or because the
+            // same track is queued twice and the buffer never went anywhere.
+            let holds_it = client.preloaded_media_id.as_deref() == Some(next.as_str())
+                || client.ready_media_id.as_deref() == Some(next.as_str());
+            client.info.ready = holds_it;
+            if holds_it {
+                client.ready_media_id = Some(next.clone());
+            }
+            client.preloaded_media_id = None;
+        }
+        self.dirty = true;
+        Some(next)
+    }
+
+    /// Replaces the queue.
+    ///
+    /// Editing a queue while it plays — appending a track, removing one further
+    /// down — must not interrupt what is currently playing. So when the new
+    /// list still has the current track at the current position, only the list
+    /// changes; anything else is a fresh selection starting from the top.
+    pub fn set_queue(&mut self, media_ids: Vec<String>, now_ns: u64) {
+        let playing_same = self.transport.media_id.as_ref().is_some_and(|current| {
+            self.transport.mode == SourceMode::ControlledAudio && media_ids.get(self.queue_index) == Some(current)
+        });
+        if playing_same {
+            self.queue = media_ids;
+            self.dirty = true;
+            return;
+        }
+        self.queue = media_ids;
+        self.queue_index = 0;
+        let first = self.queue.first().cloned();
+        self.select_source(SourceMode::ControlledAudio, first, None, now_ns);
+    }
+
     pub fn set_ready(&mut self, client_id: &str, media_id: &str) {
-        if self.transport.media_id.as_deref() != Some(media_id) {
+        // A receiver decodes the next queued track while the current one is
+        // still playing, so a report can legitimately name either. Rejecting
+        // the preload — as this did — meant every device was marked unready the
+        // instant the queue advanced, and the gap between tracks was a full
+        // download and decode rather than nothing at all.
+        let is_current = self.transport.media_id.as_deref() == Some(media_id);
+        let is_next = self.next_in_queue() == Some(media_id);
+        if !is_current && !is_next {
             return;
         }
         if let Some(client) = self.clients.get_mut(client_id) {
-            client.info.ready = true;
-            client.ready_media_id = Some(media_id.to_string());
+            if is_current {
+                client.info.ready = true;
+                client.ready_media_id = Some(media_id.to_string());
+            } else {
+                client.preloaded_media_id = Some(media_id.to_string());
+            }
         }
         if self.transport.state == TransportState::Loading && self.all_receivers_ready() {
             self.transport.state = TransportState::Ready;
@@ -516,6 +636,8 @@ impl Room {
             transport: self.transport.clone(),
             media,
             start_lead_ms: self.start_lead_ns as f64 / 1e6,
+            queue: self.queue.clone(),
+            queue_index: self.queue_index,
             stream: self.stream.clone(),
             calibration: self.calibration.clone(),
             supported_modes: vec![SourceMode::ControlledAudio, SourceMode::Youtube, SourceMode::SystemAudio],
@@ -1085,5 +1207,139 @@ mod tests {
         let mut room = youtube_room("a");
         let first = room.next_rendezvous_epoch();
         assert!(room.next_rendezvous_epoch() > first);
+    }
+
+    /// A room playing a two-track queue from `now_ns = 0`.
+    fn queued_room() -> Room {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into(), "two".into()], 0);
+        room.set_ready("a", "one");
+        room.play(0, false).expect("play");
+        room
+    }
+
+    #[test]
+    fn a_track_of_unknown_length_is_never_cut_short() {
+        let mut room = queued_room();
+        // Nobody has reported a duration: the coordinator parses WAV headers
+        // and nothing else, so an MP3 or a FLAC arrives here with no length at
+        // all. Guessing would truncate the song.
+        assert_eq!(room.advance_queue(LEAD + 3_600_000_000_000), None);
+        assert_eq!(room.transport.media_id.as_deref(), Some("one"));
+    }
+
+    #[test]
+    fn the_queue_advances_when_the_track_ends() {
+        let mut room = queued_room();
+        room.note_duration("one", 10_000_000_000);
+
+        assert_eq!(room.advance_queue(LEAD + 9_000_000_000), None, "still playing");
+        assert_eq!(room.advance_queue(LEAD + 10_000_000_000).as_deref(), Some("two"));
+        assert_eq!(room.transport.media_id.as_deref(), Some("two"));
+        assert_eq!(room.transport.anchor_media_ns, 0, "the next track starts at its beginning");
+        assert_eq!(room.queue_index, 1);
+    }
+
+    #[test]
+    fn the_last_track_does_not_wrap_or_repeat() {
+        let mut room = queued_room();
+        room.note_duration("one", 1_000_000_000);
+        room.note_duration("two", 1_000_000_000);
+
+        assert_eq!(room.advance_queue(LEAD + 1_000_000_000).as_deref(), Some("two"));
+        // Past the end of the last track: nothing left to start, and the room
+        // must not loop back round on its own.
+        let end = room.transport.anchor_server_ns + 5_000_000_000;
+        assert_eq!(room.advance_queue(end), None);
+        assert_eq!(room.transport.media_id.as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn a_paused_queue_stays_where_it_was_left() {
+        let mut room = queued_room();
+        room.note_duration("one", 1_000_000_000);
+        room.pause(LEAD + 500_000_000);
+
+        // Checked on the snapshot tick rather than by a per-track timer, so
+        // this is the case a timer would have had to remember to cancel.
+        assert_eq!(room.advance_queue(LEAD + 60_000_000_000), None);
+        assert_eq!(room.transport.media_id.as_deref(), Some("one"));
+    }
+
+    #[test]
+    fn the_next_track_starts_far_enough_ahead_to_be_scheduled() {
+        let mut room = queued_room();
+        room.note_duration("one", 1_000_000_000);
+        let now = LEAD + 1_000_000_000;
+        room.advance_queue(now).expect("advance");
+
+        // Receivers need the same warning they get from a manual start, which
+        // is why they preload the next item while the current one plays.
+        assert_eq!(room.transport.anchor_server_ns, now + LEAD);
+    }
+
+    #[test]
+    fn a_device_that_preloaded_the_next_track_stays_ready() {
+        let mut room = queued_room();
+        room.note_duration("one", 1_000_000_000);
+        // Preloaded while the first track was still playing.
+        room.set_ready("a", "two");
+        assert!(room.clients["a"].info.ready);
+
+        room.advance_queue(LEAD + 1_000_000_000).expect("advance");
+        assert!(room.clients["a"].info.ready, "a preloaded device must not be marked unready");
+    }
+
+    #[test]
+    fn the_shortest_reported_duration_wins() {
+        let mut room = queued_room();
+        room.note_duration("one", 10_000_000_000);
+        room.note_duration("one", 0);
+        room.note_duration("one", 9_000_000_000);
+        assert_eq!(room.durations_ns["one"], 9_000_000_000, "zero is not a duration");
+    }
+
+    #[test]
+    fn the_same_track_queued_twice_stays_ready() {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into(), "one".into()], 0);
+        room.set_ready("a", "one");
+        room.play(0, false).expect("play");
+        room.note_duration("one", 1_000_000_000);
+
+        room.advance_queue(LEAD + 1_000_000_000).expect("advance");
+        assert!(room.clients["a"].info.ready, "the buffer never went anywhere");
+    }
+
+    #[test]
+    fn appending_to_a_playing_queue_does_not_interrupt_it() {
+        let mut room = queued_room();
+        let before = room.transport.clone();
+
+        room.set_queue(vec!["one".into(), "two".into(), "three".into()], LEAD + 5_000_000_000);
+
+        assert_eq!(room.transport, before, "editing the list must not restart the track");
+        assert_eq!(room.queue.len(), 3);
+        assert_eq!(room.queue_index, 0);
+    }
+
+    #[test]
+    fn a_genuinely_different_queue_starts_from_the_top() {
+        let mut room = queued_room();
+        room.set_queue(vec!["three".into(), "four".into()], LEAD + 5_000_000_000);
+
+        assert_eq!(room.transport.media_id.as_deref(), Some("three"));
+        assert_eq!(room.queue_index, 0);
+    }
+
+    #[test]
+    fn a_youtube_room_never_advances_a_queue() {
+        let mut room = queued_room();
+        room.note_duration("one", 1_000_000_000);
+        room.select_source(SourceMode::Youtube, None, Some("QpJD4K_PLSI".into()), 0);
+        room.play(0, false).expect("play");
+        assert_eq!(room.advance_queue(LEAD + 60_000_000_000), None);
     }
 }
