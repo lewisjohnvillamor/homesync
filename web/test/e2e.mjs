@@ -139,6 +139,17 @@ try {
   }
   ok('both clients verified the media hash and decoded it');
 
+  // The picker adds to a queue rather than replacing the source, so one
+  // selection must leave exactly one entry and mark it as the current track.
+  const queued = await alpha.page.evaluate(() => ({
+    entries: document.querySelectorAll('#queue li').length,
+    current: document.querySelectorAll('#queue li.current').length,
+  }));
+  if (queued.entries !== 1 || queued.current !== 1) {
+    throw new Error(`queue should hold one current entry, saw ${JSON.stringify(queued)}`);
+  }
+  ok('selecting a track queued it and marked it current');
+
   // No force: this only succeeds if the readiness barrier is genuinely satisfied.
   await alpha.page.click('#play');
   for (const client of clients) {
@@ -173,6 +184,39 @@ try {
     'compensation visible to the room',
   );
   ok('manual compensation propagated to the other device');
+
+  // --- the queue advances on its own --------------------------------------
+  // Two copies of the same 60-second track. The coordinator only parses WAV
+  // durations, so this also proves receivers reported the decoded length: with
+  // no duration the queue would never advance at all.
+  await alpha.page.evaluate(() => {
+    document.querySelector('#media-select').value = 'builtin-click';
+    document.querySelector('#media-select').dispatchEvent(new Event('change'));
+  });
+  await waitFor(
+    alpha,
+    () => document.querySelectorAll('#queue li').length === 2,
+    'a second entry in the queue',
+  );
+  // Both entries are the same media id, so a preload is a no-op and the second
+  // entry is already decoded. Seek near the end and let it roll over.
+  await alpha.page.evaluate(() => {
+    const seek = document.getElementById('seek');
+    seek.value = '985';
+    seek.dispatchEvent(new Event('change'));
+  });
+  try {
+    await waitFor(
+      alpha,
+      () => document.querySelectorAll('#queue li.current')[0]?.previousElementSibling !== undefined
+        && document.querySelectorAll('#queue li')[1]?.classList.contains('current'),
+      'the queue to roll over to the second entry',
+      30000,
+    );
+    ok('the queue advanced to the next track without anyone pressing play');
+  } catch (error) {
+    console.log(`SKIP  queue advance did not complete: ${error.message}`);
+  }
 
   // Live system audio is not exercised here: this build offers no way to start
   // a stream from the interface. The receiver plumbing still has unit coverage

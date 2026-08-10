@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ClockEstimator } from '../src/clock.js';
-import { Player, LatencyMode, MIN_SCHEDULE_LEAD_S, positionAtServerNs } from '../src/player.js';
+import { Player, LatencyMode, MIN_SCHEDULE_LEAD_S, positionAtServerNs, clampDb, EQ_BANDS, EQ_LIMIT_DB } from '../src/player.js';
 
 const NOW_MS = 1000;
 
@@ -261,4 +261,25 @@ test('positionAtServerNs matches the coordinator formula', () => {
   // Before the anchor the position stays pinned rather than going negative.
   assert.equal(positionAtServerNs(transport, 0), 500);
   assert.equal(positionAtServerNs({ ...transport, state: 'paused' }, 9999), 500);
+});
+
+test('equaliser gains are clamped rather than trusted', () => {
+  // These come from a range input and from localStorage, which is to say from
+  // anywhere. A NaN reaching BiquadFilterNode.gain throws and takes the whole
+  // audio graph down with it.
+  assert.equal(clampDb(3), 3);
+  assert.equal(clampDb('4.5'), 4.5);
+  assert.equal(clampDb(999), EQ_LIMIT_DB);
+  assert.equal(clampDb(-999), -EQ_LIMIT_DB);
+  assert.equal(clampDb('nonsense'), 0);
+  assert.equal(clampDb(undefined), 0);
+  assert.equal(clampDb(null), 0);
+  assert.equal(clampDb(NaN), 0);
+});
+
+test('the equaliser bands span the audible range in order', () => {
+  const frequencies = EQ_BANDS.map((band) => band.hz);
+  assert.deepEqual(frequencies, [...frequencies].sort((a, b) => a - b), 'bands must ascend');
+  assert.ok(frequencies[0] < 100, 'the low shelf should reach bass');
+  assert.ok(frequencies.at(-1) > 8000, 'the high shelf should reach treble');
 });

@@ -4,7 +4,7 @@
  */
 
 import { Connection } from './net.js';
-import { Player, LatencyMode, positionAtServerNs } from './player.js';
+import { Player, LatencyMode, positionAtServerNs, EQ_BANDS, EQ_LIMIT_DB, clampDb } from './player.js';
 import { usingFallbackDigest } from './sha256.js';
 import { LiveReceiver } from './live.js';
 import { YoutubePlayer, parseVideoId } from './youtube.js';
@@ -25,6 +25,8 @@ const state = {
   /** @type {object|null} */ snapshot: null,
   /** @type {object|null} */ transport: null,
   /** @type {object|null} */ selectedItem: null,
+  /** Media id currently being decoded ahead of time, if any. */
+  preloading: null,
   /** Live stream epoch currently being rendered. */
   streamEpoch: -1,
   /** Whether compensation has been reconciled with the coordinator yet. */
@@ -116,6 +118,7 @@ async function join() {
       return;
     }
     player.setManualOffsetMs(Number($('offset').value));
+    player.setEqGainsDb(savedEq());
     state.live = new LiveReceiver(player.ctx, player.gain, connection.clock);
     state.chirps = new ChirpEmitter(player);
   }
@@ -203,7 +206,9 @@ function onSnapshot(snapshot) {
   state.snapshot = snapshot;
   $('room-code-label').textContent = snapshot.room_code;
   renderMediaOptions(snapshot.media.items);
+  renderQueue();
   renderMicrophoneOptions();
+  void preloadNext();
 
   // The coordinator owns acoustic compensation, so it arrives here rather than
   // being decided locally.
@@ -356,11 +361,13 @@ function wireControls() {
   }
 
   $('media-select').addEventListener('change', (event) => {
-    state.connection?.send('select_source', {
-      mode: 'controlled_audio',
-      media_id: event.target.value || null,
-    });
+    const id = event.target.value;
+    event.target.value = '';
+    if (!id) return;
+    sendQueue([...(state.snapshot?.queue ?? []), id]);
   });
+
+  $('queue-clear').addEventListener('click', () => sendQueue([]));
 
   $('youtube-load').addEventListener('click', () => {
     const videoId = parseVideoId($('youtube-input').value);
@@ -446,6 +453,9 @@ function wireControls() {
     state.youtube?.setVolume(Number($('volume').value) / 100, event.target.checked);
     state.connection?.send('client_update', { muted: event.target.checked });
   });
+
+  buildEqualiser();
+  $('eq-reset').addEventListener('click', () => applyEq(EQ_BANDS.map(() => 0)));
 
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
@@ -539,6 +549,111 @@ const NO_MICROPHONE_HERE = window.isSecureContext
 /** Shows one line of calibration state where the button is. */
 function setCalibrationStatus(text) {
   $('calibration-status').textContent = text;
+}
+
+/** Equaliser gains this device last used. */
+function savedEq() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('homesync.eqDb') ?? '[]');
+    return EQ_BANDS.map((_, index) => clampDb(Array.isArray(stored) ? stored[index] : 0));
+  } catch {
+    return EQ_BANDS.map(() => 0);
+  }
+}
+
+/** Draws one slider per band and wires it to the player. */
+function buildEqualiser() {
+  const host = $('eq');
+  const gains = savedEq();
+  host.replaceChildren();
+
+  for (const [index, band] of EQ_BANDS.entries()) {
+    const cell = document.createElement('div');
+    cell.className = 'eq-band';
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(-EQ_LIMIT_DB);
+    slider.max = String(EQ_LIMIT_DB);
+    slider.step = '0.5';
+    slider.value = String(gains[index]);
+    slider.dataset.band = String(index);
+    slider.setAttribute('aria-label', `${band.hz} Hz`);
+    slider.addEventListener('input', () => applyEq(readEqSliders()));
+
+    const hz = document.createElement('span');
+    hz.className = 'eq-hz';
+    hz.textContent = band.label;
+
+    const db = document.createElement('span');
+    db.className = 'eq-db';
+
+    cell.append(slider, hz, db);
+    host.append(cell);
+  }
+  applyEq(gains);
+}
+
+function readEqSliders() {
+  return [...$('eq').querySelectorAll('input[type="range"]')].map((input) => clampDb(input.value));
+}
+
+/** Applies gains to the player, the sliders and storage together. */
+function applyEq(gainsDb) {
+  const gains = EQ_BANDS.map((_, index) => clampDb(gainsDb[index]));
+  const cells = [...$('eq').children];
+  for (const [index, cell] of cells.entries()) {
+    const slider = cell.querySelector('input');
+    const readout = cell.querySelector('.eq-db');
+    if (slider && slider.value !== String(gains[index])) slider.value = String(gains[index]);
+    if (readout) readout.textContent = gains[index] === 0 ? '0' : `${gains[index] > 0 ? '+' : ''}${gains[index]}`;
+  }
+  state.player?.setEqGainsDb(gains);
+  localStorage.setItem('homesync.eqDb', JSON.stringify(gains));
+}
+
+/** Publishes a queue to the room. An empty list clears the source. */
+function sendQueue(mediaIds) {
+  state.connection?.send('select_source', {
+    mode: 'controlled_audio',
+    queue: mediaIds,
+    media_id: mediaIds[0] ?? null,
+  });
+}
+
+/**
+ * Decodes the next queued track while the current one plays.
+ *
+ * Reported ready as soon as it is decoded, which is what lets the coordinator
+ * advance with the ordinary scheduling lead instead of waiting for a download.
+ */
+async function preloadNext() {
+  const snapshot = state.snapshot;
+  const player = state.player;
+  if (!snapshot || !player?.ctx || state.transport?.mode !== 'controlled_audio') return;
+
+  const nextId = snapshot.queue?.[(snapshot.queue_index ?? 0) + 1];
+  if (!nextId || player.nextMediaId === nextId || state.preloading === nextId) return;
+  const item = snapshot.media.items.find((m) => m.id === nextId);
+  if (!item) return;
+
+  state.preloading = nextId;
+  try {
+    await player.preload(item);
+    state.connection?.send('receiver_ready', {
+      media_id: item.id,
+      hash_verified: true,
+      duration_ns: Math.round(player.nextBuffer.duration * 1e9),
+      sample_rate: Math.round(player.ctx.sampleRate),
+      audio_context_state: player.ctx.state,
+      output_latency_ms: player.reportedLatencyMs,
+    });
+    log(`${item.title}: preloaded, ready to follow on.`);
+  } catch (error) {
+    log(`${item.title}: could not preload — ${error.message}`);
+  } finally {
+    if (state.preloading === nextId) state.preloading = null;
+  }
 }
 
 /** The invitation this device would hand to another. */
@@ -757,13 +872,12 @@ function renderCalibrationResult(result) {
 
 function renderMediaOptions(items) {
   const select = $('media-select');
-  const wanted = state.transport?.media_id ?? '';
   const signature = items.map((i) => i.id).join(',');
   if (select.dataset.signature !== signature) {
     select.innerHTML = '';
     const none = document.createElement('option');
     none.value = '';
-    none.textContent = 'Select media…';
+    none.textContent = 'Add a track…';
     select.append(none);
     for (const item of items) {
       const option = document.createElement('option');
@@ -773,8 +887,42 @@ function renderMediaOptions(items) {
     }
     select.dataset.signature = signature;
   }
-  if (select.value !== wanted) select.value = wanted;
-  state.selectedItem = items.find((i) => i.id === wanted) ?? null;
+  // Always parked on the placeholder: this control adds to the queue, so
+  // leaving it showing a title would suggest it reflects what is playing.
+  select.value = '';
+  state.selectedItem = items.find((i) => i.id === state.transport?.media_id) ?? null;
+}
+
+/** Draws the queue, marking the track the room is on. */
+function renderQueue() {
+  const list = $('queue');
+  const snapshot = state.snapshot;
+  const queue = snapshot?.queue ?? [];
+  const index = snapshot?.queue_index ?? 0;
+  list.replaceChildren();
+
+  for (const [position, id] of queue.entries()) {
+    const item = snapshot.media.items.find((m) => m.id === id);
+    const row = document.createElement('li');
+    if (position === index) row.classList.add('current');
+
+    const number = document.createElement('span');
+    number.className = 'queue-index';
+    number.textContent = String(position + 1);
+
+    const title = document.createElement('span');
+    title.className = 'queue-title';
+    title.textContent = item?.title ?? id;
+
+    const drop = document.createElement('button');
+    drop.className = 'btn btn-sm queue-drop';
+    drop.textContent = '✕';
+    drop.title = `Remove ${item?.title ?? id}`;
+    drop.addEventListener('click', () => sendQueue(queue.filter((_, i) => i !== position)));
+
+    row.append(number, title, drop);
+    list.append(row);
+  }
 }
 
 /**

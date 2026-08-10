@@ -23,6 +23,30 @@ export const LatencyMode = {
   ReportedLatency: 'reported-latency',
 };
 
+/**
+ * Equaliser bands: a shelf at each end and three peaks between.
+ *
+ * Five is a judgement, not a limit — enough to tame a boomy shelf or a harsh
+ * tweeter, few enough to fit on a phone without becoming a mixing desk.
+ */
+export const EQ_BANDS = [
+  { hz: 60, label: '60' },
+  { hz: 250, label: '250' },
+  { hz: 1000, label: '1k' },
+  { hz: 4000, label: '4k' },
+  { hz: 12000, label: '12k' },
+];
+
+/** Range of each band, in decibels either side of flat. */
+export const EQ_LIMIT_DB = 12;
+
+/** Keeps a band inside the range the UI offers, and rejects nonsense. */
+export function clampDb(value) {
+  const db = Number(value);
+  if (!Number.isFinite(db)) return 0;
+  return Math.max(-EQ_LIMIT_DB, Math.min(EQ_LIMIT_DB, db));
+}
+
 export class Player {
   /**
    * @param {import('./clock.js').ClockEstimator} clock
@@ -32,10 +56,20 @@ export class Player {
     /** @type {AudioContext|null} */
     this.ctx = null;
     this.gain = null;
+    /** Equaliser gains in decibels, one per band in `EQ_BANDS`. */
+    this.eqGainsDb = EQ_BANDS.map(() => 0);
+    /** @type {BiquadFilterNode[]|null} */
+    this.eqFilters = null;
+    /** Node media sources connect to: the head of the equaliser chain. */
+    this.input = null;
     /** @type {AudioBuffer|null} */
     this.buffer = null;
     /** Media id the decoded buffer belongs to. */
     this.bufferMediaId = null;
+    /** @type {AudioBuffer|null} Next queued track, decoded ahead of time. */
+    this.nextBuffer = null;
+    /** Media id `nextBuffer` belongs to. */
+    this.nextMediaId = null;
     /** @type {AudioBufferSourceNode|null} */
     this.source = null;
 
@@ -75,6 +109,7 @@ export class Player {
       this.ctx = new Ctor({ latencyHint: 'playback' });
       this.gain = this.ctx.createGain();
       this.gain.connect(this.ctx.destination);
+      this.#buildEqualiser();
       this.ctx.onstatechange = () => {
         if (this.ctx.state !== 'running') {
           this.suspendEvents += 1;
@@ -102,11 +137,89 @@ export class Player {
     return Boolean(this.ctx && this.ctx.state === 'running');
   }
 
+  /**
+   * Builds the equaliser chain, which sits between the media source and the
+   * output gain.
+   *
+   * Deliberately *before* the gain rather than after it, because calibration
+   * chirps connect straight to the gain node. A chirp that went through the
+   * equaliser would measure the filters as well as the room, and the whole
+   * point of an acoustic measurement is that it sees what the speaker actually
+   * does.
+   */
+  #buildEqualiser() {
+    this.eqFilters = EQ_BANDS.map((band, index) => {
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = index === 0 ? 'lowshelf' : index === EQ_BANDS.length - 1 ? 'highshelf' : 'peaking';
+      filter.frequency.value = band.hz;
+      filter.Q.value = 1.0;
+      filter.gain.value = this.eqGainsDb[index] ?? 0;
+      return filter;
+    });
+    for (const [index, filter] of this.eqFilters.entries()) {
+      const next = this.eqFilters[index + 1];
+      filter.connect(next ?? this.gain);
+    }
+    this.input = this.eqFilters[0] ?? this.gain;
+  }
+
+  /**
+   * Sets the equaliser, in decibels per band.
+   *
+   * Ramped rather than stepped: an instant change to a filter's gain on a
+   * running graph is audible as a click.
+   */
+  setEqGainsDb(gainsDb) {
+    this.eqGainsDb = EQ_BANDS.map((_, index) => clampDb(gainsDb[index]));
+    if (!this.ctx || !this.eqFilters) return;
+    for (const [index, filter] of this.eqFilters.entries()) {
+      filter.gain.setTargetAtTime(this.eqGainsDb[index], this.ctx.currentTime, 0.02);
+    }
+  }
+
   /** Downloads, verifies and decodes one media item. */
   async load(item, onStage = () => {}) {
     if (!this.ctx) throw new Error('enable audio first');
     if (this.bufferMediaId === item.id && this.buffer) return this.buffer;
 
+    // Already decoded ahead of time while the previous track played. This is
+    // the whole point of preloading: the gap between queued tracks becomes the
+    // scheduling lead rather than a download and a decode.
+    if (this.nextMediaId === item.id && this.nextBuffer) {
+      this.buffer = this.nextBuffer;
+      this.bufferMediaId = item.id;
+      this.nextBuffer = null;
+      this.nextMediaId = null;
+      onStage('ready');
+      return this.buffer;
+    }
+
+    const decoded = await this.#fetchAndDecode(item, onStage);
+    this.buffer = decoded;
+    this.bufferMediaId = item.id;
+    onStage('ready');
+    return decoded;
+  }
+
+  /**
+   * Decodes the track queued after the current one, without disturbing it.
+   *
+   * Costs a second decoded buffer in memory — roughly 23 MB per minute of
+   * audio at 48 kHz stereo — which is the trade for tracks that follow each
+   * other without a hole.
+   */
+  async preload(item) {
+    if (!this.ctx) throw new Error('enable audio first');
+    if (this.nextMediaId === item.id && this.nextBuffer) return this.nextBuffer;
+    if (this.bufferMediaId === item.id) return this.buffer;
+
+    const decoded = await this.#fetchAndDecode(item, () => {});
+    this.nextBuffer = decoded;
+    this.nextMediaId = item.id;
+    return decoded;
+  }
+
+  async #fetchAndDecode(item, onStage) {
     onStage('downloading');
     const response = await fetch(`/api/v1/media/${encodeURIComponent(item.id)}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`download failed with HTTP ${response.status}`);
@@ -121,11 +234,7 @@ export class Player {
     onStage('decoding');
     // decodeAudioData detaches the buffer on some engines, so decode a copy and
     // keep the original bytes untouched for any retry.
-    const decoded = await this.ctx.decodeAudioData(bytes.slice(0));
-    this.buffer = decoded;
-    this.bufferMediaId = item.id;
-    onStage('ready');
-    return decoded;
+    return this.ctx.decodeAudioData(bytes.slice(0));
   }
 
   /** Forgets the decoded buffer, e.g. when the controller changes source. */
@@ -133,6 +242,8 @@ export class Player {
     this.stopSource();
     this.buffer = null;
     this.bufferMediaId = null;
+    this.nextBuffer = null;
+    this.nextMediaId = null;
     this.scheduledEpoch = -1;
   }
 
@@ -184,7 +295,7 @@ export class Player {
 
     const source = this.ctx.createBufferSource();
     source.buffer = this.buffer;
-    source.connect(this.gain);
+    source.connect(this.input ?? this.gain);
     source.onended = () => {
       if (this.source === source) this.playing = false;
     };
