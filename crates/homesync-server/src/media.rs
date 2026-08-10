@@ -164,7 +164,27 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn has_audio_extension(path: &Path) -> bool {
+/// Strips a downloaded name back to something safe to write.
+///
+/// The name comes from a URL, so it can contain path separators, `..`, query
+/// leftovers and percent escapes. Only the final component matters and only
+/// plain characters survive.
+pub fn safe_download_name(raw: &str) -> String {
+    let decoded = raw.replace("%20", " ");
+    let base = decoded.rsplit(['/', '\\']).next().unwrap_or("download");
+    let cleaned: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' })
+        .collect();
+    let cleaned = cleaned.trim_matches(['.', ' ']).to_string();
+    if cleaned.is_empty() {
+        "download".to_string()
+    } else {
+        cleaned
+    }
+}
+
+pub fn has_audio_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
@@ -408,5 +428,33 @@ mod tests {
         ]);
         assert_eq!(library.manifest().items.len(), 1, "the built-in click track survives");
         assert!(library.contains(BUILTIN_CLICK_ID));
+    }
+
+    #[test]
+    fn a_downloaded_name_cannot_escape_its_folder() {
+        // The name comes out of a URL, so it can carry separators, parent
+        // traversal, and anything else that survived percent-decoding. Only the
+        // last component may survive, and only as plain characters.
+        assert_eq!(safe_download_name("../../etc/passwd.mp3"), "passwd.mp3");
+        assert_eq!(safe_download_name("/absolute/path/song.flac"), "song.flac");
+        assert_eq!(safe_download_name("..\\..\\windows\\evil.wav"), "evil.wav");
+        assert_eq!(safe_download_name("My%20Track.mp3"), "My Track.mp3");
+        assert_eq!(safe_download_name("we;ird|name?.flac"), "we_ird_name_.flac");
+        assert_eq!(safe_download_name(""), "download");
+        assert_eq!(safe_download_name("..."), "download");
+        // A name that survives must still be recognisably the file asked for.
+        assert_eq!(safe_download_name("02. This Love.flac"), "02. This Love.flac");
+    }
+
+    #[test]
+    fn only_decodable_extensions_are_accepted_from_a_url() {
+        // A URL ending in .zip or .exe is not something any receiver could
+        // decode, and writing it would just leave rubbish in the folder.
+        for name in ["song.mp3", "song.flac", "song.wav", "song.m4a"] {
+            assert!(has_audio_extension(Path::new(name)), "{name}");
+        }
+        for name in ["payload.exe", "archive.zip", "page.html", "noextension"] {
+            assert!(!has_audio_extension(Path::new(name)), "{name}");
+        }
     }
 }

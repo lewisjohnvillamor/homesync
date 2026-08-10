@@ -492,6 +492,15 @@ function wireControls() {
     });
   });
 
+  $('fetch-add').addEventListener('click', () => {
+    const url = $('fetch-input').value.trim();
+    if (!url) return;
+    $('folder-note').textContent = 'Fetching…';
+    editFolders({ fetch: url }).then(() => {
+      $('fetch-input').value = '';
+    });
+  });
+
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
 

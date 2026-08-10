@@ -445,6 +445,9 @@ struct LibraryEdit {
     /// Folder to stop scanning.
     #[serde(default)]
     remove: Option<String>,
+    /// URL of an audio file to pull into the library.
+    #[serde(default)]
+    fetch: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -497,6 +500,13 @@ async fn library_edit(State(app): State<Arc<App>>, Json(edit): Json<LibraryEdit>
     }
     if let Some(remove) = edit.remove.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         app.remove_media_root(std::path::Path::new(remove));
+    }
+    if let Some(url) = edit.fetch.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        let dir = app.config.download_dir.clone();
+        match app.fetch_media(url, &dir).await {
+            Ok(name) => tracing::info!(%url, file = %name, "fetched a track into the library"),
+            Err(reason) => problem = Some(format!("could not fetch that URL — {reason}")),
+        }
     }
     library_view(&app, problem)
 }
