@@ -382,6 +382,12 @@ main {
   background: color-mix(in srgb, var(--bad) 10%, transparent);
 }
 
+#health {
+  white-space: normal;
+  max-width: 100%;
+  text-align: left;
+}
+
 .head-actions {
   display: flex;
   align-items: center;

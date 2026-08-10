@@ -938,6 +938,8 @@ function renderClients() {
   const snapshot = state.snapshot;
   if (!snapshot) return;
 
+  renderHealth(snapshot.health);
+
   host.replaceChildren();
   for (const client of snapshot.clients) {
     const clock = client.clock ?? {};
@@ -988,6 +990,28 @@ function renderClients() {
     card.append(top, stats);
     host.append(card);
   }
+}
+
+/**
+ * Shows the coordinator's own reading of the room.
+ *
+ * Rendered rather than recomputed: the coordinator sees every device's
+ * telemetry and the diagnostics export carries the same text, so a screenshot
+ * and a JSON file can never disagree about what was wrong.
+ */
+function renderHealth(health) {
+  const chip = $('health');
+  const detail = $('health-detail');
+  if (!health) return;
+
+  const kind = { ok: 'ok', warn: 'warn', bad: 'bad' }[health.level] ?? 'idle';
+  setPill(chip, health.summary || '—', kind);
+
+  // The summary names only the worst thing. Everything else goes underneath,
+  // so a room with three problems does not hide two of them.
+  const rest = (health.findings ?? []).slice(1);
+  detail.textContent = rest.join(' · ');
+  detail.classList.toggle('hidden', rest.length === 0);
 }
 
 /** Traffic light for a device's clock agreement. */

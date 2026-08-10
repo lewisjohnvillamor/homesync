@@ -8,8 +8,14 @@ Record results in `docs/compatibility.md` as you go, including the failures — 
 device that could not hold alignment is the most useful thing this project can
 learn.
 
-When something looks wrong, press **Download diagnostics** in the log panel
-before changing anything. It saves every device's clock, telemetry, buffer
+The **Devices** panel carries a one-line reading of the room, written by the
+coordinator rather than the browser: a device that has drifted, lost its clock,
+gone to sleep or started buffering is named there with a number, so the usual
+answer is on screen before anyone opens a JSON file. The same text is in the
+export, so a screenshot and a diagnostics file can never disagree.
+
+When something looks wrong, press **Download diagnostics** in the Advanced
+panel before changing anything. It saves every device's clock, telemetry, buffer
 health and the last calibration, which is far more useful than a description of
 what you heard.
 

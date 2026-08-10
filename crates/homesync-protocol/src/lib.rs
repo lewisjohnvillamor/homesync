@@ -304,6 +304,35 @@ pub struct ClockReport {
     pub quality: ClockQuality,
 }
 
+/// How worried a listener should be about the room.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthLevel {
+    /// Nothing to report.
+    #[default]
+    Ok,
+    /// Something is off but the room is still usable.
+    Warn,
+    /// At least one device is not playing with the others.
+    Bad,
+}
+
+/// A plain-language reading of whether the room is actually in sync.
+///
+/// Computed by the coordinator so the browser and the diagnostics export say
+/// the same thing: a report that disagrees with the screen it was taken from
+/// is worse than no report.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RoomHealth {
+    /// Severity of the worst finding.
+    pub level: HealthLevel,
+    /// One sentence, naming the device at fault where there is one.
+    pub summary: String,
+    /// Everything found, worst first. Empty when the room is fine.
+    #[serde(default)]
+    pub findings: Vec<String>,
+}
+
 /// Where the room's audio comes from (specification section 5.2).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -750,6 +779,9 @@ pub struct RoomSnapshot {
     /// Index into `queue` of the track currently on the transport.
     #[serde(default)]
     pub queue_index: usize,
+    /// Plain-language reading of whether the room is in sync.
+    #[serde(default)]
+    pub health: RoomHealth,
 }
 
 /// One participant, as published to every other participant.

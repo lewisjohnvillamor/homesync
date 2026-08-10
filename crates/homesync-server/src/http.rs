@@ -193,6 +193,7 @@ struct DiagnosticsQuery {
 
 async fn diagnostics(State(app): State<Arc<App>>, Query(query): Query<DiagnosticsQuery>) -> Response {
     let manifest = app.media.manifest();
+    let now = app.now_ns();
     let rooms = app.rooms();
 
     // Any room whose secret matches. In practice there is one.
@@ -200,7 +201,7 @@ async fn diagnostics(State(app): State<Arc<App>>, Query(query): Query<Diagnostic
         .values()
         .filter(|room| room.secret == query.secret)
         .map(|room| DiagnosticsRoom {
-            snapshot: room.snapshot(manifest.clone()),
+            snapshot: room.snapshot(manifest.clone(), now),
             last_calibration: room.last_calibration.clone(),
         })
         .collect();

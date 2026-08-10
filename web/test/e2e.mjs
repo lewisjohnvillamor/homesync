@@ -150,12 +150,29 @@ try {
   }
   ok('selecting a track queued it and marked it current');
 
+  // The coordinator's own reading of the room, rendered rather than recomputed
+  // in the browser, so a screenshot and a diagnostics export can never disagree
+  // about what was wrong.
+  await waitFor(
+    alpha,
+    () => /2 devices/.test(document.getElementById('health').textContent),
+    'a room health summary naming both devices',
+  );
+  ok(`room health reported: "${await alpha.page.textContent('#health')}"`);
+
   // No force: this only succeeds if the readiness barrier is genuinely satisfied.
   await alpha.page.click('#play');
   for (const client of clients) {
     await waitFor(client, () => document.getElementById('media-state').textContent === 'playing', 'playback');
   }
   ok('the coordinator accepted play without a forced start');
+
+  await waitFor(
+    alpha,
+    () => document.getElementById('health').textContent.includes('playing together'),
+    'the health summary to notice playback',
+  );
+  ok('room health followed the transport into playback');
 
   await sleep(3000);
   for (const client of clients) {
