@@ -115,6 +115,26 @@
               <button id="queue-clear" class="btn">Clear</button>
             </div>
             <ol id="queue" class="queue"></ol>
+
+            <details class="folders">
+              <summary>Where the music comes from</summary>
+              <p class="note">
+                Folders this coordinator scans. A mounted drive is just a path —
+                <code class="code">/media/usb</code> or <code class="code">E:\Music</code> — and
+                rescanning picks up anything plugged in since it started, without
+                restarting and dropping everyone out of the room.
+              </p>
+              <ul id="folder-list" class="folder-list"></ul>
+              <div class="field-row">
+                <label class="field grow">
+                  <span>Add a folder</span>
+                  <input id="folder-input" autocomplete="off" spellcheck="false" placeholder="/media/usb" />
+                </label>
+                <button id="folder-add" class="btn">Add</button>
+                <button id="folder-rescan" class="btn">Rescan</button>
+              </div>
+              <p id="folder-note" class="note"></p>
+            </details>
           </div>
 
           <div id="mode-youtube" class="mode-body hidden">

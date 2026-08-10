@@ -32,6 +32,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/calibration/recording", post(calibration_recording))
         .route("/api/v1/diagnostics", get(diagnostics))
         .route("/api/v1/invite.svg", get(invite_qr))
+        .route("/api/v1/library", get(library).post(library_edit))
         .route("/ws", get(crate::ws::ws_handler))
         .fallback(static_asset)
         .with_state(app)
@@ -90,7 +91,7 @@ async fn room_info(State(app): State<Arc<App>>, Path(code): Path<String>) -> Res
 }
 
 async fn media_item_manifest(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
-    match app.media.item(&id) {
+    match app.media_item(&id) {
         Some(item) => Json(item.clone()).into_response(),
         None => (StatusCode::NOT_FOUND, "no such media").into_response(),
     }
@@ -102,10 +103,10 @@ async fn media_item_manifest(State(app): State<Arc<App>>, Path(id): Path<String>
 /// costs little and lets a receiver resume a partial download over flaky
 /// Wi-Fi instead of restarting it.
 async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Response {
-    let Some(item) = app.media.item(&id).cloned() else {
+    let Some(item) = app.media_item(&id) else {
         return (StatusCode::NOT_FOUND, "no such media").into_response();
     };
-    let bytes = match app.media.read(&id) {
+    let bytes = match app.media_read(&id) {
         Some(Ok(bytes)) => bytes,
         Some(Err(error)) => {
             tracing::error!(%id, %error, "failed to read media");
@@ -192,7 +193,7 @@ struct DiagnosticsQuery {
 }
 
 async fn diagnostics(State(app): State<Arc<App>>, Query(query): Query<DiagnosticsQuery>) -> Response {
-    let manifest = app.media.manifest();
+    let manifest = app.media_manifest();
     let now = app.now_ns();
     let rooms = app.rooms();
 
@@ -425,6 +426,79 @@ fn qr_svg(code: &QrCode) -> String {
          <rect width=\"{size}\" height=\"{size}\" fill=\"#ffffff\"/>\
          <path d=\"{modules}\" fill=\"#000000\"/></svg>"
     )
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LibraryQuery {
+    /// The room secret. The catalogue names files on the host's disk, and
+    /// editing the roots reads whatever directory it is given, so this is not
+    /// something a passer-by on the LAN gets to do.
+    secret: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LibraryEdit {
+    secret: String,
+    /// Folder to start scanning. A mounted drive is just a path.
+    #[serde(default)]
+    add: Option<String>,
+    /// Folder to stop scanning.
+    #[serde(default)]
+    remove: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct LibraryView {
+    roots: Vec<String>,
+    items: usize,
+    /// Set when an edit was asked for and refused, so the interface can say why
+    /// rather than showing an unchanged list and no explanation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    problem: Option<String>,
+}
+
+fn authorised(app: &App, secret: &str) -> bool {
+    app.rooms().values().any(|room| room.secret == secret)
+}
+
+fn library_view(app: &App, problem: Option<String>) -> Response {
+    Json(LibraryView {
+        roots: app.media_roots().iter().map(|r| r.display().to_string()).collect(),
+        items: app.media_manifest().items.len(),
+        problem,
+    })
+    .into_response()
+}
+
+/// Lists the folders being scanned, and rescans them.
+///
+/// A GET rescans deliberately: a drive plugged in after startup is the ordinary
+/// case, and the alternative — restarting the coordinator — drops every device
+/// out of the room and loses everyone's clock.
+async fn library(State(app): State<Arc<App>>, Query(query): Query<LibraryQuery>) -> Response {
+    if !authorised(&app, &query.secret) {
+        return (StatusCode::FORBIDDEN, "the room secret is required to read the library").into_response();
+    }
+    let items = app.rescan_media();
+    tracing::info!(items, "library rescanned");
+    library_view(&app, None)
+}
+
+/// Adds or removes a folder, then rebuilds.
+async fn library_edit(State(app): State<Arc<App>>, Json(edit): Json<LibraryEdit>) -> Response {
+    if !authorised(&app, &edit.secret) {
+        return (StatusCode::FORBIDDEN, "the room secret is required to change the library").into_response();
+    }
+    let mut problem = None;
+    if let Some(add) = edit.add.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        if !app.add_media_root(std::path::PathBuf::from(add)) {
+            problem = Some(format!("{add} is not a folder this machine can read"));
+        }
+    }
+    if let Some(remove) = edit.remove.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        app.remove_media_root(std::path::Path::new(remove));
+    }
+    library_view(&app, problem)
 }
 
 /// Serves the embedded web app. Unknown paths fall back to `index.html` so the

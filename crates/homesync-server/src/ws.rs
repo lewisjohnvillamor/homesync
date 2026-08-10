@@ -217,7 +217,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             tracing::info!(client = %session.client_id, room = %code, role = ?join.role, "client joined");
 
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+            let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
         }
@@ -255,7 +255,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             });
 
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+            let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -286,7 +286,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             room.note_duration(&ready.media_id, ready.duration_ns);
             room.set_ready(&session.client_id, &ready.media_id);
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+            let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -304,7 +304,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             let mut rooms = app.rooms();
             let Some(room) = rooms.get_mut(&code) else { return };
             for id in select.queue.iter().chain(select.media_id.iter()) {
-                if !app.media.contains(id) {
+                if !app.media_contains(id) {
                     drop(rooms);
                     session.error(app, "no_such_media", "media id is not in the catalogue", request_id);
                     return;
@@ -376,7 +376,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.volume = volume.volume.clamp(0.0, 1.0);
             }
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+            let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -388,7 +388,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.muted = mute.muted;
             }
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+            let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -609,7 +609,7 @@ where
 /// the diagnostics view stays consistent with the timeline.
 fn broadcast_transport_and_snapshot(app: &App, room: &mut crate::room::Room, now_ns: u64) {
     room.broadcast(Payload::Transport(room.transport.clone()), now_ns);
-    let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+    let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now_ns);
     room.dirty = false;
 }
@@ -621,7 +621,7 @@ fn leave_room(app: &App, session: &mut Session) {
     room.remove(&session.client_id);
     tracing::info!(client = %session.client_id, room = %code, "client left");
     let now = app.now_ns();
-    let snapshot = room.snapshot(app.media.manifest(), app.now_ns());
+    let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
     room.dirty = false;
 }
@@ -643,7 +643,7 @@ fn sanitise_name(name: &str, device_id: &str) -> String {
 /// broadcast per room rather than one per report.
 pub fn flush_dirty_rooms(app: &App) {
     let now = app.now_ns();
-    let manifest = app.media.manifest();
+    let manifest = app.media_manifest();
     let mut rooms = app.rooms();
     for room in rooms.values_mut() {
         // Checked on the same tick as the snapshot flush rather than from a

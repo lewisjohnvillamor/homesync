@@ -50,7 +50,7 @@ impl MediaLibrary {
     ///
     /// A missing or unreadable media directory is not an error — the click
     /// track alone is enough to run the timing checkpoints.
-    pub fn load(media_dir: &Path) -> Self {
+    pub fn load(media_dirs: &[PathBuf]) -> Self {
         let mut library = MediaLibrary::default();
 
         let click = click_track_wav();
@@ -67,14 +67,24 @@ impl MediaLibrary {
             source: Source::Memory(Arc::new(click)),
         });
 
-        let Ok(dir) = std::fs::read_dir(media_dir) else {
-            tracing::info!(dir = %media_dir.display(), "no media directory; serving built-in media only");
-            return library;
-        };
-
-        let mut paths: Vec<PathBuf> =
-            dir.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_file() && has_audio_extension(p)).collect();
-        paths.sort();
+        // Several roots rather than one, so a USB drive can be added beside the
+        // music folder without either becoming "the" directory. Each is scanned
+        // in the order given and a root that is not there is skipped: an
+        // unplugged drive is a normal state, not a failure.
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for root in media_dirs {
+            let Ok(dir) = std::fs::read_dir(root) else {
+                tracing::info!(dir = %root.display(), "media root is not readable; skipping it");
+                continue;
+            };
+            let mut found: Vec<PathBuf> = dir
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && has_audio_extension(p))
+                .collect();
+            found.sort();
+            paths.extend(found);
+        }
 
         for path in paths {
             match std::fs::read(&path) {
@@ -342,7 +352,7 @@ mod tests {
 
     #[test]
     fn library_always_offers_the_builtin_even_without_a_media_directory() {
-        let library = MediaLibrary::load(Path::new("/nonexistent/homesync/media"));
+        let library = MediaLibrary::load(&[PathBuf::from("/nonexistent/homesync/media")]);
         let manifest = library.manifest();
         assert_eq!(manifest.items.len(), 1);
         assert_eq!(manifest.items[0].id, BUILTIN_CLICK_ID);
@@ -352,7 +362,7 @@ mod tests {
 
     #[test]
     fn builtin_bytes_match_the_advertised_hash_and_length() {
-        let library = MediaLibrary::load(Path::new("/nonexistent/homesync/media"));
+        let library = MediaLibrary::load(&[PathBuf::from("/nonexistent/homesync/media")]);
         let item = library.item(BUILTIN_CLICK_ID).expect("item").clone();
         let bytes = library.read(BUILTIN_CLICK_ID).expect("present").expect("read");
         assert_eq!(bytes.len() as u64, item.bytes);
@@ -361,7 +371,7 @@ mod tests {
 
     #[test]
     fn unknown_ids_never_resolve_to_a_path() {
-        let library = MediaLibrary::load(Path::new("/nonexistent/homesync/media"));
+        let library = MediaLibrary::load(&[PathBuf::from("/nonexistent/homesync/media")]);
         assert!(library.read("../../etc/passwd").is_none());
         assert!(library.read("/etc/passwd").is_none());
     }
@@ -386,5 +396,17 @@ mod tests {
     #[test]
     fn range_length_is_inclusive() {
         assert_eq!(ByteRange { start: 0, end: 9 }.len(), 10);
+    }
+
+    #[test]
+    fn several_roots_are_scanned_and_a_missing_one_is_skipped() {
+        // A drive that is not plugged in is a normal state for a media root,
+        // not a failure — the rest of the library must still load.
+        let library = MediaLibrary::load(&[
+            PathBuf::from("/nonexistent/homesync/one"),
+            PathBuf::from("/nonexistent/homesync/two"),
+        ]);
+        assert_eq!(library.manifest().items.len(), 1, "the built-in click track survives");
+        assert!(library.contains(BUILTIN_CLICK_ID));
     }
 }

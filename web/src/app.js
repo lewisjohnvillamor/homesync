@@ -163,6 +163,7 @@ async function join() {
 
   $('join-panel').classList.add('hidden');
   $('room-panel').classList.remove('hidden');
+  void refreshFolders();
   // A controller has no audio output, so nothing on it is worth compensating.
   $('device-panel').classList.toggle('hidden', role === 'controller');
 }
@@ -482,6 +483,15 @@ function wireControls() {
     $('youtube-fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
   });
 
+  $('folder-rescan').addEventListener('click', () => refreshFolders());
+  $('folder-add').addEventListener('click', () => {
+    const path = $('folder-input').value.trim();
+    if (!path) return;
+    editFolders({ add: path }).then(() => {
+      $('folder-input').value = '';
+    });
+  });
+
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
 
@@ -695,6 +705,57 @@ async function preloadNext() {
   } finally {
     if (state.preloading === nextId) state.preloading = null;
   }
+}
+
+/** The room secret, which is what authorises reading and editing the library. */
+function roomSecret() {
+  return $('room-secret').value.trim() || localStorage.getItem('homesync.roomSecret') || '';
+}
+
+/** Lists the folders being scanned, rescanning them on the way. */
+async function refreshFolders() {
+  try {
+    const response = await fetch(`/api/v1/library?secret=${encodeURIComponent(roomSecret())}`);
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    renderFolders(await response.json());
+  } catch (error) {
+    $('folder-note').textContent = `Could not read the library: ${error.message}`;
+  }
+}
+
+/** Adds or removes a folder and redraws from whatever the coordinator says. */
+async function editFolders(edit) {
+  try {
+    const response = await fetch('/api/v1/library', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: roomSecret(), ...edit }),
+    });
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    renderFolders(await response.json());
+  } catch (error) {
+    $('folder-note').textContent = `Could not change the library: ${error.message}`;
+  }
+}
+
+function renderFolders(view) {
+  const list = $('folder-list');
+  list.replaceChildren();
+  for (const root of view.roots ?? []) {
+    const row = document.createElement('li');
+    const path = document.createElement('span');
+    path.textContent = root;
+    const drop = document.createElement('button');
+    drop.className = 'btn btn-sm';
+    drop.textContent = 'Remove';
+    drop.addEventListener('click', () => editFolders({ remove: root }));
+    row.append(path, drop);
+    list.append(row);
+  }
+  // The count is the answer to "did adding that folder do anything", which the
+  // list of paths on its own does not give.
+  $('folder-note').textContent =
+    view.problem ?? `${view.items} track${view.items === 1 ? '' : 's'} in the library.`;
 }
 
 /** The invitation this device would hand to another. */

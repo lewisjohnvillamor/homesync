@@ -451,7 +451,7 @@ impl Reporter<'_> {
 
 fn finish(app: &App, room_code: &str, result: CalibrationResult) {
     let now = app.now_ns();
-    let manifest = app.media.manifest();
+    let manifest = app.media_manifest();
     let mut rooms = app.rooms();
     let Some(room) = rooms.get_mut(room_code) else { return };
     room.calibration = None;

@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("device profiles cleared at startup");
     }
 
-    let media = MediaLibrary::load(&config.media_dir);
+    let media = MediaLibrary::load(&config.media_dirs);
 
     // The room keeps its identity across restarts. A new code and secret on
     // every start silently invalidates the invite link saved on every device,
@@ -75,7 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let use_tls = config.tls;
     let tls_dir = config.tls_dir.clone();
     let use_mdns = config.mdns;
-    let app = Arc::new(App::new(config, media, room, profiles));
+    let media_roots = config.media_dirs.clone();
+    let app = Arc::new(App::new(config, media, media_roots, room, profiles));
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
@@ -322,7 +323,7 @@ fn print_banner(
         println!("                         (new — devices holding an older invite must reopen this link)");
     }
     println!("  Invite link          : {invite}");
-    println!("  Media items          : {}", app.media.manifest().items.len());
+    println!("  Media items          : {}", app.media_manifest().items.len());
     println!("  Saved devices        : {}", app.profiles.len());
     println!("  Web assets embedded  : {}", http::web_asset_count());
     println!("  Start lead           : {:.0} ms", app.config.start_lead_ms);
