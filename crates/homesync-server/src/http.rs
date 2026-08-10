@@ -9,6 +9,7 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use qrcode::QrCode;
 use rust_embed::RustEmbed;
 use serde::Serialize;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/calibration/chirp/{code}", get(calibration_chirp))
         .route("/api/v1/calibration/recording", post(calibration_recording))
         .route("/api/v1/diagnostics", get(diagnostics))
+        .route("/api/v1/invite.svg", get(invite_qr))
         .route("/ws", get(crate::ws::ws_handler))
         .fallback(static_asset)
         .with_state(app)
@@ -310,6 +312,120 @@ async fn calibration_recording(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct InviteQuery {
+    /// The room secret. Whoever can already read it is already in the room, so
+    /// this only stops a passer-by on the LAN from minting an invite.
+    secret: String,
+    /// Where the scanning device should be sent. Supplied by the client rather
+    /// than assumed by the coordinator: the page asking for this code reached
+    /// the coordinator at some address, and an address already proven to work
+    /// beats one the host merely believes in.
+    origin: String,
+}
+
+/// Renders the room invitation as a QR code.
+///
+/// Server-side because encoding a QR in the browser would mean either a
+/// JavaScript library — and therefore a build step the single-binary deploy
+/// does not have — or several hundred lines of encoder to maintain. The
+/// coordinator already draws one for the terminal at startup.
+async fn invite_qr(State(app): State<Arc<App>>, Query(query): Query<InviteQuery>) -> Response {
+    let origin = match usable_origin(&query.origin) {
+        Ok(origin) => origin,
+        Err(reason) => return (StatusCode::CONFLICT, reason).into_response(),
+    };
+
+    let invite = {
+        let rooms = app.rooms();
+        let Some(room) = rooms.values().find(|room| room.secret == query.secret) else {
+            return (StatusCode::FORBIDDEN, "the room secret is required to mint an invitation").into_response();
+        };
+        invite_url(origin, &room.code, &room.secret)
+    };
+
+    let Ok(code) = QrCode::new(invite.as_bytes()) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "could not encode the invitation").into_response();
+    };
+
+    let mut response = qr_svg(&code).into_response();
+    insert(&mut response, header::CONTENT_TYPE, "image/svg+xml".to_string());
+    // Carries the room secret, so it must not be cached anywhere shared.
+    insert(&mut response, header::CACHE_CONTROL, "no-store, private".to_string());
+    response
+}
+
+/// The invitation a scanning device follows.
+///
+/// The secret sits in the fragment, which browsers never put on the wire, so
+/// the coordinator never sees it in a request path or an access log.
+fn invite_url(origin: &str, code: &str, secret: &str) -> String {
+    format!("{origin}/#room={code}&secret={secret}")
+}
+
+/// Checks an origin is worth putting in front of a camera.
+///
+/// A loopback address is the interesting rejection: the page works perfectly
+/// for whoever is sitting at the host, and a QR code of it would scan cleanly
+/// on a phone and then fail to connect to anything. Saying so is far better
+/// than handing over a code that cannot work.
+fn usable_origin(origin: &str) -> Result<&str, &'static str> {
+    let origin = origin.trim_end_matches('/');
+    if origin.len() > 128 || origin.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("that origin is not a usable address");
+    }
+    let host = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+        .ok_or("an invitation needs an http or https address")?;
+    // A bracketed IPv6 literal keeps its colons, so it cannot be split on ':'
+    // like a name or a v4 address can.
+    let host = if let Some(rest) = host.strip_prefix('[') {
+        match rest.split_once(']') {
+            Some((inner, _)) => inner,
+            None => return Err("that origin has an unterminated IPv6 address"),
+        }
+    } else {
+        host.split([':', '/']).next().unwrap_or_default()
+    };
+    if host.is_empty() {
+        return Err("that origin has no host");
+    }
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback());
+    if loopback {
+        return Err("this page is open on a loopback address, which no other device can reach — open it by the coordinator\u{2019}s LAN address and the code will be scannable");
+    }
+    Ok(origin)
+}
+
+/// Draws a QR code as an SVG, one path segment per dark module.
+///
+/// Always black on white regardless of the page theme: a scanner needs the
+/// contrast, and a transparent code on a dark background is unreadable.
+fn qr_svg(code: &QrCode) -> String {
+    const QUIET: usize = 4;
+    let width = code.width();
+    let size = width + QUIET * 2;
+
+    let mut modules = String::new();
+    for (index, colour) in code.to_colors().iter().enumerate() {
+        if *colour == qrcode::Color::Dark {
+            let x = index % width + QUIET;
+            let y = index / width + QUIET;
+            modules.push_str(&format!("M{x} {y}h1v1h-1z"));
+        }
+    }
+
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\" \
+         shape-rendering=\"crispEdges\" role=\"img\" aria-label=\"HomeSync invitation\">\
+         <rect width=\"{size}\" height=\"{size}\" fill=\"#ffffff\"/>\
+         <path d=\"{modules}\" fill=\"#000000\"/></svg>"
+    )
+}
+
 /// Serves the embedded web app. Unknown paths fall back to `index.html` so the
 /// invite URL can carry a path without a server-side route for it.
 async fn static_asset(uri: Uri) -> Response {
@@ -339,4 +455,55 @@ pub fn web_assets_present() -> bool {
 /// Number of embedded web assets, for the startup log.
 pub fn web_asset_count() -> usize {
     WebAssets::iter().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_secret_stays_in_the_fragment() {
+        let url = invite_url("http://192.168.1.5:8080", "AA12345", "s3cret");
+        assert_eq!(url, "http://192.168.1.5:8080/#room=AA12345&secret=s3cret");
+        // Everything before the '#' is what a browser sends and a proxy logs.
+        let (sent, _) = url.split_once('#').expect("the invitation needs a fragment");
+        assert!(!sent.contains("s3cret"), "the secret must not be in the request path: {sent}");
+    }
+
+    #[test]
+    fn loopback_origins_are_refused_with_a_reason() {
+        // These scan perfectly and then connect to nothing, which is a worse
+        // failure than refusing to draw the code.
+        for origin in ["http://localhost:8080", "http://127.0.0.1:8080", "https://[::1]:8080"] {
+            let error = usable_origin(origin).expect_err(origin);
+            assert!(error.contains("loopback"), "{origin}: {error}");
+        }
+    }
+
+    #[test]
+    fn lan_origins_are_accepted_and_normalised() {
+        assert_eq!(usable_origin("http://192.168.1.5:8080"), Ok("http://192.168.1.5:8080"));
+        assert_eq!(usable_origin("https://homesync.local:8080/"), Ok("https://homesync.local:8080"));
+    }
+
+    #[test]
+    fn nonsense_origins_are_refused() {
+        assert!(usable_origin("ftp://192.168.1.5").is_err());
+        assert!(usable_origin("192.168.1.5:8080").is_err(), "a scheme is required");
+        assert!(usable_origin("http://").is_err());
+        assert!(usable_origin("http://host with spaces").is_err());
+        assert!(usable_origin(&format!("http://{}", "x".repeat(200))).is_err());
+    }
+
+    #[test]
+    fn the_svg_is_square_and_has_a_quiet_zone() {
+        let code = QrCode::new(b"http://192.168.1.5:8080/#room=AA12345&secret=s3cret").expect("encode");
+        let svg = qr_svg(&code);
+        let side = code.width() + 8;
+        assert!(svg.contains(&format!("viewBox=\"0 0 {side} {side}\"")), "{svg:.120}");
+        // A light background is not decoration: a transparent code on a dark
+        // page cannot be scanned.
+        assert!(svg.contains("fill=\"#ffffff\""));
+        assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));
+    }
 }

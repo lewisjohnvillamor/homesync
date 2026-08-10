@@ -68,7 +68,25 @@
         <section class="panel">
           <div class="panel-head">
             <h2>Room <code id="room-code-label" class="code"></code></h2>
-            <span id="media-state" class="chip">idle</span>
+            <div class="head-actions">
+              <button id="invite-toggle" class="btn btn-sm">Invite a device</button>
+              <span id="media-state" class="chip">idle</span>
+            </div>
+          </div>
+
+          <div id="invite" class="invite hidden">
+            <div class="field-row">
+              <label class="field grow">
+                <span>Invite link</span>
+                <input id="invite-link" readonly spellcheck="false" />
+              </label>
+              <button id="invite-copy" class="btn">Copy</button>
+            </div>
+            <img id="invite-qr" class="qr" alt="Invitation QR code" />
+            <p id="invite-note" class="note">
+              Scan it, or send the link. The secret travels in the link's fragment,
+              which browsers never send to the coordinator as part of a request.
+            </p>
           </div>
 
           <div class="segmented" role="group" aria-label="Source">

@@ -438,12 +438,17 @@ function wireControls() {
   $('volume').addEventListener('input', (event) => {
     const volume = Number(event.target.value) / 100;
     state.player?.setVolume(volume);
+    state.youtube?.setVolume(volume, $('mute').checked);
     state.connection?.send('client_update', { volume });
   });
   $('mute').addEventListener('change', (event) => {
     state.player?.setMuted(event.target.checked);
+    state.youtube?.setVolume(Number($('volume').value) / 100, event.target.checked);
     state.connection?.send('client_update', { muted: event.target.checked });
   });
+
+  $('invite-toggle').addEventListener('click', toggleInvite);
+  $('invite-copy').addEventListener('click', copyInvite);
 
   // Coming back from the background invalidates both the clock estimate and
   // any running schedule, so both are rebuilt rather than trusted.
@@ -534,6 +539,76 @@ const NO_MICROPHONE_HERE = window.isSecureContext
 /** Shows one line of calibration state where the button is. */
 function setCalibrationStatus(text) {
   $('calibration-status').textContent = text;
+}
+
+/** The invitation this device would hand to another. */
+function inviteUrl() {
+  const code = state.snapshot?.room_code ?? $('room-code').value.trim().toUpperCase();
+  const secret = $('room-secret').value.trim() || localStorage.getItem('homesync.roomSecret') || '';
+  return `${location.origin}/#room=${encodeURIComponent(code)}&secret=${encodeURIComponent(secret)}`;
+}
+
+/** Shows or hides the invitation, fetching the QR the first time it is opened. */
+function toggleInvite() {
+  const panel = $('invite');
+  const showing = panel.classList.toggle('hidden');
+  $('invite-toggle').textContent = showing ? 'Invite a device' : 'Hide invite';
+  if (showing) return;
+
+  $('invite-link').value = inviteUrl();
+  const secret = $('room-secret').value.trim() || localStorage.getItem('homesync.roomSecret') || '';
+  const query = new URLSearchParams({ secret, origin: location.origin });
+  // Fetched rather than set as a src so a refusal can be explained. The common
+  // one is this page being open on localhost, which scans fine and then reaches
+  // nothing.
+  fetch(`/api/v1/invite.svg?${query}`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      $('invite-qr').src = URL.createObjectURL(blob);
+      $('invite-qr').hidden = false;
+    })
+    .catch((error) => {
+      $('invite-qr').hidden = true;
+      $('invite-note').textContent = `No QR code: ${error.message}`;
+    });
+}
+
+/**
+ * Copies the invitation.
+ *
+ * `navigator.clipboard` is another secure-context API, so on the plain-HTTP LAN
+ * address it does not exist. The selection fallback is the one that actually
+ * runs in normal use; leaving the link selected is the last resort, because a
+ * user who can see it selected can always press the shortcut themselves.
+ */
+async function copyInvite() {
+  const url = inviteUrl();
+  const field = $('invite-link');
+  field.value = url;
+  field.select();
+  field.setSelectionRange(0, url.length);
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else if (!document.execCommand('copy')) {
+      throw new Error('this browser would not copy it');
+    }
+    flashCopied('Copied');
+  } catch {
+    flashCopied('Press ⌘/Ctrl+C');
+  }
+}
+
+function flashCopied(text) {
+  const button = $('invite-copy');
+  button.textContent = text;
+  setTimeout(() => {
+    button.textContent = 'Copy';
+  }, 1800);
 }
 
 /** Starts a calibration run with the chosen microphone device. */

@@ -274,6 +274,43 @@ main {
   background: color-mix(in srgb, var(--bad) 10%, transparent);
 }
 
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.invite {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.invite input {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+}
+
+/* White plate behind the code: a scanner needs the quiet zone to stay light
+   even when the rest of the page is dark. */
+.qr {
+  width: min(240px, 60vw);
+  height: auto;
+  justify-self: center;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 6px;
+}
+
+.qr[hidden],
+.qr:not([src]) {
+  display: none;
+}
+
 /* --- Forms -------------------------------------------------------------- */
 
 .field {
