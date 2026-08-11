@@ -83,9 +83,13 @@ cargo run --release -- --media-dir ~/Music
 
 ## Screenshots
 
-| Invite a device | The room, on a phone |
+| Invite a device, and run more than one room | The room, on a phone |
 | --- | --- |
-| <img src="docs/images/invite.png" alt="The invite panel showing a copyable link and a QR code" width="380"> | <img src="docs/images/phone.png" alt="The same room on a narrow phone screen" width="230"> |
+| <img src="docs/images/invite.png" alt="The invite panel: a copyable link, a QR code, and a list of rooms on this coordinator" width="380"> | <img src="docs/images/phone.png" alt="The same room on a narrow phone screen" width="230"> |
+
+The invite panel is also where a second room comes from — the list shows every
+room on the coordinator, which one you are in, and whether anything is playing
+in the others.
 
 **Is the room actually together?** The Devices panel answers in one line, and
 names the device when it isn't:
