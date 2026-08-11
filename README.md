@@ -23,9 +23,12 @@ Open the link on two devices, press **Enable audio & join** on each, pick
 cargo run --release -- --tls --media-dir ~/Music
 ```
 
-Any `wav/mp3/m4a/aac/ogg/opus/flac/webm` file in `--media-dir` joins the
-catalogue. The built-in click track is always present, so the timing
-checkpoints are runnable on a fresh checkout with no audio files at all.
+Any `wav/mp3/m4a/m4b/mp4/aac/ogg/oga/opus/flac/webm/aif/aiff` file in
+`--media-dir` joins the catalogue, with its embedded cover art if it has any.
+`wma`, `ape`, `wv` and `dsf` are left out on purpose: no browser decodes them,
+and listing a file the room cannot play is worse than not listing it. The
+built-in click track is always present, so the timing checkpoints are runnable
+on a fresh checkout with no audio files at all.
 
 **`--tls` is required for acoustic calibration.** Browsers refuse microphone
 access on a plain-HTTP LAN address, so without it no device can be the
@@ -119,11 +122,17 @@ hardware and an unverified mode does not belong next to two that work.
 Runs formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **150 Rust tests.** Clock estimation against synthetic latency, jitter, drift
-  and step discontinuities; calibration DSP against noise, reflections and
+- **229 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+  drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and clock skew; room state
-  machine.
+  machine; cover-art parsers for three container formats; the address rules that
+  stop fetch-by-URL being aimed at the local network.
+
+  Many of them are regression tests named after the defect they pin down —
+  `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
+  every device restart every few seconds, and it is a test rather than a note in
+  a changelog because that is the only form that stays true.
 - **Four integration tests** drive the real coordinator binary over a socket
   with fake devices:
   - *Calibration loop* — a fake microphone uploads recordings in which the
@@ -137,7 +146,7 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
     the capture-pacing fix makes it fail, so it has teeth.
   - *Diagnostics access* — the export is gated on the room secret, and public
     endpoints never carry it.
-- **47 browser tests.** `web/test/clock.test.mjs` mirrors the Rust clock tests
+- **55 browser tests.** `web/test/clock.test.mjs` mirrors the Rust clock tests
   case for case, and `web/test/live.test.mjs` mirrors the playout buffer tests,
   because both algorithms exist twice and must not drift apart.
 - **End-to-end** (`node web/test/e2e.mjs`) drives two headless Chromium
@@ -146,6 +155,12 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   YouTube rendezvous — failing on any uncaught JS error in our own code.
 - **Windows capture** is type-checked with
   `cargo check --target x86_64-pc-windows-msvc -p homesync-audio`.
+
+Not tested, and worth knowing before trusting the numbers above: there is no
+fuzzing of the media metadata parsers, which are the code most exposed to
+untrusted bytes; no property-based tests; no load or soak run; and no browser
+other than Chromium, which matters because Safari is a target and its Web Audio
+behaviour differs.
 
 ## Repository layout
 
@@ -242,3 +257,20 @@ an LG television. webOS does not give one application another application's
 decoded audio, and only one foreground app owns the media resources. This is an
 operating-system boundary, not a performance problem — see specification
 section 4.1.
+
+## Security
+
+HomeSync assumes one home network on which everyone who can reach the
+coordinator is already trusted. The room secret is the only credential, it is
+handed out in a QR code, and it authorises changing the library as well as
+pressing play. That is a deliberate trade, and it is the wrong one anywhere
+else — [`SECURITY.md`](SECURITY.md) sets out the model, what is defended
+regardless, the known gaps, and how to report something exploitable.
+
+**Do not put this on a public address without a VPN or an authenticating proxy
+in front of it.** The coordinator warns at startup when it finds itself on a
+routable address, but a warning is not a control.
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE).

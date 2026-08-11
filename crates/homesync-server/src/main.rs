@@ -367,7 +367,40 @@ fn print_banner(
     if app.config.mdns {
         println!("  Note: Android does not resolve .local names. Use the LAN address there.");
     }
+    if reachable_from_the_internet(bound.ip(), lan_addresses) {
+        println!();
+        println!("  WARNING: this coordinator has a public address. HomeSync is built for");
+        println!("  a home network, where everyone who can reach it is already trusted:");
+        println!("  the room secret is the only credential, it is printed in a QR code for");
+        println!("  guests, and it authorises changing the library as well as pressing play.");
+        println!("  Put it behind a VPN or a firewall rather than on the open internet.");
+    }
     println!();
+}
+
+/// Whether the coordinator is listening somewhere the internet can reach.
+///
+/// Binding `0.0.0.0` is the ordinary case and is not itself the problem — on a
+/// home router every address behind it is private. It becomes a problem on a
+/// hosted machine, where the same flag exposes the room to anyone. The
+/// distinction is not the bind address but whether any address it landed on is
+/// routable, which is why this reads the discovered addresses rather than the
+/// flag.
+fn reachable_from_the_internet(bound: IpAddr, addresses: &[IpAddr]) -> bool {
+    let public = |ip: &IpAddr| match ip {
+        IpAddr::V4(v4) => !(v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()),
+        IpAddr::V6(v6) => {
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80)
+        }
+    };
+    if bound.is_unspecified() {
+        addresses.iter().any(public)
+    } else {
+        public(&bound)
+    }
 }
 
 fn display_host(ip: IpAddr) -> String {
@@ -456,5 +489,33 @@ mod tests {
     fn unspecified_bind_displays_as_localhost() {
         assert_eq!(display_host("0.0.0.0".parse().unwrap()), "localhost");
         assert_eq!(display_host("192.168.1.50".parse().unwrap()), "192.168.1.50");
+    }
+
+    fn ip(raw: &str) -> IpAddr {
+        raw.parse().expect("address")
+    }
+
+    /// The ordinary case: `0.0.0.0` on a home router. Every address behind it
+    /// is private, so binding everything is not an exposure and must not warn —
+    /// a warning shown to everyone is a warning nobody reads.
+    #[test]
+    fn a_home_network_does_not_warn() {
+        assert!(!reachable_from_the_internet(ip("0.0.0.0"), &[ip("192.168.1.50"), ip("10.0.0.4")]));
+        assert!(!reachable_from_the_internet(ip("127.0.0.1"), &[]));
+        assert!(!reachable_from_the_internet(ip("192.168.1.50"), &[ip("192.168.1.50")]));
+    }
+
+    #[test]
+    fn a_routable_address_warns() {
+        assert!(reachable_from_the_internet(ip("0.0.0.0"), &[ip("192.168.1.50"), ip("203.0.113.7")]));
+        assert!(reachable_from_the_internet(ip("203.0.113.7"), &[]));
+        assert!(reachable_from_the_internet(ip("::"), &[ip("2606:4700::1111")]));
+    }
+
+    #[test]
+    fn ipv6_private_ranges_are_not_public() {
+        assert!(!reachable_from_the_internet(ip("::"), &[ip("fd00::1")]));
+        assert!(!reachable_from_the_internet(ip("::"), &[ip("fe80::1")]));
+        assert!(!reachable_from_the_internet(ip("::1"), &[]));
     }
 }
