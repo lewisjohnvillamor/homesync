@@ -12,3 +12,8 @@ homesync-key.pem
 homesync-cert-names.json
 homesync-devices.json
 *.json.tmp
+
+# Tracks fetched from a URL. The default download folder is the working
+# directory, so without this the first fetch puts someone else's music in
+# `git status` and one careless `git add .` commits it.
+homesync-downloads/

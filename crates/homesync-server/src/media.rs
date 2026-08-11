@@ -254,11 +254,14 @@ pub fn has_audio_extension(path: &Path) -> bool {
 
 /// Finds an embedded cover picture and returns where it sits in the file.
 ///
-/// FLAC only, and deliberately so: every file in the library that prompted
-/// this was FLAC, and a half-finished ID3 parser that mostly works is worse
-/// than an honest `None`. MP3 keeps its art in an ID3v2 `APIC` frame whose
-/// text encodings and two incompatible size formats are a separate piece of
-/// work; when someone needs it, it belongs beside this function.
+/// Three containers, three completely unrelated ways of carrying the same
+/// picture: a FLAC `PICTURE` metadata block, an ID3v2 `APIC` frame, and an MP4
+/// `covr` atom. Each is walked by its own function below; this one only decides
+/// which, from the file's first bytes rather than from its extension, because a
+/// `.m4a` and a `.mp4` are the same container and a mistagged file is common.
+///
+/// Anything else returns `None`. An honest "no artwork" is better than a
+/// half-finished parser that returns the wrong bytes.
 fn embedded_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
     if bytes.starts_with(b"fLaC") {
         return flac_artwork(bytes);
