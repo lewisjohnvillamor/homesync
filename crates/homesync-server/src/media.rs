@@ -19,7 +19,19 @@ pub const BUILTIN_CLICK_ID: &str = "builtin-click";
 
 /// File extensions the scanner accepts. Decoding happens in the browser, so
 /// this list only needs to match what `AudioContext.decodeAudioData` handles.
-const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "aac", "ogg", "oga", "opus", "flac", "webm"];
+/// Extensions the scanner picks up.
+///
+/// The list is what browsers can actually decode, not everything that is
+/// music. `mp4` and `m4b` join `m4a` because all three are the same container
+/// and people's libraries use all three; `aif`/`aiff` because uncompressed
+/// Apple files are common on a Mac.
+///
+/// Deliberately absent: `wma`, which no browser outside Edge on Windows will
+/// decode, and `ape`, `wv` and `dsf`, which none will. Listing a file the room
+/// cannot play is worse than not listing it — it puts a track in the queue
+/// that stops the room instead of playing.
+const AUDIO_EXTENSIONS: &[&str] =
+    &["wav", "mp3", "m4a", "m4b", "mp4", "aac", "ogg", "oga", "opus", "flac", "webm", "aif", "aiff"];
 
 /// Where the bytes of one media item live.
 #[derive(Debug, Clone)]
@@ -248,10 +260,22 @@ pub fn has_audio_extension(path: &Path) -> bool {
 /// text encodings and two incompatible size formats are a separate piece of
 /// work; when someone needs it, it belongs beside this function.
 fn embedded_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
-    // "fLaC", then a chain of metadata blocks before any audio.
-    if bytes.len() < 4 || &bytes[0..4] != b"fLaC" {
-        return None;
+    if bytes.starts_with(b"fLaC") {
+        return flac_artwork(bytes);
     }
+    if bytes.starts_with(b"ID3") {
+        return id3_artwork(bytes);
+    }
+    // An MP4/M4A begins with a size then "ftyp"; the size is at 0, the brand
+    // at 4, which is why this looks at an offset rather than a prefix.
+    if bytes.len() > 8 && &bytes[4..8] == b"ftyp" {
+        return mp4_artwork(bytes);
+    }
+    None
+}
+
+/// Walks FLAC metadata blocks for a PICTURE.
+fn flac_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
     let mut pos = 4usize;
 
     loop {
@@ -276,6 +300,168 @@ fn embedded_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
         }
         pos = body + block_len;
     }
+}
+
+/// Finds an `APIC` frame in an ID3v2 tag, as MP3 files carry cover art.
+///
+/// v2.3 and v2.4 only. v2.2 used three-character frame ids and three-byte
+/// sizes, and files old enough to have one are rare enough that guessing at
+/// them would add a second parser for almost nobody.
+fn id3_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
+    let header = bytes.get(0..10)?;
+    let major = header[3];
+    if !(3..=4).contains(&major) {
+        return None;
+    }
+    // The tag size is "synchsafe": seven bits per byte, so a size can never
+    // contain a byte that looks like the start of an audio frame.
+    let tag_size = synchsafe(&header[6..10])? as usize;
+    let tag_end = 10usize.checked_add(tag_size)?.min(bytes.len());
+
+    let mut at = 10usize;
+    // An extended header sits between the tag header and the first frame.
+    if header[5] & 0x40 != 0 {
+        let ext = bytes.get(at..at + 4)?;
+        let ext_size =
+            if major == 4 { synchsafe(ext)? as usize } else { u32::from_be_bytes(ext.try_into().ok()?) as usize + 4 };
+        at = at.checked_add(ext_size)?;
+    }
+
+    while at + 10 <= tag_end {
+        let frame = bytes.get(at..at + 10)?;
+        // Padding: the rest of the tag is zeroes, not another frame.
+        if frame[0] == 0 {
+            return None;
+        }
+        // v2.4 made frame sizes synchsafe too; v2.3 left them plain. Reading
+        // one as the other silently walks into the middle of a frame.
+        let size = if major == 4 {
+            synchsafe(&frame[4..8])? as usize
+        } else {
+            u32::from_be_bytes([frame[4], frame[5], frame[6], frame[7]]) as usize
+        };
+        let body = at + 10;
+        if body.checked_add(size)? > tag_end {
+            return None;
+        }
+        if &frame[0..4] == b"APIC" {
+            if let Some(found) = apic_picture(bytes, body, size) {
+                return Some(found);
+            }
+        }
+        at = body + size;
+    }
+    None
+}
+
+/// Reads an `APIC` frame body: text encoding, MIME, picture type, description,
+/// then the image.
+fn apic_picture(bytes: &[u8], body: usize, size: usize) -> Option<ArtworkRef> {
+    let end = body + size;
+    let encoding = *bytes.get(body)?;
+    let mut at = body + 1;
+
+    // MIME is always Latin-1 and null-terminated, whatever the text encoding.
+    let mime_end = bytes.get(at..end)?.iter().position(|b| *b == 0)? + at;
+    let mime = std::str::from_utf8(bytes.get(at..mime_end)?).ok()?.to_ascii_lowercase();
+    at = mime_end + 1;
+
+    at = at.checked_add(1)?; // Picture type.
+
+    // The description uses the frame's encoding, and the two UTF-16 encodings
+    // terminate on a *pair* of zero bytes — stopping at the first one lands
+    // inside the terminator and shifts every following byte.
+    at = match encoding {
+        1 | 2 => {
+            let mut scan = at;
+            loop {
+                let pair = bytes.get(scan..scan + 2)?;
+                if pair == [0, 0] {
+                    break scan + 2;
+                }
+                scan += 2;
+            }
+        }
+        _ => bytes.get(at..end)?.iter().position(|b| *b == 0)? + at + 1,
+    };
+
+    let len = end.checked_sub(at)?;
+    artwork_ref(&normalise_mime(&mime), at, len)
+}
+
+/// Finds the `covr` atom an MP4, M4A or M4B keeps its cover in.
+fn mp4_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
+    let ilst = find_atom(bytes, 0, bytes.len(), &[b"moov", b"udta", b"meta", b"ilst"])?;
+    let covr = find_atom(bytes, ilst.0, ilst.1, &[b"covr"])?;
+    // Inside `covr` is a `data` atom: size, "data", four flag bytes whose low
+    // byte is the image format, four reserved bytes, then the image.
+    let data = find_atom(bytes, covr.0, covr.1, &[b"data"])?;
+    let flags = bytes.get(data.0..data.0 + 4)?;
+    let content_type = match flags[3] {
+        13 => "image/jpeg",
+        14 => "image/png",
+        _ => return None,
+    };
+    let start = data.0 + 8;
+    let len = data.1.checked_sub(start)?;
+    artwork_ref(content_type, start, len)
+}
+
+/// Walks a path of MP4 atoms and returns the body range of the last one.
+fn find_atom(bytes: &[u8], mut from: usize, mut to: usize, path: &[&[u8; 4]]) -> Option<(usize, usize)> {
+    for (depth, want) in path.iter().enumerate() {
+        let mut at = from;
+        let mut found = None;
+        while at + 8 <= to {
+            let size = u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize;
+            let name = bytes.get(at + 4..at + 8)?;
+            // A zero size means "to the end of the file"; anything under the
+            // header is a malformed atom and walking it would not terminate.
+            let size = if size == 0 { to - at } else { size };
+            if size < 8 || at + size > to {
+                return None;
+            }
+            if name == *want {
+                // `meta` is a full atom: four bytes of version and flags sit
+                // between its header and its children. Missing this is why a
+                // naive walker finds `ilst` in some files and not others.
+                let skip = if *want == b"meta" { 12 } else { 8 };
+                found = Some((at + skip, at + size));
+                break;
+            }
+            at += size;
+        }
+        let (start, end) = found?;
+        from = start;
+        to = end;
+        let _ = depth;
+    }
+    Some((from, to))
+}
+
+/// Seven-bit-per-byte integer, as ID3 uses for sizes.
+fn synchsafe(raw: &[u8]) -> Option<u32> {
+    if raw.len() != 4 || raw.iter().any(|b| b & 0x80 != 0) {
+        return None;
+    }
+    Some(((raw[0] as u32) << 21) | ((raw[1] as u32) << 14) | ((raw[2] as u32) << 7) | raw[3] as u32)
+}
+
+/// Some taggers write `image/jpg` or a bare `JPG` where a MIME type belongs.
+fn normalise_mime(mime: &str) -> String {
+    match mime {
+        "image/jpg" | "jpg" | "jpeg" => "image/jpeg".to_string(),
+        "png" => "image/png".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// The one place a picture is accepted, so every parser gets the same limits.
+fn artwork_ref(content_type: &str, offset: usize, len: usize) -> Option<ArtworkRef> {
+    if len == 0 || len > MAX_ARTWORK_BYTES as usize || !content_type.starts_with("image/") {
+        return None;
+    }
+    Some(ArtworkRef { content_type: content_type.to_string(), offset: offset as u64, len: len as u32 })
 }
 
 /// Reads one FLAC PICTURE block body.
@@ -304,14 +490,10 @@ fn flac_picture(bytes: &[u8], body: usize, block_len: usize) -> Option<ArtworkRe
     let data_len = u32_at(at)?;
     at += 4;
 
-    if at.checked_add(data_len as usize)? > end || data_len == 0 || data_len > MAX_ARTWORK_BYTES {
+    if at.checked_add(data_len as usize)? > end {
         return None;
     }
-    // A picture the browser cannot render is not worth advertising.
-    if !mime.starts_with("image/") {
-        return None;
-    }
-    Some(ArtworkRef { content_type: mime.to_string(), offset: at as u64, len: data_len })
+    artwork_ref(&normalise_mime(&mime.to_ascii_lowercase()), at, data_len as usize)
 }
 
 fn content_type_for(path: &Path) -> String {
@@ -663,5 +845,140 @@ mod tests {
     fn an_absurdly_large_picture_is_refused() {
         let file = flac_with_picture("image/jpeg", PNG, Some(MAX_ARTWORK_BYTES + 1));
         assert!(embedded_artwork(&file).is_none());
+    }
+
+    /// An ID3v2 tag holding one APIC frame, in either major version.
+    fn mp3_with_cover(major: u8, encoding: u8, mime: &[u8], description: &[u8], data: &[u8]) -> Vec<u8> {
+        let mut body = vec![encoding];
+        body.extend_from_slice(mime);
+        body.push(0);
+        body.push(3); // Front cover.
+        body.extend_from_slice(description);
+        // UTF-16 descriptions terminate on a pair of zero bytes, not one.
+        body.push(0);
+        if encoding == 1 || encoding == 2 {
+            body.push(0);
+        }
+        body.extend_from_slice(data);
+
+        let mut frame = Vec::from(*b"APIC");
+        let size = body.len() as u32;
+        if major == 4 {
+            frame.extend_from_slice(&[
+                (size >> 21) as u8 & 0x7f,
+                (size >> 14) as u8 & 0x7f,
+                (size >> 7) as u8 & 0x7f,
+                size as u8 & 0x7f,
+            ]);
+        } else {
+            frame.extend_from_slice(&size.to_be_bytes());
+        }
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&body);
+
+        let mut out = Vec::from(*b"ID3");
+        out.extend_from_slice(&[major, 0, 0]);
+        let tag = frame.len() as u32;
+        out.extend_from_slice(&[
+            (tag >> 21) as u8 & 0x7f,
+            (tag >> 14) as u8 & 0x7f,
+            (tag >> 7) as u8 & 0x7f,
+            tag as u8 & 0x7f,
+        ]);
+        out.extend_from_slice(&frame);
+        out
+    }
+
+    fn atom(name: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(name);
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// An M4A: `ftyp`, then moov > udta > meta > ilst > covr > data.
+    fn m4a_with_cover(format: u8, data: &[u8]) -> Vec<u8> {
+        let mut data_body = vec![0, 0, 0, format, 0, 0, 0, 0];
+        data_body.extend_from_slice(data);
+        let covr = atom(b"covr", &atom(b"data", &data_body));
+        let ilst = atom(b"ilst", &covr);
+        // `meta` is a full atom: four bytes of version and flags before its
+        // children, which is the trap this fixture exists to set.
+        let mut meta_body = vec![0, 0, 0, 0];
+        meta_body.extend_from_slice(&ilst);
+        let meta = atom(b"meta", &meta_body);
+        let udta = atom(b"udta", &meta);
+        let moov = atom(b"moov", &udta);
+
+        let mut out = atom(b"ftyp", b"M4A ");
+        out.extend_from_slice(&moov);
+        out
+    }
+
+    #[test]
+    fn an_mp3_cover_is_found_in_both_id3_versions() {
+        // v2.3 sizes are plain big-endian and v2.4 sizes are synchsafe.
+        // Reading one as the other walks into the middle of a frame.
+        for major in [3u8, 4] {
+            let file = mp3_with_cover(major, 0, b"image/jpeg", b"cover", PNG);
+            let art = embedded_artwork(&file).unwrap_or_else(|| panic!("v2.{major}"));
+            assert_eq!(art.content_type, "image/jpeg");
+            assert_eq!(&file[art.offset as usize..art.offset as usize + PNG.len()], PNG);
+        }
+    }
+
+    #[test]
+    fn a_utf16_description_does_not_shift_the_picture() {
+        // Encoding 1 terminates the description with two zero bytes. Stopping
+        // at the first leaves a stray byte on the front of the image.
+        let file = mp3_with_cover(4, 1, b"image/png", &[0x41, 0x00], PNG);
+        let art = embedded_artwork(&file).expect("a picture");
+        assert_eq!(&file[art.offset as usize..art.offset as usize + PNG.len()], PNG);
+    }
+
+    #[test]
+    fn a_tagger_writing_image_slash_jpg_still_works() {
+        // Not a real MIME type, and common in the wild.
+        let file = mp3_with_cover(3, 0, b"image/jpg", b"", PNG);
+        assert_eq!(embedded_artwork(&file).expect("a picture").content_type, "image/jpeg");
+    }
+
+    #[test]
+    fn an_m4a_cover_is_found_past_the_meta_version_bytes() {
+        for (format, expected) in [(13u8, "image/jpeg"), (14, "image/png")] {
+            let file = m4a_with_cover(format, PNG);
+            let art = embedded_artwork(&file).expect("a picture");
+            assert_eq!(art.content_type, expected);
+            assert_eq!(&file[art.offset as usize..art.offset as usize + PNG.len()], PNG);
+        }
+    }
+
+    #[test]
+    fn an_m4a_with_an_unknown_picture_format_is_refused() {
+        // Only 13 and 14 are defined. Serving anything else would hand the
+        // browser bytes it cannot render with a MIME type that lies.
+        assert!(embedded_artwork(&m4a_with_cover(1, PNG)).is_none());
+    }
+
+    #[test]
+    fn an_atom_smaller_than_its_own_header_does_not_hang_the_walk() {
+        // Straight off disk, so it can say anything. A size under 8 would
+        // advance the cursor by nothing and loop forever.
+        let mut file = atom(b"ftyp", b"M4A ");
+        file.extend_from_slice(&[0, 0, 0, 2]);
+        file.extend_from_slice(b"moov");
+        assert!(embedded_artwork(&file).is_none());
+    }
+
+    #[test]
+    fn the_newly_accepted_extensions_are_picked_up() {
+        for name in ["a.mp4", "b.m4b", "c.aiff", "d.aif", "e.MP3"] {
+            assert!(has_audio_extension(Path::new(name)), "{name}");
+        }
+        // No browser outside Edge decodes these, and a track that stops the
+        // room is worse than a track that is not offered.
+        for name in ["a.wma", "b.ape", "c.dsf", "d.txt"] {
+            assert!(!has_audio_extension(Path::new(name)), "{name}");
+        }
     }
 }
