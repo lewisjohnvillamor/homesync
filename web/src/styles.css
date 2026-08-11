@@ -755,6 +755,12 @@ input[type="range"]:disabled {
   margin: 0;
   padding: 0;
   display: grid;
+  /* `minmax(0, 1fr)` rather than the implicit `auto`. An `auto` track is at
+     least as wide as its widest row's content, so on a phone the rows grew
+     past the list instead of shrinking inside it and the remove button sat
+     off the right edge, unreachable. Capping the track at the container is
+     what lets a long title ellipsise. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   /* Ten rows, then scroll. A long queue is the normal case once a folder is
      attached, and an eighty-track list pushes the transport and every device
@@ -854,18 +860,8 @@ input[type="range"]:disabled {
   border-radius: var(--radius-sm);
 }
 
-.queue-play:hover /* Square, and sized from the row so a cover never changes the row height. */
-.queue-art {
-  width: 1.75rem;
-  height: 1.75rem;
-  flex: none;
-  border-radius: 4px;
-  object-fit: cover;
-  background: var(--bg-sunken);
-}
-
-.queue-title {
-  color: var(--accent);
+.queue-play:hover .queue-title {
+  text-decoration: underline;
 }
 
 .queue-move {
@@ -895,6 +891,7 @@ input[type="range"]:disabled {
 .queue-title {
   flex: 1 1 auto;
   min-width: 0;
+  color: var(--accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1,168 +1,296 @@
+<div align="center">
+
 # HomeSync
 
-Self-hosted synchronised audio for a home network. A single Rust binary serves
-a browser client to every device on the LAN, measures each device's clock
-against its own, and schedules audio to be *heard* at one agreed instant.
+**Play the same music, in time, on every device in your house.**
 
-The full design lives in [`HomeSync_Technical_Specification.md`](HomeSync_Technical_Specification.md).
-All six milestones from that document are now implemented. How thoroughly each
-one has been *verified* varies enormously — see [Status](#status), which is the
-most important section in this file.
+One Rust binary. No accounts, no cloud, no app to install —
+every device joins from its browser.
+
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
+
+</div>
+
+<p align="center">
+  <img src="docs/images/room.png" alt="The HomeSync room: a queue with cover art playing on two devices, each reporting its clock agreement and drift" width="820">
+</p>
+
+---
+
+## What it is
+
+Put a laptop, a phone and a TV in the same room and press play on all three, and
+you get an echo. The devices do not share a clock, their audio hardware adds
+different amounts of delay, and nothing tells them when "now" is.
+
+HomeSync is a coordinator that fixes that. It measures every device's clock
+against its own, works out how far each one drifts, and then schedules audio to
+be **heard** at one agreed instant rather than merely *started* at roughly the
+same time.
+
+You run it on one machine on your network. Everything else joins by opening a
+link.
+
+- 🎵 **Music** — every device downloads the same file, verifies it, and plays it off one shared timeline
+- 📺 **YouTube together** — every device runs its own player; HomeSync keeps them lined up
+- 🎚️ **Per-device equaliser** — tame the boomy speaker in the kitchen without touching the rest
+- 📶 **No internet needed** — it is your LAN, your files, your machine
+- 🔍 **It tells you the truth** — one line saying whether the room is actually together, or which device is 2.4 s behind
 
 ## Quick start
 
+You need [Rust](https://rustup.rs) (stable). Then:
+
 ```sh
+git clone https://github.com/lewisjohnvillamor/homesync.git
+cd homesync
 cargo run --release
 ```
 
-The coordinator prints a LAN URL, a room code, an invite link and a QR code.
-Open the link on two devices, press **Enable audio & join** on each, pick
-**Click track (built-in, 60 s)** and press **Play**.
+That is the whole install. The coordinator prints a LAN address, a room code, an
+invite link and a QR code:
 
-```sh
-cargo run --release -- --tls --media-dir ~/Music
+```text
+  HomeSync coordinator 0.1.0 — protocol v1
+  ---------------------------------------------
+  Open on the LAN      : http://192.168.1.50:8080
+  Open on this machine : http://localhost:8080
+  Also try             : http://homesync.local:8080
+  Room code            : K7M2QX
+  Invite link          : http://192.168.1.50:8080/#room=K7M2QX&secret=01K...
 ```
 
-Any `wav/mp3/m4a/m4b/mp4/aac/ogg/oga/opus/flac/webm/aif/aiff` file in
-`--media-dir` joins the catalogue, with its embedded cover art if it has any.
-`wma`, `ape`, `wv` and `dsf` are left out on purpose: no browser decodes them,
-and listing a file the room cannot play is worse than not listing it. The
-built-in click track is always present, so the timing checkpoints are runnable
-on a fresh checkout with no audio files at all.
+Open the invite link on two devices, press **Enable audio & join** on each, pick
+**Click track (built-in, 60 s)**, and press **Play**. A click track is used for
+the first test on purpose — two clicks that are out of time are obvious in a way
+that two songs are not.
 
-**`--tls` is required for acoustic calibration.** Browsers refuse microphone
-access on a plain-HTTP LAN address, so without it no device can be the
-calibration microphone. HomeSync signs its own certificate and each device
-shows a warning once. See [`docs/self-hosting.md`](docs/self-hosting.md).
+To play your own music, point it at a folder:
 
-Open `/probe.html` on any device to find out whether it can hold a schedule
-before trusting it as a receiver.
+```sh
+cargo run --release -- --media-dir ~/Music
+```
 
-## Source modes
+## Screenshots
 
-| Mode | What it does | Timing story |
+| Invite a device | The room, on a phone |
+| --- | --- |
+| <img src="docs/images/invite.png" alt="The invite panel showing a copyable link and a QR code" width="380"> | <img src="docs/images/phone.png" alt="The same room on a narrow phone screen" width="230"> |
+
+**Is the room actually together?** The Devices panel answers in one line, and
+names the device when it isn't:
+
+<p align="center">
+  <img src="docs/images/devices.png" alt="Devices panel reading '2 devices playing together', with per-device clock agreement and drift" width="700">
+</p>
+
+It follows your system theme:
+
+<p align="center">
+  <img src="docs/images/room-light.png" alt="The same room in light theme" width="620">
+</p>
+
+## Running the self-hosted server
+
+### Prerequisites
+
+| | |
+| --- | --- |
+| **Rust** | Stable, via [rustup](https://rustup.rs). Nothing else — no Node, no bundler, no database. The web client is compiled into the binary. |
+| **Linux** | Nothing extra for the coordinator. |
+| **macOS** | Nothing extra. |
+| **Windows** | Nothing extra. Live system-audio capture additionally needs the MSVC toolchain, and is unverified — see [Status](#status). |
+
+### Build a release binary
+
+```sh
+cargo build --release
+./target/release/homesync --media-dir ~/Music
+```
+
+The binary is self-contained; copy it wherever you like. It needs no files
+beside it except the ones it writes itself (certificate, device profiles).
+
+### Common setups
+
+```sh
+# Point at several folders, including a mounted drive
+cargo run --release -- --media-dir ~/Music --media-dir /mnt/nas/albums
+
+# A fixed room code, so a saved invite link keeps working
+cargo run --release -- --room-code HOUSE1
+
+# HTTPS — required for acoustic calibration (see below)
+cargo run --release -- --tls --media-dir ~/Music
+
+# Keep it on this machine only
+cargo run --release -- --bind 127.0.0.1
+```
+
+Folders can also be added from the interface while it is running, so a drive
+plugged in later does not need a restart — restarting would drop every device
+out of the room and lose their clocks.
+
+### Useful flags
+
+| Flag | Default | What it does |
 | --- | --- | --- |
-| **Music** | Every receiver preloads, verifies and schedules the same file, and follows a queue | Guaranteed: one timeline, sample-scheduled |
-| **YouTube together** | Every device runs its own YouTube player; HomeSync distributes a position and an instant | Best effort: learned per-device start latency, drift re-convergence |
+| `--media-dir <DIR>` | `media` | A folder to scan. Repeat for several. |
+| `--port <PORT>` | `8080` | Listening port. |
+| `--bind <ADDR>` | `0.0.0.0` | `127.0.0.1` keeps it off the network. |
+| `--tls` | off | HTTPS with a self-signed certificate. Needed for calibration. |
+| `--room-code <CODE>` | random | Fix the room code across restarts. |
+| `--mdns <BOOL>` | `true` | Advertise `homesync.local`. |
+| `--max-clients <N>` | `16` | Devices allowed in the room. |
+| `--state-file <PATH>` | `homesync-devices.json` | Where per-device compensation is saved. |
+| `--start-lead-ms <MS>` | `2000` | How far ahead playback is scheduled. |
 
-Music takes a queue: tracks play in order, any entry can be played or moved,
-and the coordinator advances on its own.
+`homesync --help` lists them all. Every flag has an `HOMESYNC_*` environment
+variable, which is what you want under systemd or Docker.
 
-The library is a set of folders rather than one hardcoded directory. Repeat
-`--media-dir` for several, or add one from the interface while the coordinator
-is running — a drive plugged in after startup is the ordinary case, and
-restarting to see it would drop every device out of the room. **Rescan** picks
-up whatever changed.
+### Run it as a service
 
-A track can also be fetched from a URL. The coordinator downloads it once and
-then serves it like any local file, so every receiver preloads the same
-verified bytes and the remote host is asked for it once rather than once per
-device. An endless radio stream is refused, and that is not a gap: Music mode
-rests on every device holding the same decoded buffer and starting it at an
-agreed instant, and a stream has no length, no hash and nothing to preload.
-Re-broadcasting one is what live system audio is for. Receivers decode the next track while the current one plays, so the gap
-between them is the ordinary scheduling lead rather than a download.
+<details>
+<summary><b>systemd (Linux)</b></summary>
 
-Each device also has its own five-band equaliser, which shapes only that
-device's output — the point being that a boomy speaker in the kitchen can be
-tamed without touching anything else in the room. It applies to Music alone: a
-YouTube player's audio never reaches the page, so nothing in the client can
-filter it. Calibration chirps bypass it deliberately, so an acoustic
-measurement still hears the speaker rather than the filters.
+```ini
+# /etc/systemd/system/homesync.service
+[Unit]
+Description=HomeSync coordinator
+After=network-online.target
 
-Music is the reference mode and the only one with a guaranteed timing story.
-YouTube is best-effort *by construction*, not by omission — the reasons are in
+[Service]
+ExecStart=/usr/local/bin/homesync
+Environment=HOMESYNC_MEDIA_DIR=/srv/music
+Environment=HOMESYNC_ROOM_CODE=HOUSE1
+WorkingDirectory=/var/lib/homesync
+Restart=on-failure
+User=homesync
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+sudo systemctl enable --now homesync
+```
+
+`WorkingDirectory` matters: the certificate and the device profiles are written
+there.
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+Run it from a terminal, or register it with
+[NSSM](https://nssm.cc) to start with the machine. Windows Defender Firewall
+will ask once for permission to accept connections — say yes for **private
+networks**, or no device will be able to reach it.
+</details>
+
+### Which file formats work
+
+`wav`, `mp3`, `m4a`, `m4b`, `mp4`, `aac`, `ogg`, `oga`, `opus`, `flac`, `webm`,
+`aif` and `aiff`, with embedded cover art from FLAC, MP3 and MP4 files.
+
+`wma`, `ape`, `wv` and `dsf` are deliberately **not** listed, because no browser
+decodes them — and a track in the queue that cannot play stops the room, which is
+worse than not offering it. If a file will not decode, the interface says so and
+names it.
+
+### A track from a URL
+
+Paste a link and the coordinator downloads it once, then serves it like any local
+file, so the remote host is asked for it once instead of once per device. Endless
+radio streams are refused: Music mode needs a file with a length and a hash to
+schedule, and a stream has neither.
+
+Only public URLs. Addresses on your own machine or network are refused on
+purpose — see [`SECURITY.md`](SECURITY.md).
+
+## Using it
+
+### Getting devices in
+
+Press **Invite a device** for a QR code and a copyable link. Scan it with a
+phone, or send the link. The secret lives in the URL fragment, which browsers
+never put on the wire.
+
+Some devices need help finding the coordinator:
+
+- **Android does not resolve `.local` names.** Give phones the IP address.
+- **iPhone and iPad** need an explicit tap before any audio plays, so **Enable
+  audio & join** is a real button rather than a formality.
+- **A device on a guest network or a VPN** is not on your LAN and cannot reach
+  the coordinator at all.
+
+### Getting them in time
+
+Three things are worth knowing, in order of how often they matter.
+
+1. **Wait for the clocks.** A device that just joined has not measured its clock
+   yet. Press Play anyway and HomeSync holds the start until every device is
+   ready, telling you what it is waiting for. There is a force option when you
+   would rather have sound now than sound in time.
+2. **Nudge by ear.** If one speaker is audibly late, raise its **Timing
+   compensation** until the flam disappears. It is saved per device and comes
+   back when that device rejoins. This handles Bluetooth speakers, soundbars and
+   televisions, whose latency the browser reports wrongly or not at all.
+3. **Or measure it.** Acoustic calibration plays coded chirps and has one device
+   listen, working out each speaker's real delay rather than the one it claims.
+   This needs `--tls`, because browsers refuse microphone access on a plain-HTTP
+   address. It has never been run against a real microphone — see
+   [Status](#status).
+
+### Playing to a TV
+
+Open the invite link in the television's browser like any other device. Before
+trusting it, open **`/probe.html`** on it: that page reports whether the device's
+audio clock runs at the right rate, which is the difference between a receiver
+that can hold a schedule and one that cannot.
+
+What a TV *cannot* do is share audio from Netflix, YouTube or Spotify running as
+their own apps. That is an operating-system boundary, not something better
+software fixes.
+
+## Troubleshooting
+
+| Symptom | What is happening |
+| --- | --- |
+| A device cannot open the link | It is on a different network — a guest SSID, a VPN, or mobile data. Check the LAN address the banner printed. |
+| `homesync.local` does not resolve | Android never resolves it; on Linux it needs Avahi. Use the IP address. |
+| Nothing plays on one device | Browsers block audio until the page is interacted with. Press **Enable audio & join** on that device. |
+| Play does nothing | The room is waiting for a device to be ready. The interface says which, and what for. |
+| One speaker is late | Raise its Timing compensation until the flam goes. Bluetooth adds 100–300 ms and changes on every reconnection. |
+| **Calibrate** is greyed out or silent | You are on plain HTTP. Restart with `--tls` and accept the certificate warning on the microphone device. |
+| A file will not play | The interface names it. It is a format this browser cannot decode, or the file is damaged. |
+| Devices drift apart over time | Export the diagnostics — the button is under Advanced — and open an issue with the JSON attached. |
+
+## How it works
+
+A short version; the full design is in
+[`HomeSync_Technical_Specification.md`](HomeSync_Technical_Specification.md) and
 [`docs/protocol.md`](docs/protocol.md).
 
-A third mode, **live system audio**, exists in the protocol and the
-coordinator: the host captures its own output and streams timestamped PCM,
-which receivers still know how to play. The interface offers no way to start
-one, because the Windows capture path has never been run against real
-hardware and an unverified mode does not belong next to two that work.
+- **Clock synchronisation.** A four-timestamp exchange, like NTP, with
+  median-absolute-deviation outlier rejection, a lowest-round-trip offset
+  estimate, drift by linear regression, and confirmation before a jump is
+  believed to be a real clock step rather than a bad sample.
+- **One timeline.** The coordinator owns a single authoritative transport —
+  epoch, state, anchor instant, anchor position. Every receiver translates that
+  instant into its own `AudioContext` clock and schedules the buffer. Join,
+  resume, seek and late arrival all take the same path, so there is one way for
+  playback to start rather than four.
+- **A readiness barrier.** Nothing plays until every receiver holds the verified
+  file and a stable clock, with an explicit override for when you would rather
+  not wait.
+- **Honest reporting.** Clock agreement, player-timeline agreement, and
+  physically measured alignment are three different things, and the interface
+  never lets one stand in for another. Only the third is real, and only after a
+  calibration run.
 
-## What it does
-
-- **Clock synchronisation.** Four-timestamp exchange with median-absolute-
-  deviation outlier rejection, a lowest-round-trip offset estimate, drift by
-  linear regression, and confirmation before a jump is believed to be a real
-  clock step.
-- **Scheduled playback.** One authoritative timeline; every receiver translates
-  the anchor instant into its own `AudioContext` clock. Join, resume, seek and
-  late arrival all follow that single path.
-- **Acoustic calibration.** Coded chirps, match filtering through an in-house
-  FFT, first-arrival detection that survives a reflection louder than the
-  direct sound, repetition with outlier rejection, and a solver that will not
-  let a device with wandering latency drag the whole room. This is the
-  differentiator; see [`docs/calibration.md`](docs/calibration.md).
-- **Live PCM streaming.** Binary frames on the control socket, an `AudioWorklet`
-  playout buffer with gap concealment and loss/reorder/duplicate handling, and
-  three latency profiles.
-- **A readiness barrier.** Playback is refused until every receiver is ready
-  and holds a stable clock — with an explicit best-effort override.
-- **Diagnostics that distinguish three different things:** network agreement,
-  player-timeline agreement, and physically-measured alignment. Only the third
-  is real, and only after a calibration run.
-- **Single binary.** The web client is embedded; no bundler, no npm dependency,
-  no build step.
-- **Compensation that survives a restart.** Values found by ear or by
-  calibration are saved per device and restored when it rejoins — losing them
-  to a restart would make the feature feel unreliable even when it works.
-- **`homesync.local` over mDNS**, so devices can be pointed at a name instead
-  of an address read off a terminal. Android does not resolve `.local`, and the
-  banner says so rather than pretending.
-- **A diagnostics export**, so a problem is a JSON file rather than a
-  description of a sound.
-
-## Testing
-
-```sh
-./scripts/check.sh
-```
-
-Runs formatting, clippy, the Rust suite, the browser unit tests, a
-two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
-
-- **229 Rust unit tests.** Clock estimation against synthetic latency, jitter,
-  drift and step discontinuities; calibration DSP against noise, reflections and
-  differing sample rates; frame codec against every malformed input; playout
-  buffer against loss, reordering, duplication and clock skew; room state
-  machine; cover-art parsers for three container formats; the address rules that
-  stop fetch-by-URL being aimed at the local network.
-
-  Many of them are regression tests named after the defect they pin down —
-  `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
-  every device restart every few seconds, and it is a test rather than a note in
-  a changelog because that is the only form that stays true.
-- **Four integration tests** drive the real coordinator binary over a socket
-  with fake devices:
-  - *Calibration loop* — a fake microphone uploads recordings in which the
-    chirp sits at a **known** delay, so the test asserts against ground truth:
-    40 ms and 180 ms are measured, solved to −140 ms of compensation, and
-    applied to the room. A third device nobody heard is reported as
-    unmeasured rather than guessed.
-  - *Live stream* — a receiver decodes 400 consecutive frames and checks
-    contiguous sequence numbers, exactly 10 ms presentation spacing, no
-    re-anchoring, and a lead over real time that does not shrink. Reverting
-    the capture-pacing fix makes it fail, so it has teeth.
-  - *Diagnostics access* — the export is gated on the room secret, and public
-    endpoints never carry it.
-- **55 browser tests.** `web/test/clock.test.mjs` mirrors the Rust clock tests
-  case for case, and `web/test/live.test.mjs` mirrors the playout buffer tests,
-  because both algorithms exist twice and must not drift apart.
-- **End-to-end** (`node web/test/e2e.mjs`) drives two headless Chromium
-  receivers through join, clock warm-up, hash verification, decode, the
-  readiness barrier, play/pause/resume, compensation, a live PCM stream, and a
-  YouTube rendezvous — failing on any uncaught JS error in our own code.
-- **Windows capture** is type-checked with
-  `cargo check --target x86_64-pc-windows-msvc -p homesync-audio`.
-
-Not tested, and worth knowing before trusting the numbers above: there is no
-fuzzing of the media metadata parsers, which are the code most exposed to
-untrusted bytes; no property-based tests; no load or soak run; and no browser
-other than Chromium, which matters because Safari is a target and its Web Audio
-behaviour differs.
-
-## Repository layout
+### Repository layout
 
 ```text
 crates/homesync-protocol   Control protocol v1 types, shared and tested
@@ -178,99 +306,136 @@ docs/                      Protocol, calibration, checkpoints, compatibility
 
 ## Status
 
-This is the part to read before trusting anything.
+**This is the section to read before trusting anything.** The software is well
+tested; almost none of it has been heard by a human.
 
 ### Verified here
 
 - Clock exchange and estimator, in Rust and in the browser.
-- Controlled-audio scheduling: two headless browsers join, verify, and schedule
-  against one instant with zero JS errors.
+- Scheduling: two headless browsers join, verify the same file, and schedule
+  against one instant with zero JavaScript errors.
 - Live PCM: 400 consecutive frames arrive contiguous and exactly 10 ms apart,
-  holding a 456 ms lead against an expected 460 ms with +11 ms of drift across
-  the run. Buffers prime and underruns settle to zero.
+  holding a 456 ms lead against an expected 460 ms.
 - YouTube: the rendezvous reaches every device and the transport converges.
-- Checkpoint 1 passes headlessly with ~0.01 ms of cross-client disagreement.
+- Clock agreement of ~0.01 ms across simulated clients, headlessly.
 - HTTPS: a browser reaches the coordinator over `wss`, reports
   `isSecureContext`, and exposes `getUserMedia` — which is what makes
   calibration reachable on a real phone at all.
 - Persistence: a device whose browser storage was cleared rejoins and recovers
   its compensation from the coordinator.
 
-The **Devices** panel says in one line whether the room is actually together —
-"2 devices playing together", or "Kitchen TV is 2.4 s behind the room". It is
-computed by the coordinator, which is the only party that sees every device's
-telemetry, and it travels in the diagnostics export unchanged.
-
 ### Implemented but never run against reality
 
 - **Acoustic calibration has never heard a real microphone.** The DSP and the
-  whole coordinator loop are tested against synthetic recordings with known
-  ground truth — that is not the same as a speaker, a room and a phone.
-- **WASAPI loopback capture has never been executed.** It now genuinely
-  type-checks for `x86_64-pc-windows-msvc` on every run of `scripts/check.sh`,
-  which it did not before — the code is behind `cfg(windows)`, so on Linux it
-  was neither compiled nor linted and the claim that it compiled was resting on
-  nothing. That catches API misuse and proves nothing about device enumeration,
-  format negotiation or timing on real hardware. This is why live system audio
-  no longer has a button: the integration test exercises the streaming path
-  against a synthetic source, but nothing has captured real audio.
+  coordinator loop are tested against synthetic recordings with known ground
+  truth. That is not a speaker, a room and a phone.
+- **WASAPI loopback capture has never been executed.** It type-checks for
+  `x86_64-pc-windows-msvc` on every run of `scripts/check.sh`, which catches API
+  misuse and proves nothing about real hardware. This is why live system audio
+  has no button in the interface.
 - **The webOS receiver has never been packaged or installed on a television.**
 - **Nothing has been heard by a human.** Headless Chromium renders into a null
   audio sink: it can prove the client schedules correctly, never that a room
-  sounds synchronised. Live-mode buffer depth in particular is not meaningful
-  without real audio hardware.
+  sounds synchronised.
 
-Checkpoints 2 through 6 in [`docs/checkpoints.md`](docs/checkpoints.md) are the
-procedures for closing that gap, and `docs/compatibility.md` is where the
-results belong — including the failures.
+[`docs/checkpoints.md`](docs/checkpoints.md) is the procedure for closing that
+gap, and [`docs/compatibility.md`](docs/compatibility.md) is where results
+belong — including the failures.
 
 ### Not implemented
 
 - Opus compression. PCM only; the format code is reserved and rejected.
 - Multiple simultaneous rooms. One room is created at startup.
-- Rate limiting on join attempts (spec section 17).
-- Controlled video (mode D), so no lip-sync with HomeSync-owned video.
-- Bounded resampling for slow drift correction; drift over threshold causes a
-  coordinated restart instead.
+- Rate limiting on join attempts.
+- Controlled video, so no lip-sync with HomeSync-owned video.
+- Bounded resampling for slow drift; over threshold causes a coordinated restart.
 
 ### Deliberate deviations from the specification
 
-- **Any room member may issue transport commands**, not only the owner. Spec
-  section 15.3 wants owner-approved controllers; on a trusted LAN, requiring
-  approval before a phone can press pause is friction without a threat model.
-  The owner is still shown in the UI.
-- **The browser client is plain ES modules**, not TypeScript with Vite. This
-  keeps the "one executable, no build step" property. If the client grows
-  enough to need types, revisit the trade.
-- **`stable` clock quality is 5 ms of uncertainty, not 2 ms.** The uncertainty
-  figure includes a half-round-trip bound that a healthy LAN already spends;
-  2 ms would mark good networks degraded. The estimator still meets the 2 ms
-  accuracy target — there is a test.
+- **Any room member may control the transport**, not only the owner. On a
+  trusted LAN, requiring approval before a phone can press pause is friction
+  without a threat model.
+- **The browser client is plain ES modules**, not TypeScript with a bundler.
+  This keeps the "one executable, no build step" property.
+- **`stable` clock quality is 5 ms of uncertainty, not 2 ms.** The figure
+  includes a half-round-trip bound a healthy LAN already spends; 2 ms would mark
+  good networks degraded. The estimator still meets the 2 ms accuracy target,
+  and there is a test.
 - **Live system-audio capture is Windows-only.** cpal on Linux needs ALSA
   development headers, which would burden every build for a feature the
-  specification scopes to WASAPI. The synthetic source covers the rest.
+  specification scopes to WASAPI.
 
-### What will not work, ever, in software alone
+## Testing
 
-Capturing audio from Netflix, YouTube or Spotify running as their own apps on
-an LG television. webOS does not give one application another application's
-decoded audio, and only one foreground app owns the media resources. This is an
-operating-system boundary, not a performance problem — see specification
-section 4.1.
+```sh
+./scripts/check.sh
+```
+
+Formatting, clippy, the Rust suite, the browser unit tests, a
+two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
+
+- **229 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+  drift and step discontinuities; calibration DSP against noise, reflections and
+  differing sample rates; frame codec against every malformed input; playout
+  buffer against loss, reordering, duplication and skew; the room state machine;
+  cover-art parsers for three container formats; the address rules that stop
+  fetch-by-URL being aimed at the local network.
+
+  Many are regression tests named after the defect they pin down —
+  `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
+  every device restart every few seconds, and it is a test rather than a
+  changelog entry because that is the only form that stays true.
+- **Four integration tests** drive the real binary over a socket with fake
+  devices: the calibration loop against known ground truth, a live stream
+  holding its timeline across 400 frames, and diagnostics access control.
+- **55 browser tests.** `clock.test.mjs` mirrors the Rust clock tests case for
+  case and `live.test.mjs` mirrors the playout buffer tests, because both
+  algorithms exist twice and must not drift apart.
+- **End-to-end** (`node web/test/e2e.mjs`) drives two headless Chromium
+  receivers through join, warm-up, verification, decode, the readiness barrier,
+  play/pause/resume, compensation, a live PCM stream and a YouTube rendezvous.
+
+Not tested: no fuzzing of the media metadata parsers, which are the code most
+exposed to untrusted bytes; no property-based tests; no load or soak run; and no
+browser other than Chromium, which matters because Safari is a target and its
+Web Audio behaviour differs.
 
 ## Security
 
 HomeSync assumes one home network on which everyone who can reach the
-coordinator is already trusted. The room secret is the only credential, it is
-handed out in a QR code, and it authorises changing the library as well as
-pressing play. That is a deliberate trade, and it is the wrong one anywhere
-else — [`SECURITY.md`](SECURITY.md) sets out the model, what is defended
-regardless, the known gaps, and how to report something exploitable.
+coordinator is trusted. The room secret is the only credential, it is handed out
+in a QR code, and it authorises changing the library as well as pressing play.
+That is a deliberate trade and the wrong one anywhere else.
 
-**Do not put this on a public address without a VPN or an authenticating proxy
-in front of it.** The coordinator warns at startup when it finds itself on a
+**Do not put this on a public address without a VPN or an authenticating proxy in
+front of it.** The coordinator warns at startup when it finds itself on a
 routable address, but a warning is not a control.
+
+[`SECURITY.md`](SECURITY.md) sets out the model, what is defended regardless, the
+known gaps, and how to report something exploitable.
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR, run `./scripts/check.sh`
+and make sure it passes.
+
+The most useful contribution right now is not code: it is **a row in
+[`docs/compatibility.md`](docs/compatibility.md)**. Open `/probe.html` on a
+device, run a calibration if you can, and record what happened — including
+devices that did not work. That table is empty, and every entry in it is worth
+more than another test.
+
+## Support
+
+HomeSync is free and always will be. If it saved you buying a multi-room speaker
+system, you can [buy me a coffee](https://www.paypal.com/paypalme/lewisjohnvillamor/199).
+
+<a href="https://www.paypal.com/paypalme/lewisjohnvillamor/199">
+  <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-PayPal-00457C?logo=paypal&logoColor=white" alt="Buy me a coffee on PayPal">
+</a>
 
 ## Licence
 
 MIT — see [`LICENSE`](LICENSE).
+
+Copyright © 2026 Lewis John Villamor.
