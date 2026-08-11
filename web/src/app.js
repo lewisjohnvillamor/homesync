@@ -1099,6 +1099,7 @@ function renderClients() {
   if (!snapshot) return;
 
   renderHealth(snapshot.health);
+  renderPendingStart(snapshot.starting_when_ready);
 
   host.replaceChildren();
   for (const client of snapshot.clients) {
@@ -1150,6 +1151,28 @@ function renderClients() {
     card.append(top, stats);
     host.append(card);
   }
+}
+
+/**
+ * Says what a held start is waiting for.
+ *
+ * Pressing Play used to be refused outright when a device was still measuring
+ * its clock, and the refusal went to the activity log — which lives inside a
+ * collapsed panel, so the button appeared to do nothing at all. The
+ * coordinator now holds the request and starts on its own; this is the part
+ * that says so where the button is.
+ */
+function renderPendingStart(waitingFor) {
+  const element = $('pending-start');
+  const reasons = waitingFor ?? [];
+  if (reasons.length === 0) {
+    element.classList.add('hidden');
+    element.textContent = '';
+    return;
+  }
+  const detail = reasons.length === 1 ? reasons[0] : `${reasons.length} devices are not ready`;
+  element.textContent = `Waiting to start — ${detail}. It will begin on its own.`;
+  element.classList.remove('hidden');
 }
 
 /**

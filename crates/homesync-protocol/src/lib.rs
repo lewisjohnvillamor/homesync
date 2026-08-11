@@ -787,6 +787,15 @@ pub struct RoomSnapshot {
     /// Plain-language reading of whether the room is in sync.
     #[serde(default)]
     pub health: RoomHealth,
+    /// What a requested start is still waiting for, worst-named first.
+    ///
+    /// Empty when nothing is pending. Non-empty means Play has been pressed
+    /// and the coordinator is holding it until every receiver is ready — a
+    /// device that has just joined is still measuring its clock, and starting
+    /// against an estimate that has not settled is how a room ends up sounding
+    /// wrong for the first thirty seconds.
+    #[serde(default)]
+    pub starting_when_ready: Vec<String>,
 }
 
 /// One participant, as published to every other participant.

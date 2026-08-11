@@ -128,6 +128,15 @@ pub struct Room {
     pub clients: BTreeMap<String, Client>,
     /// Authoritative timeline.
     pub transport: Transport,
+    /// Set when Play has been asked for and the room is not ready to start.
+    ///
+    /// The alternative was refusing the press, which is what this used to do,
+    /// and the refusal went to a log panel that is collapsed by default — so
+    /// pressing Play while a device was still measuring its clock did nothing
+    /// a listener could see. Holding the request and starting when the room is
+    /// ready is both what someone pressing Play meant and the only version of
+    /// this that is visible.
+    pub pending_play: bool,
     /// Set when membership or telemetry changed and the room owes everyone a
     /// fresh snapshot. Telemetry arrives once per second per client, so
     /// snapshots are coalesced by a ticker rather than sent per report.
@@ -173,6 +182,7 @@ impl Room {
             clients: BTreeMap::new(),
             transport: Transport::default(),
             dirty: false,
+            pending_play: false,
             stream: None,
             calibration: None,
             last_calibration: None,
@@ -494,12 +504,15 @@ impl Room {
         if self.transport.state == TransportState::Playing {
             return Ok(());
         }
-        if !force {
-            let blockers = self.blockers();
-            if !blockers.is_empty() {
-                return Err(ErrorMessage::new("not_ready", blockers.join("; ")));
-            }
+        if !force && !self.blockers().is_empty() {
+            // Held, not refused. `pending_play` is published in the snapshot so
+            // every device can say what the room is waiting for, and
+            // `start_if_ready` picks it up as soon as the barrier clears.
+            self.pending_play = true;
+            self.dirty = true;
+            return Ok(());
         }
+        self.pending_play = false;
         // anchor_media_ns already holds the paused position, so resuming needs
         // only a new anchor instant.
         self.transport.anchor_server_ns = now_ns + self.start_lead_ns;
@@ -508,8 +521,40 @@ impl Room {
         Ok(())
     }
 
+    /// Starts a held request once every receiver is ready.
+    ///
+    /// Returns true when this call actually started playback, so the caller
+    /// can tell the room. Polled from the same tick that flushes snapshots
+    /// rather than fired from wherever readiness happens to change: a device
+    /// becomes ready through several different messages, and one place that
+    /// asks beats four places that must all remember to.
+    pub fn start_if_ready(&mut self, now_ns: u64) -> bool {
+        if !self.pending_play || self.transport.state == TransportState::Playing {
+            return false;
+        }
+        if !self.blockers().is_empty() {
+            return false;
+        }
+        self.pending_play = false;
+        self.transport.anchor_server_ns = now_ns + self.start_lead_ns;
+        self.transport.state = TransportState::Playing;
+        self.transport.epoch += 1;
+        self.dirty = true;
+        true
+    }
+
+    /// Abandons a held start. Pressing pause or stop while a room is waiting
+    /// means "no longer", not "later".
+    pub fn cancel_pending_play(&mut self) {
+        if self.pending_play {
+            self.pending_play = false;
+            self.dirty = true;
+        }
+    }
+
     /// Holds playback at the position reached at `now_ns`.
     pub fn pause(&mut self, now_ns: u64) {
+        self.cancel_pending_play();
         if self.transport.state != TransportState::Playing {
             return;
         }
@@ -537,6 +582,7 @@ impl Room {
 
     /// Stops and rewinds, keeping the media selected and everyone's readiness.
     pub fn stop(&mut self, now_ns: u64) {
+        self.cancel_pending_play();
         if !self.has_source() {
             return;
         }
@@ -880,6 +926,7 @@ impl Room {
             queue: self.queue.clone(),
             queue_index: self.queue_index,
             health: self.health(now_ns),
+            starting_when_ready: if self.pending_play { self.blockers() } else { Vec::new() },
             stream: self.stream.clone(),
             calibration: self.calibration.clone(),
             supported_modes: vec![SourceMode::ControlledAudio, SourceMode::Youtube, SourceMode::SystemAudio],
@@ -980,20 +1027,23 @@ mod tests {
         add(&mut room, "ctrl", Role::Controller);
         room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
 
-        // No receivers at all: refuse, rather than pretending to be in sync.
-        assert_eq!(room.play(0, false).unwrap_err().code, "not_ready");
+        // No receivers at all: hold, rather than pretending to be in sync.
+        assert!(room.play(0, false).is_ok());
+        assert_ne!(room.transport.state, TransportState::Playing);
 
         add(&mut room, "a", Role::Speaker);
         add(&mut room, "b", Role::Speaker);
         room.set_ready("a", "m1");
         room.set_clock_report("a", stable_clock());
-        let err = room.play(0, false).unwrap_err();
-        assert_eq!(err.code, "not_ready");
-        assert!(err.message.contains('b'), "the blocking device should be named: {}", err.message);
+        assert!(room.play(0, false).is_ok());
+        assert_ne!(room.transport.state, TransportState::Playing, "b is not ready");
+        let waiting = room.snapshot(MediaManifest::default(), 0).starting_when_ready;
+        assert!(waiting.iter().any(|r| r.contains('b')), "the blocking device should be named: {waiting:?}");
 
         room.set_ready("b", "m1");
         room.set_clock_report("b", stable_clock());
-        assert!(room.play(0, false).is_ok());
+        // The held request is released by the tick, not by pressing again.
+        assert!(room.start_if_ready(0));
         assert_eq!(room.transport.state, TransportState::Playing);
     }
 
@@ -1003,9 +1053,14 @@ mod tests {
         room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
         add(&mut room, "a", Role::Speaker);
         room.set_ready("a", "m1");
-        // Clock left at its default: warming_up.
-        assert_eq!(room.play(0, false).unwrap_err().code, "not_ready");
+        // Clock left at its default: warming_up. The press is held rather
+        // than refused, but the barrier still does its job — nothing plays.
+        assert!(room.play(0, false).is_ok());
+        assert!(room.pending_play);
+        assert_ne!(room.transport.state, TransportState::Playing);
+
         assert!(room.play(0, true).is_ok(), "force must allow a best-effort start");
+        assert_eq!(room.transport.state, TransportState::Playing);
     }
 
     #[test]
@@ -1190,7 +1245,11 @@ mod tests {
         let mut room = room();
         room.select_source(SourceMode::Youtube, None, Some("dQw4w9WgXcQ".into()), 0);
         add(&mut room, "a", Role::Speaker);
-        assert_eq!(room.play(0, false).unwrap_err().code, "not_ready");
+        // YouTube needs no preload, but it still needs a settled clock, so the
+        // start is held exactly as it is for a scheduled file.
+        assert!(room.play(0, false).is_ok());
+        assert!(room.pending_play);
+        assert_ne!(room.transport.state, TransportState::Playing);
     }
 
     #[test]
@@ -1870,5 +1929,76 @@ mod tests {
         room.set_queue(vec!["one".into(), "three".into(), "two".into()], LEAD);
         assert_eq!(room.transport, before, "the track playing must not restart");
         assert_eq!(room.next_in_queue(), Some("three"), "but what follows has changed");
+    }
+
+    #[test]
+    fn play_is_held_rather_than_refused_when_a_clock_is_still_settling() {
+        let mut room = room();
+        add(&mut room, "ctrl", Role::Controller);
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
+        let _rx = add(&mut room, "a", Role::Speaker);
+        room.set_ready("a", "m1");
+        // Joined, verified the media, but its clock has not settled yet.
+        room.set_clock_report("a", ClockReport { quality: ClockQuality::WarmingUp, ..stable_clock() });
+
+        // Refusing here was the old behaviour, and the refusal went to a log
+        // panel that is collapsed by default — so the button did nothing a
+        // listener could see.
+        assert!(room.play(0, false).is_ok(), "a held start is not an error");
+        assert!(room.pending_play);
+        assert_eq!(room.transport.state, TransportState::Ready);
+
+        let snapshot = room.snapshot(MediaManifest::default(), 0);
+        assert!(!snapshot.starting_when_ready.is_empty(), "the room must say what it waits for");
+        assert!(snapshot.starting_when_ready[0].contains('a'), "{:?}", snapshot.starting_when_ready);
+    }
+
+    #[test]
+    fn a_held_start_begins_on_its_own_once_the_room_is_ready() {
+        let mut room = room();
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
+        add(&mut room, "a", Role::Speaker);
+        room.set_ready("a", "m1");
+        room.set_clock_report("a", ClockReport { quality: ClockQuality::WarmingUp, ..stable_clock() });
+        room.play(0, false).expect("held");
+
+        assert!(!room.start_if_ready(1_000), "still warming up");
+
+        room.set_clock_report("a", stable_clock());
+        assert!(room.start_if_ready(LEAD), "the barrier is clear, so it should start");
+        assert_eq!(room.transport.state, TransportState::Playing);
+        assert!(!room.pending_play);
+        // The same lead a manual start gets: receivers need the warning either way.
+        assert_eq!(room.transport.anchor_server_ns, LEAD + LEAD);
+        assert!(room.snapshot(MediaManifest::default(), 0).starting_when_ready.is_empty());
+    }
+
+    #[test]
+    fn pausing_a_waiting_room_means_no_longer_rather_than_later() {
+        let mut room = room();
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
+        add(&mut room, "a", Role::Speaker);
+        room.set_ready("a", "m1");
+        room.set_clock_report("a", ClockReport { quality: ClockQuality::WarmingUp, ..stable_clock() });
+        room.play(0, false).expect("held");
+        assert!(room.pending_play);
+
+        room.pause(1_000);
+        room.set_clock_report("a", stable_clock());
+        assert!(!room.start_if_ready(LEAD), "a cancelled start must not fire later");
+        assert_eq!(room.transport.state, TransportState::Ready);
+    }
+
+    #[test]
+    fn forcing_a_start_still_skips_the_barrier_entirely() {
+        let mut room = room();
+        room.select_source(SourceMode::ControlledAudio, Some("m1".into()), None, 0);
+        add(&mut room, "a", Role::Speaker);
+        room.set_ready("a", "m1");
+        room.set_clock_report("a", ClockReport { quality: ClockQuality::WarmingUp, ..stable_clock() });
+
+        room.play(0, true).expect("forced");
+        assert_eq!(room.transport.state, TransportState::Playing);
+        assert!(!room.pending_play, "a forced start is not also a held one");
     }
 }

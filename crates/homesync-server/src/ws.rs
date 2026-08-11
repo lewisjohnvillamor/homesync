@@ -322,6 +322,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             }
             let now = app.now_ns();
             room.stream = None;
+            room.cancel_pending_play();
             if select.mode == SourceMode::ControlledAudio && !select.queue.is_empty() {
                 room.set_queue(select.queue, now);
                 // Picking a track out of a queue that is already playing, as
@@ -650,6 +651,12 @@ pub fn flush_dirty_rooms(app: &App) {
         // timer per track: a timer would have to be cancelled on every pause,
         // seek and source change, and getting that wrong means a track that
         // advances while the room is paused.
+        // A start that was held until the room was ready. Checked first so a
+        // room that was waiting begins on this tick rather than the next one.
+        if room.start_if_ready(now) {
+            tracing::info!(room = %room.code, "held start released; every receiver is ready");
+            room.broadcast(Payload::Transport(room.transport.clone()), now);
+        }
         // Once the players have settled, the room's own timeline moves onto
         // what they actually reached. Before this, every device was measured
         // against a position none of them could hit, so all of them read as

@@ -756,6 +756,65 @@ input[type="range"]:disabled {
   padding: 0;
   display: grid;
   gap: 4px;
+  /* Ten rows, then scroll. A long queue is the normal case once a folder is
+     attached, and an eighty-track list pushes the transport and every device
+     off the screen — the two things you are looking at while it plays.
+     `--queue-row` is the row height plus its gap, so the cut lands between
+     rows and the eleventh is visibly clipped rather than hidden. */
+  --queue-row: 2.6rem;
+  max-height: calc(var(--queue-row) * 10);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* A scrollbar that only appears when it is doing something. */
+.queue::-webkit-scrollbar {
+  width: 10px;
+}
+
+.queue::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.pending {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--text);
+  font-size: var(--step--1);
+}
+
+/* A ring, not a spinner: `prefers-reduced-motion` stops it, and a dashboard
+   rule in this project is that nothing animates a number. This animates a
+   border, and it is the one place where "still working" is the message. */
+.pending::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-top-color: var(--warn);
+  animation: pending-spin 1s linear infinite;
+}
+
+@keyframes pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending::before {
+    animation: none;
+  }
 }
 
 .queue:empty {
