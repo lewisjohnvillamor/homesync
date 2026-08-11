@@ -1,6 +1,13 @@
-<div align="center">
+```
+██╗  ██╗ ██████╗ ███╗   ███╗███████╗███████╗██╗   ██╗███╗   ██╗ ██████╗
+██║  ██║██╔═══██╗████╗ ████║██╔════╝██╔════╝╚██╗ ██╔╝████╗  ██║██╔════╝
+███████║██║   ██║██╔████╔██║█████╗  ███████╗ ╚████╔╝ ██╔██╗ ██║██║
+██╔══██║██║   ██║██║╚██╔╝██║██╔══╝  ╚════██║  ╚██╔╝  ██║╚██╗██║██║
+██║  ██║╚██████╔╝██║ ╚═╝ ██║███████╗███████║   ██║   ██║ ╚████║╚██████╗
+╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═══╝ ╚═════╝
+```
 
-# HomeSync
+<div align="center">
 
 **Play the same music, in time, on every device in your house.**
 
@@ -269,7 +276,39 @@ software fixes.
 
 ## How it works
 
-A short version; the full design is in
+Every device is told *one instant*, and each works out for itself how early to
+start so the sound lands on it. A device with a 210 ms speaker starts 210 ms
+before a device with a 40 ms one.
+
+```
+                       ┌─────────────────────────────┐
+                       │    HomeSync coordinator     │
+                       │  ─────────────────────────  │
+                       │  one authoritative timeline │
+                       │   epoch · state · anchor    │
+                       └──────────────┬──────────────┘
+                                      │  "play at T"
+         ┌────────────────────────────┼────────────────────────────┐
+         ▼                            ▼                            ▼
+┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
+│      Laptop     │          │      Phone      │          │    Kitchen TV   │
+├─────────────────┤          ├─────────────────┤          ├─────────────────┤
+│ clock   +2.1 ms │          │ clock   -7.4 ms │          │ clock   +0.9 ms │
+│ output    40 ms │          │ output    90 ms │          │ output   210 ms │
+│ starts  T-42 ms │          │ starts  T-83 ms │          │ starts T-211 ms │
+└────────┬────────┘          └────────┬────────┘          └────────┬────────┘
+         │                            │                            │
+         └────────────────────────────┴────────────────────────────┘
+                                      ▼
+                       ♪  heard at the same instant  ♪
+```
+
+**Clock** is how far that device's idea of now sits from the coordinator's,
+measured continuously. **Output** is how long its audio hardware takes to turn a
+buffer into sound. Neither is guessed: the first is measured over the network,
+the second is what acoustic calibration exists to find.
+
+A short version of the rest; the full design is in
 [`HomeSync_Technical_Specification.md`](HomeSync_Technical_Specification.md) and
 [`docs/protocol.md`](docs/protocol.md).
 
