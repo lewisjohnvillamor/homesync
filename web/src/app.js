@@ -353,12 +353,30 @@ async function loadMedia(item) {
       audio_context_state: player.ctx.state,
       output_latency_ms: player.reportedLatencyMs,
     });
+    showMediaProblem('');
     log(`${item.title}: verified and decoded (${player.buffer.duration.toFixed(1)} s).`);
     if (state.transport) player.applyTransport(state.transport, { force: true });
   } catch (error) {
     if (token !== state.loadToken) return;
     log(`${item.title}: ${error.message}`);
+    // Visible, not only logged. A file this browser cannot decode never
+    // reports ready, so the room waits for this device indefinitely — and
+    // until now the only account of why sat in a panel that is collapsed by
+    // default. `decodeAudioData` rejects with a bare "Unable to decode audio
+    // data", which names neither the file nor the reason.
+    showMediaProblem(
+      /decode/i.test(error.message)
+        ? `This device cannot play “${item.title}”. Its format is one this browser has no decoder for — the room is waiting for this device, so remove the track or use a different one.`
+        : `“${item.title}” could not be loaded here: ${error.message}`,
+    );
   }
+}
+
+/** Shows a media problem where the transport is, and clears the last one. */
+function showMediaProblem(message) {
+  const element = $('media-problem');
+  element.textContent = message;
+  element.classList.toggle('hidden', !message);
 }
 
 // ---------------------------------------------------------------------------
