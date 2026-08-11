@@ -625,6 +625,11 @@ pub struct MediaItem {
     /// Duration in nanoseconds when the coordinator knows it, else `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ns: Option<u64>,
+    /// Whether the file carries an embedded cover picture, servable from
+    /// `/api/v1/media/{id}/art`. False is not "no art exists" — it is "this
+    /// coordinator found none", which for now means anything that is not FLAC.
+    #[serde(default)]
+    pub has_artwork: bool,
     /// True for media the coordinator synthesised itself, such as the built-in
     /// click track used for calibration and checkpoint testing.
     #[serde(default)]

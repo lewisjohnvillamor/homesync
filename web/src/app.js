@@ -1047,6 +1047,21 @@ function renderQueue() {
     number.className = 'queue-index';
     number.textContent = String(position + 1);
 
+    // Cover art where the file carries one, and nothing at all where it does
+    // not — a grey placeholder square on every row of a queue whose files have
+    // no art is eleven pieces of furniture standing in for information.
+    let art = null;
+    if (item?.has_artwork) {
+      art = document.createElement('img');
+      art.className = 'queue-art';
+      art.loading = 'lazy';
+      art.alt = '';
+      art.src = `/api/v1/media/${encodeURIComponent(id)}/art`;
+      // A file replaced since the scan leaves a range that no longer holds a
+      // picture. Drop the element rather than showing a broken-image icon.
+      art.addEventListener('error', () => art.remove(), { once: true });
+    }
+
     const title = document.createElement('span');
     title.className = 'queue-title';
     title.textContent = item?.title ?? id;
@@ -1080,6 +1095,9 @@ function renderQueue() {
     drop.title = `Remove ${item?.title ?? id}`;
     drop.addEventListener('click', () => sendQueue(queue.filter((_, i) => i !== position)));
 
+    // The cover sits inside the play control, so clicking the picture starts
+    // the track — a cover that is not the button is a target people miss.
+    if (art) play.prepend(art);
     row.append(number, play, up, down, drop);
     list.append(row);
   }

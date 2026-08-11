@@ -28,6 +28,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/v1/rooms/{code}", get(room_info))
         .route("/api/v1/media/{id}", get(media_bytes))
         .route("/api/v1/media/{id}/manifest", get(media_item_manifest))
+        .route("/api/v1/media/{id}/art", get(media_artwork))
         .route("/api/v1/calibration/chirp/{code}", get(calibration_chirp))
         .route("/api/v1/calibration/recording", post(calibration_recording))
         .route("/api/v1/diagnostics", get(diagnostics))
@@ -102,6 +103,19 @@ async fn media_item_manifest(State(app): State<Arc<App>>, Path(id): Path<String>
 /// Receivers normally fetch the whole file and decode it, but range support
 /// costs little and lets a receiver resume a partial download over flaky
 /// Wi-Fi instead of restarting it.
+/// Serves a track's embedded cover picture.
+async fn media_artwork(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+    let Some((content_type, bytes)) = app.media_artwork(&id) else {
+        return (StatusCode::NOT_FOUND, "no artwork for that track").into_response();
+    };
+    let mut response = Body::from(bytes).into_response();
+    insert(&mut response, header::CONTENT_TYPE, content_type);
+    // The id is a content hash, so this picture can never change under a
+    // client that already has it.
+    insert(&mut response, header::CACHE_CONTROL, "public, max-age=86400, immutable".to_string());
+    response
+}
+
 async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, headers: HeaderMap) -> Response {
     let Some(item) = app.media_item(&id) else {
         return (StatusCode::NOT_FOUND, "no such media").into_response();
