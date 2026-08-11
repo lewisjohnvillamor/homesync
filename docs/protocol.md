@@ -238,6 +238,17 @@ ready — there would be nothing to hear.
 verifies: on a plain-HTTP LAN address `crypto.subtle` does not exist, so the
 client falls back to a JS SHA-256 implementation rather than skipping the check.
 
+## Drift correction
+
+Receivers report `drift_ms` — their own position minus the coordinator's. A
+receiver whose drift exceeds a few milliseconds trims its playback rate by up to
+0.2% until it is back, and reports the trim in force as `rate_trim_ppm`, signed,
+where negative means it was asked to slow down.
+
+The correction is inaudible: 0.2% is about 3.5 cents of pitch. Beyond a quarter
+of a second the trim would take minutes, so that range is left to a coordinated
+restart, which is audible and is meant to be rare.
+
 ## Authority
 
 The first client to join becomes the owner, and ownership passes on if they
@@ -250,18 +261,50 @@ network, not an authenticated system.
 
 ## HTTP
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `GET` | `/` | Browser client |
-| `GET` | `/health` | Liveness |
-| `GET` | `/api/v1/info` | Version, protocol, implemented modes |
-| `GET` | `/api/v1/rooms/{code}` | Room metadata, never the secret |
-| `GET` | `/api/v1/media/{id}` | Media bytes, single-range support |
-| `GET` | `/api/v1/media/{id}/manifest` | Hash, size, type, duration |
-| `GET` | `/api/v1/calibration/chirp/{code}` | Chirp audio for one device |
-| `POST` | `/api/v1/calibration/recording` | Raw recorded samples |
-| `GET` | `/probe.html` | Device capability probe |
-| `GET` | `/ws` | Control socket and binary PCM |
+| Method | Route | Secret | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/` | — | Browser client |
+| `GET` | `/health` | — | Liveness |
+| `GET` | `/api/v1/info` | — | Version, protocol, implemented modes |
+| `GET` | `/api/v1/rooms` | yes | Every room: code, name, occupancy, whether playing |
+| `POST` | `/api/v1/rooms` | yes | Create a room; returns its code, secret and invitation |
+| `GET` | `/api/v1/rooms/{code}` | — | Room metadata, never the secret |
+| `GET` | `/api/v1/media/{id}` | — | Media bytes, single-range support |
+| `GET` | `/api/v1/media/{id}/manifest` | — | Hash, size, type, duration |
+| `GET` | `/api/v1/media/{id}/art` | — | Embedded cover picture, if the file carries one |
+| `GET` | `/api/v1/library` | yes | Scanned folders, and rescans them |
+| `POST` | `/api/v1/library` | yes | Add or remove a folder, or fetch a URL into it |
+| `GET` | `/api/v1/invite.svg` | yes | Invitation QR code |
+| `GET` | `/api/v1/diagnostics` | yes | Full export: devices, telemetry, calibration |
+| `GET` | `/api/v1/calibration/chirp/{code}` | — | Chirp audio for one device |
+| `POST` | `/api/v1/calibration/recording` | — | Raw recorded samples |
+| `GET` | `/probe.html` | — | Device capability probe |
+| `GET` | `/ws` | on join | Control socket and binary PCM |
+
+"Secret" means the request carries a room secret — any room's, since a person
+holding one is already in the house. Endpoints without it are either public
+metadata or addressed by a content hash.
 
 Media ids are content hashes and only resolve to files already in the
 catalogue, so no request can name an arbitrary path on disk.
+
+## Rooms
+
+A coordinator runs any number of rooms. They share its clock service, its media
+catalogue and its process, and share nothing else: each has its own timeline,
+its own members and its own secret.
+
+One room is created at startup — the one the banner prints — and is never
+removed. Others are created through `POST /api/v1/rooms`, persist across
+restarts, and are dropped once nobody has been in them for thirty minutes.
+
+## Join limiting
+
+Ten failed joins from one address within a minute earn a minute's refusal,
+answered as `too_many_attempts`. A wrong room code and a wrong secret count the
+same, so the reply cannot be used to discover which codes exist, and the check
+runs before the secret is compared, so a refused address learns nothing from
+guessing correctly. Successful joins clear the record: a device reconnecting
+repeatedly with the right secret is the ordinary case on a home network.
+
+This bounds work, not guessing. The secret is a ULID.
