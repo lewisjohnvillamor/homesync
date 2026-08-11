@@ -1047,6 +1047,21 @@ function renderQueue() {
     number.className = 'queue-index';
     number.textContent = String(position + 1);
 
+    // Cover art where the file carries one, and nothing at all where it does
+    // not — a grey placeholder square on every row of a queue whose files have
+    // no art is eleven pieces of furniture standing in for information.
+    let art = null;
+    if (item?.has_artwork) {
+      art = document.createElement('img');
+      art.className = 'queue-art';
+      art.loading = 'lazy';
+      art.alt = '';
+      art.src = `/api/v1/media/${encodeURIComponent(id)}/art`;
+      // A file replaced since the scan leaves a range that no longer holds a
+      // picture. Drop the element rather than showing a broken-image icon.
+      art.addEventListener('error', () => art.remove(), { once: true });
+    }
+
     const title = document.createElement('span');
     title.className = 'queue-title';
     title.textContent = item?.title ?? id;
@@ -1080,6 +1095,9 @@ function renderQueue() {
     drop.title = `Remove ${item?.title ?? id}`;
     drop.addEventListener('click', () => sendQueue(queue.filter((_, i) => i !== position)));
 
+    // The cover sits inside the play control, so clicking the picture starts
+    // the track — a cover that is not the button is a target people miss.
+    if (art) play.prepend(art);
     row.append(number, play, up, down, drop);
     list.append(row);
   }
@@ -1099,6 +1117,7 @@ function renderClients() {
   if (!snapshot) return;
 
   renderHealth(snapshot.health);
+  renderPendingStart(snapshot.starting_when_ready);
 
   host.replaceChildren();
   for (const client of snapshot.clients) {
@@ -1150,6 +1169,28 @@ function renderClients() {
     card.append(top, stats);
     host.append(card);
   }
+}
+
+/**
+ * Says what a held start is waiting for.
+ *
+ * Pressing Play used to be refused outright when a device was still measuring
+ * its clock, and the refusal went to the activity log — which lives inside a
+ * collapsed panel, so the button appeared to do nothing at all. The
+ * coordinator now holds the request and starts on its own; this is the part
+ * that says so where the button is.
+ */
+function renderPendingStart(waitingFor) {
+  const element = $('pending-start');
+  const reasons = waitingFor ?? [];
+  if (reasons.length === 0) {
+    element.classList.add('hidden');
+    element.textContent = '';
+    return;
+  }
+  const detail = reasons.length === 1 ? reasons[0] : `${reasons.length} devices are not ready`;
+  element.textContent = `Waiting to start — ${detail}. It will begin on its own.`;
+  element.classList.remove('hidden');
 }
 
 /**

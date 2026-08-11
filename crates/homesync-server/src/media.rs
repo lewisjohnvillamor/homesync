@@ -30,11 +30,30 @@ enum Source {
     File(PathBuf),
 }
 
+/// Where a track's embedded cover art sits inside its file.
+///
+/// A range rather than the picture itself. The scan already holds every file's
+/// bytes long enough to hash them, so finding the art costs nothing extra —
+/// but a folder of albums with a 400 kB cover each would be tens of megabytes
+/// of coordinator memory for something almost nobody looks at twice. The
+/// endpoint re-reads the range on demand.
+#[derive(Debug, Clone)]
+struct ArtworkRef {
+    content_type: String,
+    offset: u64,
+    len: u32,
+}
+
+/// Largest embedded picture served. Beyond this the file is more likely to be
+/// malformed than to hold a cover worth showing.
+const MAX_ARTWORK_BYTES: u32 = 8 * 1024 * 1024;
+
 /// One catalogue entry.
 #[derive(Debug, Clone)]
 struct Entry {
     item: MediaItem,
     source: Source,
+    artwork: Option<ArtworkRef>,
 }
 
 /// Immutable catalogue built once at startup.
@@ -62,9 +81,11 @@ impl MediaLibrary {
                 sha256: sha256_hex(&click),
                 content_type: "audio/wav".to_string(),
                 duration_ns: Some(CLICK_SECONDS * 1_000_000_000),
+                has_artwork: false,
                 builtin: true,
             },
             source: Source::Memory(Arc::new(click)),
+            artwork: None,
         });
 
         // Several roots rather than one, so a USB drive can be added beside the
@@ -90,6 +111,7 @@ impl MediaLibrary {
             match std::fs::read(&path) {
                 Ok(bytes) => {
                     let digest = sha256_hex(&bytes);
+                    let artwork = embedded_artwork(&bytes);
                     let title = path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -104,11 +126,13 @@ impl MediaLibrary {
                             sha256: digest,
                             content_type: content_type_for(&path),
                             duration_ns: wav_duration_ns(&bytes),
+                            has_artwork: artwork.is_some(),
                             builtin: false,
                         },
                         // Held as a path, not as bytes: a media directory of
                         // albums should not be resident in memory.
                         source: Source::File(path.clone()),
+                        artwork,
                     });
                 }
                 Err(error) => {
@@ -141,6 +165,31 @@ impl MediaLibrary {
     }
 
     /// Whether the catalogue contains `id`.
+    /// Reads one item's embedded cover picture, with its MIME type.
+    ///
+    /// Re-read from the file rather than held in memory: the catalogue keeps
+    /// only where the picture sits, so a folder of albums costs a few dozen
+    /// bytes per track instead of a few hundred kilobytes.
+    pub fn read_artwork(&self, id: &str) -> Option<(String, Vec<u8>)> {
+        let entry = self.entries.get(id)?;
+        let art = entry.artwork.as_ref()?;
+        let from = art.offset as usize;
+        let to = from + art.len as usize;
+        match &entry.source {
+            Source::Memory(bytes) => Some((art.content_type.clone(), bytes.get(from..to)?.to_vec())),
+            Source::File(path) => {
+                use std::io::{Read, Seek, SeekFrom};
+                let mut file = std::fs::File::open(path).ok()?;
+                file.seek(SeekFrom::Start(art.offset)).ok()?;
+                let mut buffer = vec![0u8; art.len as usize];
+                // The file may have been replaced since the scan, in which case
+                // the range is meaningless — a short read is the signal.
+                file.read_exact(&mut buffer).ok()?;
+                Some((art.content_type.clone(), buffer))
+            }
+        }
+    }
+
     pub fn contains(&self, id: &str) -> bool {
         self.entries.contains_key(id)
     }
@@ -189,6 +238,80 @@ pub fn has_audio_extension(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Finds an embedded cover picture and returns where it sits in the file.
+///
+/// FLAC only, and deliberately so: every file in the library that prompted
+/// this was FLAC, and a half-finished ID3 parser that mostly works is worse
+/// than an honest `None`. MP3 keeps its art in an ID3v2 `APIC` frame whose
+/// text encodings and two incompatible size formats are a separate piece of
+/// work; when someone needs it, it belongs beside this function.
+fn embedded_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
+    // "fLaC", then a chain of metadata blocks before any audio.
+    if bytes.len() < 4 || &bytes[0..4] != b"fLaC" {
+        return None;
+    }
+    let mut pos = 4usize;
+
+    loop {
+        let header = bytes.get(pos..pos + 4)?;
+        let last = header[0] & 0x80 != 0;
+        let block_type = header[0] & 0x7f;
+        let block_len = u32::from_be_bytes([0, header[1], header[2], header[3]]) as usize;
+        let body = pos + 4;
+        // A length that runs past the end means a truncated or lying file.
+        if body.checked_add(block_len)? > bytes.len() {
+            return None;
+        }
+
+        // 6 is PICTURE.
+        if block_type == 6 {
+            if let Some(found) = flac_picture(bytes, body, block_len) {
+                return Some(found);
+            }
+        }
+        if last {
+            return None;
+        }
+        pos = body + block_len;
+    }
+}
+
+/// Reads one FLAC PICTURE block body.
+///
+/// Layout, all lengths big-endian u32: picture type, MIME length and string,
+/// description length and string, then width, height, depth and colour count,
+/// then the data length and the data itself. Every read is bounds-checked
+/// against the block, because these lengths come out of a file on disk.
+fn flac_picture(bytes: &[u8], body: usize, block_len: usize) -> Option<ArtworkRef> {
+    let end = body + block_len;
+    let u32_at = |at: usize| -> Option<u32> {
+        let raw = bytes.get(at..at + 4)?;
+        Some(u32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]))
+    };
+
+    let mut at = body + 4; // Skip the picture type.
+    let mime_len = u32_at(at)? as usize;
+    at += 4;
+    let mime = std::str::from_utf8(bytes.get(at..at.checked_add(mime_len)?)?).ok()?;
+    at += mime_len;
+
+    let desc_len = u32_at(at)? as usize;
+    at += 4 + desc_len;
+
+    at = at.checked_add(16)?; // Width, height, depth, colours.
+    let data_len = u32_at(at)?;
+    at += 4;
+
+    if at.checked_add(data_len as usize)? > end || data_len == 0 || data_len > MAX_ARTWORK_BYTES {
+        return None;
+    }
+    // A picture the browser cannot render is not worth advertising.
+    if !mime.starts_with("image/") {
+        return None;
+    }
+    Some(ArtworkRef { content_type: mime.to_string(), offset: at as u64, len: data_len })
 }
 
 fn content_type_for(path: &Path) -> String {
@@ -456,5 +579,89 @@ mod tests {
         for name in ["payload.exe", "archive.zip", "page.html", "noextension"] {
             assert!(!has_audio_extension(Path::new(name)), "{name}");
         }
+    }
+
+    /// Builds a FLAC metadata chain: a stand-in STREAMINFO, then one PICTURE.
+    ///
+    /// Written out by hand rather than shipping a binary fixture, so the thing
+    /// under test — the lengths — is visible in the test itself.
+    fn flac_with_picture(mime: &str, data: &[u8], declared_len: Option<u32>) -> Vec<u8> {
+        let mut picture = Vec::new();
+        picture.extend_from_slice(&3u32.to_be_bytes()); // Picture type: front cover.
+        picture.extend_from_slice(&(mime.len() as u32).to_be_bytes());
+        picture.extend_from_slice(mime.as_bytes());
+        let description = "cover";
+        picture.extend_from_slice(&(description.len() as u32).to_be_bytes());
+        picture.extend_from_slice(description.as_bytes());
+        for value in [600u32, 600, 24, 0] {
+            picture.extend_from_slice(&value.to_be_bytes());
+        }
+        picture.extend_from_slice(&declared_len.unwrap_or(data.len() as u32).to_be_bytes());
+        picture.extend_from_slice(data);
+
+        let mut out = Vec::from(*b"fLaC");
+        // STREAMINFO, not the last block: the parser has to walk past it.
+        out.push(0);
+        out.extend_from_slice(&[0, 0, 8]);
+        out.extend_from_slice(&[0u8; 8]);
+        // PICTURE, last block.
+        out.push(0x80 | 6);
+        let len = picture.len() as u32;
+        out.extend_from_slice(&[(len >> 16) as u8, (len >> 8) as u8, len as u8]);
+        out.extend_from_slice(&picture);
+        out
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\nsome pixels";
+
+    #[test]
+    fn a_cover_is_found_past_the_blocks_in_front_of_it() {
+        let file = flac_with_picture("image/png", PNG, None);
+        let art = embedded_artwork(&file).expect("a picture");
+        assert_eq!(art.content_type, "image/png");
+        assert_eq!(art.len as usize, PNG.len());
+        // The offset must land exactly on the picture, not near it.
+        assert_eq!(&file[art.offset as usize..art.offset as usize + PNG.len()], PNG);
+    }
+
+    #[test]
+    fn a_file_that_is_not_flac_has_no_cover() {
+        // An MP3 keeps its art in an ID3 frame this parser does not read, and
+        // saying so honestly is better than a half-right guess.
+        assert!(embedded_artwork(b"ID3\x03\x00\x00\x00\x00\x00\x00").is_none());
+        assert!(embedded_artwork(b"").is_none());
+        assert!(embedded_artwork(b"fLaC").is_none());
+    }
+
+    #[test]
+    fn a_flac_without_a_picture_block_reports_none() {
+        let mut out = Vec::from(*b"fLaC");
+        out.push(0x80); // STREAMINFO, and the last block.
+        out.extend_from_slice(&[0, 0, 4]);
+        out.extend_from_slice(&[0u8; 4]);
+        assert!(embedded_artwork(&out).is_none());
+    }
+
+    #[test]
+    fn a_length_that_runs_past_the_block_is_refused() {
+        // These lengths come from a file on disk. Trusting one would mean
+        // serving whatever happened to follow it in memory.
+        let file = flac_with_picture("image/png", PNG, Some(50_000));
+        assert!(embedded_artwork(&file).is_none());
+    }
+
+    #[test]
+    fn a_picture_the_browser_cannot_render_is_not_advertised() {
+        let file = flac_with_picture("application/octet-stream", PNG, None);
+        assert!(embedded_artwork(&file).is_none());
+        // "-->" is the FLAC convention for a URL instead of image data.
+        let linked = flac_with_picture("-->", b"https://example.com/cover.jpg", None);
+        assert!(embedded_artwork(&linked).is_none());
+    }
+
+    #[test]
+    fn an_absurdly_large_picture_is_refused() {
+        let file = flac_with_picture("image/jpeg", PNG, Some(MAX_ARTWORK_BYTES + 1));
+        assert!(embedded_artwork(&file).is_none());
     }
 }

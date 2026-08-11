@@ -625,6 +625,11 @@ pub struct MediaItem {
     /// Duration in nanoseconds when the coordinator knows it, else `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ns: Option<u64>,
+    /// Whether the file carries an embedded cover picture, servable from
+    /// `/api/v1/media/{id}/art`. False is not "no art exists" — it is "this
+    /// coordinator found none", which for now means anything that is not FLAC.
+    #[serde(default)]
+    pub has_artwork: bool,
     /// True for media the coordinator synthesised itself, such as the built-in
     /// click track used for calibration and checkpoint testing.
     #[serde(default)]
@@ -787,6 +792,15 @@ pub struct RoomSnapshot {
     /// Plain-language reading of whether the room is in sync.
     #[serde(default)]
     pub health: RoomHealth,
+    /// What a requested start is still waiting for, worst-named first.
+    ///
+    /// Empty when nothing is pending. Non-empty means Play has been pressed
+    /// and the coordinator is holding it until every receiver is ready — a
+    /// device that has just joined is still measuring its clock, and starting
+    /// against an estimate that has not settled is how a room ends up sounding
+    /// wrong for the first thirty seconds.
+    #[serde(default)]
+    pub starting_when_ready: Vec<String>,
 }
 
 /// One participant, as published to every other participant.

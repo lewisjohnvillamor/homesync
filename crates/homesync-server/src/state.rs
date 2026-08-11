@@ -70,6 +70,11 @@ impl App {
         self.media.read().expect("media lock").read(id)
     }
 
+    /// Reads one item's embedded cover picture, if it has one.
+    pub fn media_artwork(&self, id: &str) -> Option<(String, Vec<u8>)> {
+        self.media.read().expect("media lock").read_artwork(id)
+    }
+
     /// Folders the catalogue is built from.
     pub fn media_roots(&self) -> Vec<PathBuf> {
         self.media_roots.lock().expect("media roots").clone()
