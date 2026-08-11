@@ -3,6 +3,7 @@
 use crate::calibration::CalibrationRegistry;
 use crate::clock::ServerClock;
 use crate::config::Config;
+use crate::join_limit::JoinLimiter;
 use crate::media::MediaLibrary;
 use crate::profiles::ProfileStore;
 use crate::room::Room;
@@ -40,6 +41,21 @@ pub struct App {
     pub calibration: CalibrationRegistry,
     /// Per-device compensation that survives a restart.
     pub profiles: ProfileStore,
+    /// A ceiling on how fast one address can get join attempts wrong.
+    pub join_limiter: JoinLimiter,
+    /// The room created at startup, which is never reaped.
+    default_room: String,
+}
+
+/// How long a room with nobody in it is kept before it is dropped.
+///
+/// Long enough that everyone leaving to reload a page finds their room still
+/// there; short enough that a house does not accumulate abandoned rooms.
+pub const EMPTY_ROOM_TTL_NS: u64 = 30 * 60 * 1_000_000_000;
+
+/// Six Crockford base-32 characters from a fresh ULID's random section.
+fn random_room_code() -> String {
+    ulid::Ulid::new().to_string().chars().rev().take(6).collect::<String>().to_uppercase()
 }
 
 /// Ceiling on a fetched file.
@@ -184,6 +200,7 @@ impl App {
         profiles: ProfileStore,
     ) -> Self {
         let mut rooms = HashMap::new();
+        let default_room = room.code.clone();
         rooms.insert(room.code.clone(), room);
         Self {
             clock: ServerClock::new(),
@@ -195,7 +212,107 @@ impl App {
             streams: Mutex::new(HashMap::new()),
             calibration: CalibrationRegistry::default(),
             profiles,
+            join_limiter: JoinLimiter::default(),
+            default_room,
         }
+    }
+
+    /// The default room's code — the one the banner printed.
+    ///
+    /// Never reaped, however empty it gets: its invite link is saved on every
+    /// device and printed on a terminal somebody may still be looking at.
+    pub fn default_room_code(&self) -> String {
+        self.default_room.clone()
+    }
+
+    /// Creates a room with a fresh code and secret, and remembers it.
+    ///
+    /// Returns the code and secret. Rooms are cheap — a state machine and a
+    /// client map — so the cost of one is a map entry, not a process.
+    pub fn create_room(&self, name: Option<String>) -> (String, String) {
+        let secret = ulid::Ulid::new().to_string();
+        let mut rooms = self.rooms();
+        // A six-character code has 32^6 values and a house has a handful of
+        // rooms, but a collision would hand two groups the same code, so it is
+        // retried rather than hoped against.
+        let code = std::iter::repeat_with(random_room_code)
+            .find(|candidate| !rooms.contains_key(candidate))
+            .expect("an infinite iterator always yields");
+
+        let mut room = Room::new(code.clone(), secret.clone(), self.config.start_lead_ns(), self.config.max_clients);
+        let saved_name = name.clone();
+        room.name = name;
+        // A room created and not yet joined gets its full grace period rather
+        // than being eligible for reaping on the very next tick.
+        room.last_occupied_ns = self.clock.now_ns();
+        rooms.insert(code.clone(), room);
+        drop(rooms);
+
+        self.profiles.add_room_identity(crate::profiles::RoomIdentity {
+            code: code.clone(),
+            secret: secret.clone(),
+            name: saved_name,
+        });
+        tracing::info!(room = %code, "room created");
+        (code, secret)
+    }
+
+    /// Recreates rooms remembered from a previous run, other than the default.
+    ///
+    /// Returns how many were restored. Without this a restart answers
+    /// `no_such_room` to every device holding an invite for a room that is not
+    /// the default one — the same silent-invalidation problem the default room
+    /// already avoids, just one level down.
+    pub fn restore_saved_rooms(&self) -> usize {
+        let saved = self.profiles.room_identities();
+        let mut rooms = self.rooms();
+        let mut restored = 0;
+        let now = self.clock.now_ns();
+        for identity in saved {
+            if rooms.contains_key(&identity.code) {
+                continue;
+            }
+            let mut room =
+                Room::new(identity.code.clone(), identity.secret, self.config.start_lead_ns(), self.config.max_clients);
+            room.name = identity.name;
+            room.last_occupied_ns = now;
+            rooms.insert(identity.code, room);
+            restored += 1;
+        }
+        restored
+    }
+
+    /// Drops rooms that nobody is in and nobody has been in for a while.
+    ///
+    /// Without this the room table grows for the life of the process: every
+    /// room ever created stays, holding a code that can never be reissued. The
+    /// default room is exempt.
+    ///
+    /// Returns the codes that were dropped.
+    pub fn reap_empty_rooms(&self, now_ns: u64) -> Vec<String> {
+        let mut dropped = Vec::new();
+        {
+            let mut rooms = self.rooms();
+            rooms.retain(|code, room| {
+                if code == &self.default_room || !room.clients.is_empty() {
+                    return true;
+                }
+                // `saturating_sub` because a room created after the last
+                // snapshot reads as being in the future for a few nanoseconds.
+                let idle_ns = now_ns.saturating_sub(room.last_occupied_ns);
+                if idle_ns < EMPTY_ROOM_TTL_NS {
+                    return true;
+                }
+                dropped.push(code.clone());
+                false
+            });
+        }
+        for code in &dropped {
+            self.profiles.forget_room(code);
+            self.stop_stream(code);
+            tracing::info!(room = %code, "empty room reaped");
+        }
+        dropped
     }
 
     /// Locks the room table.
@@ -432,5 +549,96 @@ mod tests {
         assert!(internal("240.0.0.1"));
         assert!(!internal("100.128.0.1"));
         assert!(!internal("198.20.0.1"));
+    }
+}
+
+#[cfg(test)]
+mod room_table_tests {
+    use super::*;
+    use crate::config::Config;
+    use clap::Parser;
+
+    fn app() -> App {
+        // `--no-state` keeps the profile file out of it: these tests are about
+        // the room table, and a test that writes to the working directory would
+        // collide with every other test run in parallel.
+        let config = Config::parse_from(["homesync", "--no-state", "--room-code", "DEFALT", "--room-secret", "s"]);
+        let room = Room::new("DEFALT".into(), "s".into(), config.start_lead_ns(), config.max_clients);
+        App::new(config, MediaLibrary::load(&[]), Vec::new(), room, ProfileStore::load(None))
+    }
+
+    #[test]
+    fn a_created_room_has_its_own_code_and_secret() {
+        let app = app();
+        let (code, secret) = app.create_room(Some("Kitchen".into()));
+        assert_ne!(code, "DEFALT");
+        assert_ne!(secret, "s");
+        assert_eq!(code.len(), 6);
+
+        let rooms = app.rooms();
+        assert_eq!(rooms.len(), 2);
+        assert_eq!(rooms[&code].name.as_deref(), Some("Kitchen"));
+    }
+
+    #[test]
+    fn every_created_room_gets_a_distinct_code() {
+        let app = app();
+        let codes: std::collections::HashSet<String> = (0..50).map(|_| app.create_room(None).0).collect();
+        assert_eq!(codes.len(), 50, "a code was reused");
+    }
+
+    /// Rooms are separate timelines. The whole point is the kitchen playing one
+    /// thing while the bedroom plays another, so a transport change in one must
+    /// not be visible in the other.
+    #[test]
+    fn rooms_hold_separate_transports() {
+        let app = app();
+        let (code, _) = app.create_room(None);
+        {
+            let mut rooms = app.rooms();
+            rooms.get_mut("DEFALT").expect("default").transport.epoch = 7;
+            assert_eq!(rooms[&code].transport.epoch, 0, "the new room should not have moved");
+        }
+    }
+
+    #[test]
+    fn an_empty_room_is_reaped_once_its_grace_period_is_over() {
+        let app = app();
+        let (code, _) = app.create_room(None);
+        let created = app.rooms()[&code].last_occupied_ns;
+
+        assert!(app.reap_empty_rooms(created + EMPTY_ROOM_TTL_NS / 2).is_empty(), "still inside the grace period");
+        assert!(app.rooms().contains_key(&code));
+
+        let dropped = app.reap_empty_rooms(created + EMPTY_ROOM_TTL_NS + 1);
+        assert_eq!(dropped, vec![code.clone()]);
+        assert!(!app.rooms().contains_key(&code));
+    }
+
+    /// The banner printed the default room's invite link and somebody may still
+    /// be looking at that terminal. It is never reaped, however empty it gets.
+    #[test]
+    fn the_default_room_is_never_reaped() {
+        let app = app();
+        let dropped = app.reap_empty_rooms(u64::MAX / 2);
+        assert!(dropped.is_empty());
+        assert!(app.rooms().contains_key("DEFALT"));
+    }
+
+    /// Reaping is about abandonment, not emptiness at one instant. A room being
+    /// used must survive however long it has existed.
+    #[test]
+    fn an_occupied_room_is_never_reaped() {
+        let app = app();
+        let (code, _) = app.create_room(None);
+        {
+            let mut rooms = app.rooms();
+            let room = rooms.get_mut(&code).expect("the new room");
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            room.join("client".into(), "device".into(), "Kitchen speaker".into(), Default::default(), tx)
+                .expect("join");
+        }
+        assert!(app.reap_empty_rooms(u64::MAX / 2).is_empty(), "an occupied room must survive");
+        assert!(app.rooms().contains_key(&code));
     }
 }

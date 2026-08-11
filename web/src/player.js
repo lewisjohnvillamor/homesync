@@ -37,6 +37,102 @@ export const EQ_BANDS = [
   { hz: 12000, label: '12k' },
 ];
 
+/* --- Drift correction by resampling ---------------------------------------
+ *
+ * A device whose audio clock runs slightly fast or slow slides away from the
+ * room. The old answer was a coordinated restart once the gap got big enough,
+ * which is audible: everyone stops and starts again. This is the quiet answer —
+ * trim playback rate by a fraction of a percent and let the device slide back
+ * into position over the next half-minute.
+ *
+ * The numbers are chosen so the correction cannot be heard. 0.2% is about 3.5
+ * cents of pitch; the just-noticeable difference for a complex tone is roughly
+ * 5-10 cents, and this is a *drift* towards that bound rather than a step to
+ * it. What is emphatically audible is the thing it replaces.
+ */
+
+/** Largest fractional deviation from normal speed. 0.002 is 0.2%. */
+export const MAX_RATE_TRIM = 0.002;
+
+/**
+ * Seconds a correction aims to take. The trim is drift divided by this, so a
+ * 20 ms error asks for 0.001 and a 40 ms error saturates the bound.
+ *
+ * Deliberately unhurried: the loop runs once a second against a drift figure
+ * that carries measurement noise, and a controller that tries to erase the
+ * error in one tick chases the noise instead of the drift.
+ */
+export const RATE_CONVERGE_SECONDS = 20;
+
+/** Drift that starts a correction, in ms. Below this, nothing is wrong. */
+export const RATE_DEADBAND_MS = 4;
+
+/**
+ * Smallest trim applied while a correction is running.
+ *
+ * Proportional control alone decays exponentially, so the last few milliseconds
+ * take longer to close than the first thirty — a 30 ms error would sit at 4 ms
+ * for the best part of a minute, technically converging and practically stuck.
+ * A floor makes the tail linear: from here, any remaining error closes at
+ * 0.2 ms per second and the correction actually ends.
+ *
+ * Small enough that it cannot overshoot the release threshold from outside it.
+ */
+export const MIN_ACTIVE_TRIM = 0.0002;
+
+/**
+ * Drift that ends one, in ms.
+ *
+ * Lower than the entry threshold on purpose. With a single threshold the
+ * controller switches on and off around it forever — correcting to just inside,
+ * stopping, drifting to just outside, starting again. The gap between the two
+ * is what makes a correction run to completion.
+ */
+export const RATE_RELEASE_MS = 1;
+
+/**
+ * Drift beyond which resampling is the wrong tool, in ms.
+ *
+ * At the bound, a correction closes 2 ms per second. A quarter-second error
+ * would take two minutes, and something that far out is not drifting — it
+ * stalled, or its clock stepped. The coordinated restart handles those.
+ */
+export const RATE_RESAMPLE_LIMIT_MS = 250;
+
+/**
+ * The playback rate trim this drift calls for.
+ *
+ * Pure, and separated from the player so the control law can be tested without
+ * an `AudioContext`: every interesting case here is about what the loop does
+ * over many ticks, which is miserable to check against a real audio graph.
+ *
+ * `drifting` is the controller's own memory — whether it is mid-correction —
+ * and is returned alongside the trim so the caller can hand it back next tick.
+ *
+ * A positive `driftMs` means this device is *ahead* of where the room says it
+ * should be, so it is asked to slow down and the trim comes back negative.
+ */
+export function rateTrimFor(driftMs, correcting = false) {
+  const magnitude = Math.abs(driftMs);
+
+  // Too far gone to resample, or not far enough to bother.
+  if (!Number.isFinite(driftMs) || magnitude >= RATE_RESAMPLE_LIMIT_MS) {
+    return { trim: 0, correcting: false };
+  }
+  const threshold = correcting ? RATE_RELEASE_MS : RATE_DEADBAND_MS;
+  if (magnitude <= threshold) {
+    return { trim: 0, correcting: false };
+  }
+
+  const wanted = -driftMs / 1000 / RATE_CONVERGE_SECONDS;
+  const bounded = Math.max(-MAX_RATE_TRIM, Math.min(MAX_RATE_TRIM, wanted));
+  // Floored towards the direction the correction is already going, so the tail
+  // closes at a steady rate instead of asymptotically.
+  const floored = Math.max(Math.abs(bounded), MIN_ACTIVE_TRIM);
+  const trim = Math.sign(bounded) * floored;
+  return { trim, correcting: true };
+}
+
 /** Range of each band, in decibels either side of flat. */
 export const EQ_LIMIT_DB = 12;
 
@@ -89,6 +185,15 @@ export class Player {
     this.startAudioTime = 0;
     this.startMediaOffsetNs = 0;
     this.playing = false;
+    /* Rate-trim state. The trim changes how fast media time advances against
+       the audio clock, so position can no longer be derived from the start
+       anchor alone — every rate change re-anchors, and elapsed time since is
+       scaled by the rate then in force. */
+    this.rateTrim = 0;
+    this.rateCorrecting = false;
+    this.rateAnchorAudioTime = 0;
+    this.rateAnchorMediaNs = 0;
+    this.rateTrimChanges = 0;
     this.suspendEvents = 0;
     this.resyncCount = 0;
     /** @type {((message: string) => void)|null} */
@@ -304,6 +409,12 @@ export class Player {
     this.source = source;
     this.startAudioTime = startAudioTime;
     this.startMediaOffsetNs = mediaOffsetNs;
+    // A fresh schedule starts at normal speed: the new anchor is exact, so
+    // whatever the trim was compensating for has just been erased.
+    this.rateTrim = 0;
+    this.rateCorrecting = false;
+    this.rateAnchorAudioTime = startAudioTime;
+    this.rateAnchorMediaNs = mediaOffsetNs;
     this.scheduledStartServerNs = transport.anchor_server_ns;
     this.playing = true;
   }
@@ -352,9 +463,62 @@ export class Player {
   heardPositionNs() {
     if (!this.playing || !this.ctx) return null;
     const heardContextTime = this.#heardContextTime();
-    const elapsed = heardContextTime - this.startAudioTime;
-    if (elapsed < 0) return this.startMediaOffsetNs;
-    return this.startMediaOffsetNs + elapsed * 1e9 - this.unmeasurableCompensationMs() * 1e6;
+    if (heardContextTime < this.startAudioTime) return this.startMediaOffsetNs;
+    // From the rate anchor rather than the start anchor. They are the same
+    // until the first trim; after one, media time and audio time no longer
+    // advance together, and measuring from the start would report the whole
+    // correction as drift and ask for it all over again.
+    const elapsed = Math.max(0, heardContextTime - this.rateAnchorAudioTime);
+    const media = this.rateAnchorMediaNs + elapsed * (1 + this.rateTrim) * 1e9;
+    return media - this.unmeasurableCompensationMs() * 1e6;
+  }
+
+  /**
+   * Nudges playback rate towards the room, and reports the trim in force.
+   *
+   * Called once a second from the same tick that sends telemetry. Returns the
+   * fractional trim so the interface can say when a device is being corrected —
+   * a correction nobody can hear is still worth being able to see.
+   */
+  steerTowards(transport) {
+    if (!this.playing || !this.source || !this.ctx) {
+      this.rateCorrecting = false;
+      return 0;
+    }
+    if (!transport || transport.state !== 'playing') return this.rateTrim;
+
+    const heard = this.heardPositionNs();
+    if (heard == null) return this.rateTrim;
+    const expected = positionAtServerNs(transport, this.clock.serverNow());
+    const driftMs = (heard - expected) / 1e6;
+
+    const { trim, correcting } = rateTrimFor(driftMs, this.rateCorrecting);
+    this.rateCorrecting = correcting;
+    if (trim === this.rateTrim) return this.rateTrim;
+    this.#applyRateTrim(trim);
+    return this.rateTrim;
+  }
+
+  /**
+   * Changes the playback rate, re-anchoring so position stays continuous.
+   *
+   * The anchor is snapshotted *before* the rate changes. Without that, the
+   * elapsed time since the previous anchor would be rescaled by the new rate
+   * retroactively, and the position would jump by however long the device had
+   * been playing — a correction of a few milliseconds would move it by seconds.
+   */
+  #applyRateTrim(trim) {
+    const anchorAudioTime = this.#heardContextTime();
+    const elapsed = Math.max(0, anchorAudioTime - this.rateAnchorAudioTime);
+    this.rateAnchorMediaNs += elapsed * (1 + this.rateTrim) * 1e9;
+    this.rateAnchorAudioTime = anchorAudioTime;
+    this.rateTrim = trim;
+    this.rateTrimChanges += 1;
+
+    // Set rather than ramped. A rate step is a discontinuity in speed, not in
+    // amplitude, so there is no click to smooth away — and a ramp would make
+    // the anchor arithmetic above an approximation for the length of it.
+    this.source.playbackRate.setValueAtTime(1 + trim, this.ctx.currentTime);
   }
 
   /** Sets calibration-derived compensation and reschedules if playing. */
@@ -405,6 +569,10 @@ export class Player {
       page_visible: document.visibilityState === 'visible',
       suspend_events: this.suspendEvents,
       resync_count: this.resyncCount,
+      // Parts per million of rate trim, so a device being quietly corrected is
+      // visible in an export rather than looking like it simply stopped
+      // drifting for no reason.
+      rate_trim_ppm: Math.round(this.rateTrim * 1e6),
     };
   }
 

@@ -50,6 +50,10 @@ pub struct RoomIdentity {
     pub code: String,
     /// Shared secret required to join.
     pub secret: String,
+    /// What somebody called it. Absent in files written before rooms had names,
+    /// and absent for a room nobody named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// On-disk shape. Versioned so a future format change can be recognised
@@ -59,14 +63,22 @@ struct StoredProfiles {
     version: u32,
     #[serde(default)]
     devices: HashMap<String, DeviceProfile>,
-    /// Absent in files written before rooms were persisted.
+    /// The default room, duplicated from the head of `rooms`.
+    ///
+    /// Written for the benefit of an older binary, which knows only this field
+    /// and would otherwise mint a fresh room and silently invalidate every
+    /// saved invite link. Read only when `rooms` is absent, which is what a
+    /// file written before multiple rooms existed looks like.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     room: Option<RoomIdentity>,
+    /// Every room, default first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rooms: Vec<RoomIdentity>,
 }
 
 impl Default for StoredProfiles {
     fn default() -> Self {
-        Self { version: 1, devices: HashMap::new(), room: None }
+        Self { version: 1, devices: HashMap::new(), room: None, rooms: Vec::new() }
     }
 }
 
@@ -78,7 +90,9 @@ const FORMAT_VERSION: u32 = 1;
 pub struct ProfileStore {
     path: Option<PathBuf>,
     profiles: Mutex<HashMap<String, DeviceProfile>>,
-    room: Mutex<Option<RoomIdentity>>,
+    /// Every room, default first. The default is the one whose invite link the
+    /// banner prints, so it keeps its place across restarts.
+    rooms: Mutex<Vec<RoomIdentity>>,
 }
 
 impl ProfileStore {
@@ -89,15 +103,17 @@ impl ProfileStore {
     /// nuisance, refusing to start is worse.
     pub fn load(path: Option<PathBuf>) -> Self {
         let Some(path) = path else {
-            return Self { path: None, profiles: Mutex::new(HashMap::new()), room: Mutex::new(None) };
+            return Self { path: None, profiles: Mutex::new(HashMap::new()), rooms: Mutex::new(Vec::new()) };
         };
 
-        let mut room = None;
+        let mut rooms = Vec::new();
         let profiles = match std::fs::read_to_string(&path) {
             Ok(text) => match serde_json::from_str::<StoredProfiles>(&text) {
                 Ok(stored) if stored.version == FORMAT_VERSION => {
                     tracing::info!(count = stored.devices.len(), path = %path.display(), "loaded device profiles");
-                    room = stored.room;
+                    // `rooms` wins when present; `room` is what a file written
+                    // before multiple rooms existed carries instead.
+                    rooms = if stored.rooms.is_empty() { stored.room.into_iter().collect() } else { stored.rooms };
                     stored.devices
                 }
                 Ok(stored) => {
@@ -120,17 +136,54 @@ impl ProfileStore {
             }
         };
 
-        Self { path: Some(path), profiles: Mutex::new(profiles), room: Mutex::new(room) }
+        Self { path: Some(path), profiles: Mutex::new(profiles), rooms: Mutex::new(rooms) }
     }
 
-    /// The room identity remembered from a previous run, if any.
+    /// The default room remembered from a previous run, if any.
     pub fn room_identity(&self) -> Option<RoomIdentity> {
-        self.room.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.rooms.lock().unwrap_or_else(|e| e.into_inner()).first().cloned()
     }
 
-    /// Remembers a room identity so saved invite links keep working.
+    /// Every remembered room, default first.
+    pub fn room_identities(&self) -> Vec<RoomIdentity> {
+        self.rooms.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Remembers the default room so saved invite links keep working.
+    ///
+    /// Takes the head of the list rather than appending: the banner prints this
+    /// room, and a restart that promoted a different one would hand out an
+    /// invite for a room nobody is in.
     pub fn set_room_identity(&self, identity: RoomIdentity) {
-        *self.room.lock().unwrap_or_else(|e| e.into_inner()) = Some(identity);
+        {
+            let mut rooms = self.rooms.lock().unwrap_or_else(|e| e.into_inner());
+            rooms.retain(|room| room.code != identity.code);
+            rooms.insert(0, identity);
+        }
+        self.save();
+    }
+
+    /// Remembers an additional room.
+    pub fn add_room_identity(&self, identity: RoomIdentity) {
+        {
+            let mut rooms = self.rooms.lock().unwrap_or_else(|e| e.into_inner());
+            if rooms.iter().any(|room| room.code == identity.code) {
+                return;
+            }
+            rooms.push(identity);
+        }
+        self.save();
+    }
+
+    /// Forgets a room. The default is never forgotten.
+    pub fn forget_room(&self, code: &str) {
+        {
+            let mut rooms = self.rooms.lock().unwrap_or_else(|e| e.into_inner());
+            if rooms.first().is_some_and(|room| room.code == code) {
+                return;
+            }
+            rooms.retain(|room| room.code != code);
+        }
         self.save();
     }
 
@@ -164,7 +217,7 @@ impl ProfileStore {
     /// Forgets every profile, for a user who wants to start clean.
     pub fn clear(&self) {
         self.profiles.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        *self.room.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.rooms.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.save();
     }
 
@@ -175,10 +228,15 @@ impl ProfileStore {
     /// over the target.
     fn save(&self) {
         let Some(path) = &self.path else { return };
+        let rooms = self.rooms.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let stored = StoredProfiles {
             version: FORMAT_VERSION,
             devices: self.profiles.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-            room: self.room.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            // Both fields, deliberately. An older binary reads only `room`, and
+            // writing just `rooms` would leave it minting a fresh default room
+            // and invalidating every saved invite link.
+            room: rooms.first().cloned(),
+            rooms: rooms.clone(),
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             tracing::error!("could not serialise device profiles");
@@ -261,7 +319,7 @@ mod tests {
         let store = ProfileStore::load(Some(path.clone()));
         assert!(store.room_identity().is_none());
 
-        store.set_room_identity(RoomIdentity { code: "ABC123".into(), secret: "s3cret".into() });
+        store.set_room_identity(RoomIdentity { code: "ABC123".into(), secret: "s3cret".into(), name: None });
         store.update("d", |p| p.acoustic_offset_ms = -10.0);
 
         let reloaded = ProfileStore::load(Some(path.clone()));
@@ -278,7 +336,7 @@ mod tests {
     fn resetting_forgets_the_room_as_well_as_the_devices() {
         let path = temp_path("room-clear");
         let store = ProfileStore::load(Some(path.clone()));
-        store.set_room_identity(RoomIdentity { code: "ABC123".into(), secret: "s".into() });
+        store.set_room_identity(RoomIdentity { code: "ABC123".into(), secret: "s".into(), name: None });
         store.clear();
 
         assert!(ProfileStore::load(Some(path.clone())).room_identity().is_none());

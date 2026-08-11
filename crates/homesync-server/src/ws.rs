@@ -6,7 +6,7 @@
 use crate::room::OutFrame;
 use crate::state::App;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 use homesync_audio::LatencyProfile;
@@ -14,13 +14,19 @@ use homesync_protocol::{
     ClockPong, Envelope, ErrorMessage, Payload, RoomSnapshot, SourceMode, TransportState, Welcome, YoutubeRendezvous,
     MAX_CONTROL_FRAME_BYTES, PROTOCOL_VERSION,
 };
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use ulid::Ulid;
 
 /// Upgrades an HTTP request to the control socket.
-pub async fn ws_handler(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, app))
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, app, peer.ip()))
 }
 
 /// Per-connection state held by the reader task.
@@ -28,6 +34,10 @@ struct Session {
     client_id: String,
     device_id: String,
     room_code: Option<String>,
+    /// Where this socket came from, for the join limiter. Not used for anything
+    /// else: a device is identified by its own id, not by an address that
+    /// changes with every DHCP lease.
+    peer: std::net::IpAddr,
     tx: mpsc::UnboundedSender<OutFrame>,
 }
 
@@ -48,7 +58,7 @@ impl Session {
     }
 }
 
-async fn handle_socket(socket: WebSocket, app: Arc<App>) {
+async fn handle_socket(socket: WebSocket, app: Arc<App>, peer: std::net::IpAddr) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<OutFrame>();
 
@@ -71,6 +81,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
         client_id: Ulid::new().to_string(),
         device_id: Ulid::new().to_string(),
         room_code: None,
+        peer,
         tx: tx.clone(),
     };
 
@@ -150,19 +161,43 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 session.error(app, "already_joined", "this connection is already in a room", request_id);
                 return;
             }
-            let code = join.room_code.trim().to_uppercase();
-            let mut rooms = app.rooms();
-            let Some(room) = rooms.get_mut(&code) else {
-                session.error(app, "no_such_room", "no room with that code", request_id);
-                return;
-            };
-            // Constant-time comparison is unnecessary here: the secret is a
-            // 26-character ULID and joins are LAN-local, but a mismatch must
-            // reveal nothing beyond "wrong secret".
-            if room.secret != join.secret {
-                session.error(app, "bad_secret", "room secret is incorrect", request_id);
+            // Checked before the room table is touched, so an address that has
+            // already spent its attempts costs a map lookup rather than the
+            // work it was trying to provoke.
+            let now = Instant::now();
+            if let Some(wait) = app.join_limiter.retry_after(session.peer, now) {
+                tracing::warn!(peer = %session.peer, seconds = wait.as_secs(), "join refused: too many failed attempts");
+                session.error(
+                    app,
+                    "too_many_attempts",
+                    format!("too many failed join attempts; try again in {} seconds", wait.as_secs().max(1)),
+                    request_id,
+                );
                 return;
             }
+
+            let code = join.room_code.trim().to_uppercase();
+            let mut rooms = app.rooms();
+            let wrong = match rooms.get(&code) {
+                None => Some(("no_such_room", "no room with that code")),
+                // Constant-time comparison is unnecessary here: the secret is a
+                // 26-character ULID and joins are LAN-local, but a mismatch must
+                // reveal nothing beyond "wrong secret".
+                Some(room) if room.secret != join.secret => Some(("bad_secret", "room secret is incorrect")),
+                Some(_) => None,
+            };
+            if let Some((code, message)) = wrong {
+                // Both failures are counted the same way and answered the same
+                // way. Charging only for a bad secret would turn the room-code
+                // reply into a free oracle for which codes exist.
+                drop(rooms);
+                if let Some(wait) = app.join_limiter.record_failure(session.peer, now) {
+                    tracing::warn!(peer = %session.peer, seconds = wait.as_secs(), "join attempts exhausted");
+                }
+                session.error(app, code, message, request_id);
+                return;
+            }
+            let room = rooms.get_mut(&code).expect("checked just above");
             let name = sanitise_name(&join.name, &session.device_id);
             let replaced = match room.join(
                 session.client_id.clone(),
@@ -214,6 +249,10 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             }
 
             session.room_code = Some(code.clone());
+            // A device on flapping wifi rejoins over and over with the right
+            // secret. Clearing on success is what stops a bad signal from
+            // turning into a room it can no longer get back into.
+            app.join_limiter.record_success(session.peer, now);
             tracing::info!(client = %session.client_id, room = %code, role = ?join.role, "client joined");
 
             let now = app.now_ns();
@@ -647,6 +686,12 @@ pub fn flush_dirty_rooms(app: &App) {
     let manifest = app.media_manifest();
     let mut rooms = app.rooms();
     for room in rooms.values_mut() {
+        // Occupancy is stamped here rather than on join and leave: this tick
+        // already walks every room, and a room that empties then refills within
+        // one tick should not look abandoned.
+        if !room.clients.is_empty() {
+            room.last_occupied_ns = now;
+        }
         // Checked on the same tick as the snapshot flush rather than from a
         // timer per track: a timer would have to be cancelled on every pause,
         // seek and source change, and getting that wrong means a track that

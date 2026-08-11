@@ -5,6 +5,7 @@ mod clock;
 mod config;
 mod discovery;
 mod http;
+mod join_limit;
 mod media;
 mod profiles;
 mod room;
@@ -28,6 +29,10 @@ use ulid::Ulid;
 
 /// How often coalesced room snapshots are flushed to clients.
 const SNAPSHOT_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Snapshot flushes between sweeps for abandoned rooms. 60 ticks at 500 ms is
+/// every 30 seconds.
+const REAP_EVERY_TICKS: u32 = 60;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -67,8 +72,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .or_else(|| saved_room.as_ref().map(|room| room.secret.clone()))
         .unwrap_or_else(|| Ulid::new().to_string());
+    let saved_default_name = saved_room.as_ref().and_then(|room| room.name.clone());
     let room_reused = saved_room.map(|room| room.code == room_code && room.secret == room_secret).unwrap_or(false);
-    profiles.set_room_identity(profiles::RoomIdentity { code: room_code.clone(), secret: room_secret.clone() });
+    // The default room's name, if it had one, survives its own re-registration.
+    let default_name = saved_default_name;
+    profiles.set_room_identity(profiles::RoomIdentity {
+        code: room_code.clone(),
+        secret: room_secret.clone(),
+        name: default_name,
+    });
     let room = Room::new(room_code.clone(), room_secret.clone(), config.start_lead_ns(), config.max_clients);
 
     let addr = SocketAddr::new(config.bind, config.port);
@@ -77,6 +89,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let use_mdns = config.mdns;
     let media_roots = config.media_dirs.clone();
     let app = Arc::new(App::new(config, media, media_roots, room, profiles));
+
+    // Rooms beyond the default, restored so an invite link saved on a device
+    // for the kitchen still opens the kitchen after a restart rather than a
+    // "no such room". The default is already in place and is skipped.
+    let restored = app.restore_saved_rooms();
+    if restored > 0 {
+        tracing::info!(count = restored, "restored rooms from the previous run");
+    }
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
@@ -139,9 +159,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app = Arc::clone(&app);
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(SNAPSHOT_FLUSH_INTERVAL);
+            let mut since_reap = 0u32;
             loop {
                 ticker.tick().await;
                 ws::flush_dirty_rooms(&app);
+                // Reaping walks every room and touches the profile file, so it
+                // runs on a slower cadence than the snapshot flush. A room's
+                // grace period is half an hour; checking it twice a minute is
+                // ample.
+                since_reap += 1;
+                if since_reap >= REAP_EVERY_TICKS {
+                    since_reap = 0;
+                    app.reap_empty_rooms(app.now_ns());
+                }
             }
         })
     };
@@ -245,7 +275,11 @@ async fn serve(
 ) -> std::io::Result<()> {
     match certificate {
         None => {
-            axum::serve(listener, router.into_make_service()).with_graceful_shutdown(shutdown_signal()).await?;
+            // `with_connect_info` rather than `into_make_service`: the join limiter
+            // needs the peer address, and without this axum has no reason to keep it.
+            axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
+                .with_graceful_shutdown(shutdown_signal())
+                .await?;
             Ok(())
         }
         Some(certificate) => {
@@ -268,7 +302,7 @@ async fn serve(
             axum_server::from_tcp_rustls(standard, config)
                 .map_err(|error| std::io::Error::other(format!("could not adopt the listener: {error}")))?
                 .handle(handle)
-                .serve(router.into_make_service())
+                .serve(router.into_make_service_with_connect_info::<SocketAddr>())
                 .await?;
             Ok(())
         }
