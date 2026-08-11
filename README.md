@@ -155,7 +155,7 @@ out of the room and lose their clocks.
 | `--tls` | off | HTTPS with a self-signed certificate. Needed for calibration. |
 | `--room-code <CODE>` | random | Fix the room code across restarts. |
 | `--mdns <BOOL>` | `true` | Advertise `homesync.local`. |
-| `--max-clients <N>` | `16` | Devices allowed in the room. |
+| `--max-clients <N>` | `16` | Devices allowed in each room. |
 | `--state-file <PATH>` | `homesync-devices.json` | Where per-device compensation is saved. |
 | `--start-lead-ms <MS>` | `2000` | How far ahead playback is scheduled. |
 
@@ -257,7 +257,8 @@ never dropped.
 
 ### Getting them in time
 
-Three things are worth knowing, in order of how often they matter.
+Four things are worth knowing, in order of how often they matter. The third one
+happens on its own.
 
 1. **Wait for the clocks.** A device that just joined has not measured its clock
    yet. Press Play anyway and HomeSync holds the start until every device is
@@ -398,6 +399,14 @@ tested; almost none of it has been heard by a human.
   calibration reachable on a real phone at all.
 - Persistence: a device whose browser storage was cleared rejoins and recovers
   its compensation from the coordinator.
+- Several rooms: two browsers in two rooms on one coordinator, one playing and
+  one idle, each with its own timeline, device list and health line. Rooms come
+  back after a restart with their names.
+- The drift-correction control law, run as a closed loop against a simulated
+  drifting clock, and again inside Chromium to confirm it behaves identically
+  there. Chromium honours `playbackRate` at 0.998 and 1.002 on a live source.
+- Join limiting: eleven wrong secrets in a row against the real binary earns a
+  refusal, and a device rejoining *correctly* thirty times never does.
 
 ### Implemented but never run against reality
 
@@ -408,6 +417,11 @@ tested; almost none of it has been heard by a human.
   `x86_64-pc-windows-msvc` on every run of `scripts/check.sh`, which catches API
   misuse and proves nothing about real hardware. This is why live system audio
   has no button in the interface.
+- **Drift correction has never corrected real drift.** The control law is
+  tested as a closed loop and the browser is confirmed to accept the rate
+  changes, but headless Chromium's audio clock does not meaningfully drift
+  against the coordinator, so the loop has never had anything real to close.
+  Two devices left playing for an hour is the test that counts.
 - **The webOS receiver has never been packaged or installed on a television.**
 - **Nothing has been heard by a human.** Headless Chromium renders into a null
   audio sink: it can prove the client schedules correctly, never that a room
@@ -428,9 +442,11 @@ belong — including the failures.
 
 ### Deliberate deviations from the specification
 
-- **Any room member may control the transport**, not only the owner. On a
-  trusted LAN, requiring approval before a phone can press pause is friction
-  without a threat model.
+- **Any room member may control the transport**, not only the owner, and may
+  create another room. On a trusted LAN, requiring approval before a phone can
+  press pause is friction without a threat model. The consequence is that the
+  room secret is a house key rather than an account — see
+  [`SECURITY.md`](SECURITY.md).
 - **The browser client is plain ES modules**, not TypeScript with a bundler.
   This keeps the "one executable, no build step" property.
 - **`stable` clock quality is 5 ms of uncertainty, not 2 ms.** The figure
