@@ -191,10 +191,14 @@ telemetry, and it travels in the diagnostics export unchanged.
 - **Acoustic calibration has never heard a real microphone.** The DSP and the
   whole coordinator loop are tested against synthetic recordings with known
   ground truth — that is not the same as a speaker, a room and a phone.
-- **WASAPI loopback capture has never been executed.** It compiles for Windows
-  and that is all anyone knows. This is why live system audio no longer has a
-  button: the integration test still exercises the streaming path against a
-  synthetic source, but nothing has captured real audio.
+- **WASAPI loopback capture has never been executed.** It now genuinely
+  type-checks for `x86_64-pc-windows-msvc` on every run of `scripts/check.sh`,
+  which it did not before — the code is behind `cfg(windows)`, so on Linux it
+  was neither compiled nor linted and the claim that it compiled was resting on
+  nothing. That catches API misuse and proves nothing about device enumeration,
+  format negotiation or timing on real hardware. This is why live system audio
+  no longer has a button: the integration test exercises the streaming path
+  against a synthetic source, but nothing has captured real audio.
 - **The webOS receiver has never been packaged or installed on a television.**
 - **Nothing has been heard by a human.** Headless Chromium renders into a null
   audio sink: it can prove the client schedules correctly, never that a room

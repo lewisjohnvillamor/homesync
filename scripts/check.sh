@@ -11,6 +11,23 @@ cargo fmt --all --check
 echo "==> cargo clippy"
 cargo clippy --all-targets -- -D warnings
 
+# The WASAPI capture backend is behind `cfg(windows)`, so nothing above ever
+# looks at it: on Linux it is not compiled, not linted and not type-checked.
+# The README claims it is compile-checked for Windows, and this is the line
+# that makes that claim true. `check` needs no linker, so no Windows toolchain
+# is required — only the target's standard library.
+#
+# Scoped to homesync-audio deliberately. The server crate pulls in rustls,
+# whose C dependencies need a Windows C compiler to cross-build, and the
+# capture code does not live there.
+if rustup target list --installed 2>/dev/null | grep -q x86_64-pc-windows-msvc; then
+  echo "==> cargo check (windows capture backend)"
+  cargo check --quiet --target x86_64-pc-windows-msvc -p homesync-audio
+else
+  echo "==> cargo check (windows capture backend) — SKIPPED, target not installed"
+  echo "    rustup target add x86_64-pc-windows-msvc"
+fi
+
 echo "==> cargo test (unit and integration)"
 # The integration tests drive the real binary over a socket, so the binary has
 # to exist before they run.

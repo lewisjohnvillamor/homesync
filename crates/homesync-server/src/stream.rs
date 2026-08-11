@@ -92,13 +92,28 @@ pub fn start(
             }
         }
 
+        // Read before `stop`, which releases the device and with it the
+        // counter's only writer.
+        let dropped = source.dropped_blocks();
         source.stop();
         tracing::info!(
             room = %room_code,
             frames = framer.sequence(),
             reanchors = framer.reanchor_count(),
+            dropped_blocks = dropped,
             "live stream stopped"
         );
+        // Counted since the backend was written and never once looked at. A
+        // capture that quietly discards audio when the network stalls is
+        // indistinguishable from one that is working, right up until somebody
+        // hears the gap.
+        if dropped > 0 {
+            tracing::warn!(
+                room = %room_code,
+                dropped_blocks = dropped,
+                "capture discarded audio because the stream could not keep up"
+            );
+        }
     });
 
     Ok(handle)

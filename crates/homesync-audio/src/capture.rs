@@ -45,7 +45,27 @@ pub trait CaptureSource: Send {
 
     /// Stops capture and releases the device.
     fn stop(&mut self) {}
+
+    /// Blocks the source had to discard because the consumer fell behind.
+    ///
+    /// Reported rather than merely counted: a capture backend that silently
+    /// drops audio when the network stalls looks exactly like one that is
+    /// working, and the difference only shows up as a gap somebody hears.
+    /// Sources that cannot drop anything return zero.
+    fn dropped_blocks(&self) -> u64 {
+        0
+    }
 }
+
+/// How long a capture backend may deliver nothing before it is treated as
+/// stopped rather than slow.
+///
+/// A render endpoint that has produced no callback for this long has been
+/// taken away — the device changed, another application claimed it in
+/// exclusive mode, or the session was torn down. None of those recover on
+/// their own, and blocking forever on one turns a stoppable stream into a
+/// thread that cannot be stopped at all.
+pub const CAPTURE_STALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Frames per block at the standard rate: 10 ms, per specification 11.1.
 pub const DEFAULT_BLOCK_FRAMES: usize = 480;
@@ -167,9 +187,9 @@ pub mod wasapi {
     //! Unverified: compile-checked for Windows but never executed. See the
     //! module documentation above.
 
-    use super::{CaptureFormat, CaptureSource};
+    use super::{CaptureFormat, CaptureSource, CAPTURE_STALL_TIMEOUT};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+    use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 
     /// Blocks buffered between the capture callback and the sender. The
     /// callback must never block, so the channel is bounded and overflow is
@@ -236,12 +256,6 @@ pub mod wasapi {
                 )
                 .map_err(|error| format!("could not open loopback stream: {error}"))
         }
-
-        /// Blocks the capture callback discarded because the consumer fell
-        /// behind.
-        pub fn dropped_blocks(&self) -> u64 {
-            self.dropped.load(std::sync::atomic::Ordering::Relaxed)
-        }
     }
 
     impl CaptureSource for LoopbackCapture {
@@ -250,11 +264,31 @@ pub mod wasapi {
         }
 
         fn next_block(&mut self) -> Option<Vec<f32>> {
-            self.receiver.recv().ok()
+            match self.receiver.recv_timeout(CAPTURE_STALL_TIMEOUT) {
+                Ok(block) => Some(block),
+                // The device stopped producing. Ending the stream with a
+                // reason in the log is the whole point: a bare `recv()` here
+                // parks this thread forever, and because the consuming loop
+                // only checks its stop flag between blocks, the stream then
+                // cannot be stopped by anything short of killing the process.
+                Err(RecvTimeoutError::Timeout) => {
+                    tracing::warn!(
+                        seconds = CAPTURE_STALL_TIMEOUT.as_secs(),
+                        "WASAPI loopback delivered nothing; treating the endpoint as gone"
+                    );
+                    None
+                }
+                // The stream was dropped by `stop`, which is the ordinary end.
+                Err(RecvTimeoutError::Disconnected) => None,
+            }
         }
 
         fn stop(&mut self) {
             self.stream = None;
+        }
+
+        fn dropped_blocks(&self) -> u64 {
+            self.dropped.load(std::sync::atomic::Ordering::Relaxed)
         }
     }
 }
@@ -309,6 +343,26 @@ mod tests {
         let quiet = capture.next_block().expect("block");
         let peak_quiet = quiet.iter().fold(0.0f32, |a, s| a.max(s.abs()));
         assert!(peak_quiet < 0.25, "unexpected transient mid-second: {peak_quiet}");
+    }
+
+    #[test]
+    fn a_source_that_cannot_drop_anything_reports_none() {
+        // The default exists so the streaming loop can log this number without
+        // knowing which backend it has. A synthetic source hands its blocks
+        // over directly and has nothing to discard.
+        let capture = SyntheticCapture::new().unpaced();
+        assert_eq!(capture.dropped_blocks(), 0);
+    }
+
+    #[test]
+    fn the_stall_timeout_outlasts_an_ordinary_block() {
+        // It has to be far longer than the ~10 ms between callbacks, or a
+        // scheduling hiccup would be reported as a device that has gone away.
+        // It also has to be short enough that a stopped stream does not hold
+        // its thread for an uncomfortable time.
+        let block = Duration::from_millis(10);
+        assert!(CAPTURE_STALL_TIMEOUT > block * 20, "too eager: {CAPTURE_STALL_TIMEOUT:?}");
+        assert!(CAPTURE_STALL_TIMEOUT <= Duration::from_secs(5), "too patient: {CAPTURE_STALL_TIMEOUT:?}");
     }
 
     #[test]
