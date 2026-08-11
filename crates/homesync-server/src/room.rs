@@ -122,6 +122,15 @@ pub struct Room {
     pub code: String,
     /// Shared secret required to join.
     pub secret: String,
+    /// What somebody called this room, if they called it anything.
+    pub name: Option<String>,
+    /// Coordinator time when the room last had someone in it.
+    ///
+    /// A room nobody has been in for long enough is reaped, so this is what
+    /// stops the table growing for the life of the process. Set at creation
+    /// rather than left at zero, so a room created and not yet joined has its
+    /// grace period rather than being eligible immediately.
+    pub last_occupied_ns: u64,
     /// Client id of the owner, which is the first client to join.
     pub owner: Option<String>,
     /// Members, ordered by client id for stable UI ordering.
@@ -178,6 +187,8 @@ impl Room {
         Self {
             code,
             secret,
+            name: None,
+            last_occupied_ns: 0,
             owner: None,
             clients: BTreeMap::new(),
             transport: Transport::default(),

@@ -43,6 +43,8 @@ link.
 - 📺 **YouTube together** — every device runs its own player; HomeSync keeps them lined up
 - 🎚️ **Per-device equaliser** — tame the boomy speaker in the kitchen without touching the rest
 - 📶 **No internet needed** — it is your LAN, your files, your machine
+- 🎛️ **Quiet drift correction** — a device whose clock runs fast is nudged back by a fraction of a percent instead of restarting the room
+- 🚪 **Several rooms** — the kitchen plays one thing while the bedroom plays another, from one coordinator
 - 🔍 **It tells you the truth** — one line saying whether the room is actually together, or which device is 2.4 s behind
 
 ## Quick start
@@ -232,6 +234,23 @@ Some devices need help finding the coordinator:
 - **A device on a guest network or a VPN** is not on your LAN and cannot reach
   the coordinator at all.
 
+### More than one room
+
+Open **Invite a device** and press **New room**. You get a second room with its
+own code, secret and invite link — send that link to the devices that belong in
+it. The kitchen can then play one thing while the bedroom plays another, from
+the same coordinator, sharing its clock service and its library and nothing
+else.
+
+Creating a room does not move the device that created it, because whoever
+presses the button is usually setting a room up for other devices, and being
+yanked out of what you are listening to is not what that button looks like it
+does.
+
+Rooms survive a restart. Empty ones are dropped after half an hour, so a house
+does not accumulate abandoned rooms; the room printed in the startup banner is
+never dropped.
+
 ### Getting them in time
 
 Three things are worth knowing, in order of how often they matter.
@@ -244,7 +263,13 @@ Three things are worth knowing, in order of how often they matter.
    compensation** until the flam disappears. It is saved per device and comes
    back when that device rejoins. This handles Bluetooth speakers, soundbars and
    televisions, whose latency the browser reports wrongly or not at all.
-3. **Or measure it.** Acoustic calibration plays coded chirps and has one device
+3. **Slow drift handles itself.** A device whose audio clock runs slightly fast
+   or slow has its playback rate trimmed by a fraction of a percent until it is
+   back in position — inaudible, and no interruption. You can see it happening:
+   a device being corrected shows an arrow beside its drift figure. Only a
+   device more than a quarter-second out gets the old, audible treatment of a
+   coordinated restart.
+4. **Or measure it.** Acoustic calibration plays coded chirps and has one device
    listen, working out each speaker's real delay rather than the one it claims.
    This needs `--tls`, because browsers refuse microphone access on a plain-HTTP
    address. It has never been run against a real microphone — see
@@ -324,6 +349,13 @@ A short version of the rest; the full design is in
 - **A readiness barrier.** Nothing plays until every receiver holds the verified
   file and a stable clock, with an explicit override for when you would rather
   not wait.
+- **Drift corrected by resampling.** A device whose audio clock runs fast has
+  its playback rate trimmed by up to 0.2% — about 3.5 cents of pitch, under the
+  5-10 cents a listener can detect — and slides back into position over the next
+  half-minute. Only past a quarter-second does the room fall back to a
+  coordinated restart, because at that distance a rate trim would take minutes.
+  The old behaviour was to restart every time, which is exactly as audible as it
+  sounds.
 - **Honest reporting.** Clock agreement, player-timeline agreement, and
   physically measured alignment are three different things, and the interface
   never lets one stand in for another. Only the third is real, and only after a
@@ -383,11 +415,12 @@ belong — including the failures.
 
 ### Not implemented
 
-- Opus compression. PCM only; the format code is reserved and rejected.
-- Multiple simultaneous rooms. One room is created at startup.
-- Rate limiting on join attempts.
-- Controlled video, so no lip-sync with HomeSync-owned video.
-- Bounded resampling for slow drift; over threshold causes a coordinated restart.
+- Opus compression. PCM only; the format code is reserved and rejected. It
+  would only affect live streaming, which has no button yet, and PCM at
+  1.5 Mbit/s is not what is hurting on a home network.
+- Controlled video, so no lip-sync with HomeSync-owned video. Video gives
+  nothing like `AudioBufferSourceNode.start(when)`, and there is no acoustic
+  equivalent for measuring a display's latency.
 
 ### Deliberate deviations from the specification
 
@@ -413,21 +446,29 @@ belong — including the failures.
 Formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **229 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+- **244 Rust unit tests.** Clock estimation against synthetic latency, jitter,
   drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and skew; the room state machine;
   cover-art parsers for three container formats; the address rules that stop
-  fetch-by-URL being aimed at the local network.
+  fetch-by-URL being aimed at the local network; the room table and its reaping;
+  and the join limiter's accounting against a fake clock.
 
   Many are regression tests named after the defect they pin down —
   `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
   every device restart every few seconds, and it is a test rather than a
   changelog entry because that is the only form that stays true.
-- **Four integration tests** drive the real binary over a socket with fake
+- **Seven integration tests** drive the real binary over a socket with fake
   devices: the calibration loop against known ground truth, a live stream
-  holding its timeline across 400 frames, and diagnostics access control.
-- **55 browser tests.** `clock.test.mjs` mirrors the Rust clock tests case for
+  holding its timeline across 400 frames, diagnostics access control, and the
+  join limiter — including that a device rejoining *correctly* thirty times is
+  never locked out, which is the case the design is shaped around.
+- **76 browser tests**, including the drift-correction control law run as a
+  closed loop against a simulated drifting clock — the trim changes the device's
+  speed, the speed changes the drift, the next tick sees it. A control law that
+  looks sensible one call at a time and oscillates forever in a loop passes the
+  wrong test.
+- The older browser tests: `clock.test.mjs` mirrors the Rust clock tests case for
   case and `live.test.mjs` mirrors the playout buffer tests, because both
   algorithms exist twice and must not drift apart.
 - **End-to-end** (`node web/test/e2e.mjs`) drives two headless Chromium

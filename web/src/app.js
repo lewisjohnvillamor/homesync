@@ -150,7 +150,14 @@ async function join() {
   connection.onJoinRejected = onJoinRejected;
   connection.onSnapshot = onSnapshot;
   connection.onTransport = onTransport;
-  connection.diagnosticsProvider = () => (player.ctx ? player.diagnostics(state.transport) : null);
+  connection.diagnosticsProvider = () => {
+    if (!player.ctx) return null;
+    // Steered on the same tick that reports, so the drift a correction is
+    // answering is the drift that was just measured rather than one from a
+    // second ago.
+    player.steerTowards(state.transport);
+    return player.diagnostics(state.transport);
+  };
   connection.bufferProvider = () => state.live?.bufferReport() ?? null;
   connection.youtubeProvider = () =>
     state.transport?.mode === 'youtube' && state.youtube?.player ? state.youtube.state() : null;
@@ -521,6 +528,8 @@ function wireControls() {
 
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
+  $('room-new').addEventListener('click', createRoom);
+  $('room-created-copy').addEventListener('click', copyCreatedRoom);
 
   // Coming back from the background invalidates both the clock estimate and
   // any running schedule, so both are rebuilt rather than trusted.
@@ -818,6 +827,127 @@ function toggleInvite() {
       $('invite-qr').hidden = true;
       $('invite-note').textContent = `No QR code: ${error.message}`;
     });
+
+  refreshRooms();
+}
+
+/** The room secret this page holds, however it arrived. */
+function currentSecret() {
+  return $('room-secret').value.trim() || localStorage.getItem('homesync.roomSecret') || '';
+}
+
+/**
+ * Lists the rooms this coordinator is running.
+ *
+ * Only ever shown inside the invite panel, and only fetched when that panel is
+ * opened: it is a once-in-a-while action, not something worth polling for.
+ */
+async function refreshRooms() {
+  const list = $('room-list');
+  try {
+    const response = await fetch(`/api/v1/rooms?secret=${encodeURIComponent(currentSecret())}`);
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    const rooms = await response.json();
+    const here = state.snapshot?.room_code;
+    list.replaceChildren(
+      ...rooms.map((room) => {
+        const item = document.createElement('li');
+        if (room.code === here) item.classList.add('current');
+
+        const code = document.createElement('code');
+        code.className = 'code';
+        code.textContent = room.code;
+        item.append(code);
+
+        if (room.name) {
+          const name = document.createElement('span');
+          name.className = 'room-name';
+          name.textContent = room.name;
+          item.append(name);
+        }
+
+        const detail = document.createElement('span');
+        detail.className = 'room-detail';
+        // Devices and state, because "is anything happening in the bedroom"
+        // is the only question this list exists to answer.
+        const devices = room.clients === 1 ? '1 device' : `${room.clients} devices`;
+        detail.textContent = room.code === here ? `${devices} · you are here` : `${devices} · ${room.playing ? 'playing' : 'idle'}`;
+        item.append(detail);
+        return item;
+      }),
+    );
+    hideRoomProblem();
+  } catch (error) {
+    list.replaceChildren();
+    showRoomProblem(`Could not list the rooms — ${error.message}`);
+  }
+}
+
+/**
+ * Creates a room and shows its invitation.
+ *
+ * Deliberately does not move this device into it. Whoever presses this is
+ * usually setting a room up *for other devices*, and yanking the page they are
+ * looking at into an empty room would stop whatever is currently playing here.
+ */
+async function createRoom() {
+  const button = $('room-new');
+  const name = prompt('Name for the new room (optional):', '');
+  // A cancelled prompt returns null, which is a decision not to create one.
+  if (name === null) return;
+
+  button.disabled = true;
+  button.textContent = 'Creating…';
+  try {
+    const response = await fetch('/api/v1/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ secret: currentSecret(), name, origin: location.origin }),
+    });
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    const room = await response.json();
+    $('room-created-code').textContent = room.code;
+    $('room-created-link').value = room.invite;
+    $('room-created').classList.remove('hidden');
+    hideRoomProblem();
+    log(`created room ${room.code}`);
+    refreshRooms();
+  } catch (error) {
+    showRoomProblem(`Could not create a room — ${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'New room';
+  }
+}
+
+async function copyCreatedRoom() {
+  const field = $('room-created-link');
+  field.select();
+  field.setSelectionRange(0, field.value.length);
+  const button = $('room-created-copy');
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(field.value);
+    } else if (!document.execCommand('copy')) {
+      throw new Error('no');
+    }
+    button.textContent = 'Copied';
+  } catch {
+    button.textContent = 'Press ⌘/Ctrl+C';
+  }
+  setTimeout(() => {
+    button.textContent = 'Copy';
+  }, 1800);
+}
+
+function showRoomProblem(message) {
+  const alert = $('room-problem');
+  alert.textContent = message;
+  alert.classList.remove('hidden');
+}
+
+function hideRoomProblem() {
+  $('room-problem').classList.add('hidden');
 }
 
 /**
@@ -1165,7 +1295,12 @@ function renderClients() {
 
     const stats = document.createElement('div');
     stats.className = 'device-stats';
-    const drift = client.role === 'controller' ? '—' : fmt(diagnostics.drift_ms, 'ms', 1);
+    // A device being resampled is drifting *and being handled*, which is a
+    // different state from drifting. The correction is inaudible by design, so
+    // without saying so here there is nothing to distinguish the two.
+    const trimPpm = diagnostics.rate_trim_ppm || 0;
+    const driftValue = fmt(diagnostics.drift_ms, 'ms', 1);
+    const drift = client.role === 'controller' ? '—' : trimPpm ? `${driftValue} ⇢` : driftValue;
     const compensation = (client.manual_offset_ms || 0) + (client.acoustic_offset_ms || 0);
     for (const [label, value] of [
       ['Clock', fmt(clock.offset_uncertainty_ms, 'ms', 1)],
@@ -1280,6 +1415,12 @@ function renderDeviceFacts() {
     ['Total compensation applied', fmt(player.compensationSeconds() * 1000, 'ms', 1)],
     ['Start moved by (late join)', fmt(player.scheduleShiftMs, 'ms', 1)],
     ['Timeline drift', player.playing ? fmt(player.diagnostics(state.transport).drift_ms, 'ms', 2) : '—'],
+    [
+      'Rate trim',
+      player.playing && player.rateTrim
+        ? `${(player.rateTrim * 1e6).toFixed(0)} ppm (${player.rateTrim > 0 ? 'catching up' : 'easing back'})`
+        : 'none',
+    ],
   ];
 
   list.innerHTML = '';

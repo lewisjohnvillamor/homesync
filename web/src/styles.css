@@ -1253,3 +1253,87 @@ td {
     animation: none !important;
   }
 }
+
+/* Rooms on this coordinator ------------------------------------------------ */
+
+.rooms {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.rooms-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rooms-head h3 {
+  margin: 0;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.room-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Same reason as the queue: an `auto` track is as wide as its widest row's
+     content, so on a phone the rows would grow past the list instead of
+     shrinking inside it. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.room-list:empty {
+  display: none;
+}
+
+.room-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: var(--step--1);
+}
+
+.room-list li.current {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: var(--accent-soft);
+}
+
+.room-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.room-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--text-faint);
+}
+
+.room-created {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}

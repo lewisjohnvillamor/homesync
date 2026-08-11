@@ -885,6 +885,14 @@ pub struct DiagnosticReport {
     /// Count of coordinated restarts caused by excessive drift.
     #[serde(default)]
     pub resync_count: u32,
+    /// Playback rate trim in force, in parts per million, signed.
+    ///
+    /// Negative means the device was asked to slow down because it had run
+    /// ahead of the room. Non-zero here is a device being corrected *without a
+    /// restart* — the quiet path — so a diagnostics export can distinguish
+    /// "drifting and being handled" from "drifting and not".
+    #[serde(default)]
+    pub rate_trim_ppm: i32,
 }
 
 /// Machine-readable failure notice.

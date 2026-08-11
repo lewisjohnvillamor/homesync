@@ -25,6 +25,7 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/info", get(info))
+        .route("/api/v1/rooms", get(list_rooms).post(create_room))
         .route("/api/v1/rooms/{code}", get(room_info))
         .route("/api/v1/media/{id}", get(media_bytes))
         .route("/api/v1/media/{id}/manifest", get(media_item_manifest))
@@ -89,6 +90,112 @@ async fn room_info(State(app): State<Arc<App>>, Path(code): Path<String>) -> Res
         .into_response(),
         None => (StatusCode::NOT_FOUND, "no such room").into_response(),
     }
+}
+
+/// One room, as listed to somebody who already holds a room secret.
+#[derive(Debug, Serialize)]
+struct RoomSummary {
+    code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    clients: usize,
+    playing: bool,
+    /// True for the room the banner printed, which is never reaped.
+    is_default: bool,
+}
+
+/// What creating a room hands back: enough to invite somebody into it.
+#[derive(Debug, Serialize)]
+struct CreatedRoom {
+    code: String,
+    secret: String,
+    invite: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CreateRoom {
+    /// A secret for any existing room. Creating rooms is for people already in
+    /// the house, not for anyone who can reach the port.
+    secret: String,
+    #[serde(default)]
+    name: Option<String>,
+    /// The address the caller reached this coordinator on, so the invitation
+    /// points somewhere the other devices can actually open. The coordinator
+    /// cannot work this out for itself on a machine with several interfaces.
+    #[serde(default)]
+    origin: String,
+}
+
+/// Query carrying nothing but a room secret.
+#[derive(Debug, serde::Deserialize)]
+struct RoomsQuery {
+    secret: String,
+}
+
+/// Lists the rooms this coordinator is running.
+///
+/// Gated on holding *a* room secret, and deliberately carries no secrets back:
+/// knowing that a room exists is not permission to join it.
+async fn list_rooms(State(app): State<Arc<App>>, Query(query): Query<RoomsQuery>) -> Response {
+    if !authorised(&app, &query.secret) {
+        return (StatusCode::FORBIDDEN, "a room secret is required to list rooms").into_response();
+    }
+    let default = app.default_room_code();
+    let rooms = app.rooms();
+    let mut summaries: Vec<RoomSummary> = rooms
+        .values()
+        .map(|room| RoomSummary {
+            code: room.code.clone(),
+            name: room.name.clone(),
+            clients: room.clients.len(),
+            playing: room.transport.state == homesync_protocol::TransportState::Playing,
+            is_default: room.code == default,
+        })
+        .collect();
+    // Default first, then by code, so the list does not reshuffle between polls
+    // the way a HashMap's order would.
+    summaries.sort_by(|a, b| b.is_default.cmp(&a.is_default).then_with(|| a.code.cmp(&b.code)));
+    Json(summaries).into_response()
+}
+
+/// Creates a room and returns its invitation.
+///
+/// A second room is what lets the kitchen play one thing while the bedroom
+/// plays another: rooms share this coordinator, its clock service and its
+/// library, and share nothing else — separate timelines, separate devices,
+/// separate secrets.
+async fn create_room(State(app): State<Arc<App>>, Json(request): Json<CreateRoom>) -> Response {
+    if !authorised(&app, &request.secret) {
+        return (StatusCode::FORBIDDEN, "a room secret is required to create a room").into_response();
+    }
+    // Validated before the room exists. Creating one and then failing to
+    // describe how to reach it would leave a room nobody can be invited into —
+    // and, because it is not the default room, one that is silently reaped half
+    // an hour later.
+    let origin = match usable_origin(&request.origin) {
+        Ok(origin) => origin.to_string(),
+        // The shared message is written for the QR code. A room is a different
+        // thing to fail at, and being told the code will not scan does not
+        // explain why the room was not made.
+        Err(_) if request.origin.contains("//localhost") || request.origin.contains("//127.") => {
+            return (
+                StatusCode::CONFLICT,
+                "this page is open on a loopback address, so an invitation minted here \
+                 would point at a room no other device can reach. Open the coordinator by \
+                 its LAN address and create the room from there.",
+            )
+                .into_response()
+        }
+        Err(reason) => return (StatusCode::CONFLICT, reason).into_response(),
+    };
+    let name = request.name.map(|name| name.trim().chars().take(40).collect::<String>()).filter(|n| !n.is_empty());
+    let (code, secret) = app.create_room(name);
+
+    let invite = invite_url(&origin, &code, &secret);
+    let mut response = Json(CreatedRoom { code, secret, invite }).into_response();
+    // Carries a secret, so it must not be cached anywhere shared.
+    insert(&mut response, header::CACHE_CONTROL, "no-store".to_string());
+    response
 }
 
 async fn media_item_manifest(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {

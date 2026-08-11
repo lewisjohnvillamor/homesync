@@ -35,7 +35,14 @@ async function loadPlaywright() {
   ].filter(Boolean);
   for (const candidate of candidates) {
     try {
-      return await import(candidate);
+      const module = await import(candidate);
+      // Playwright ships CommonJS, so an ESM import of it may put everything
+      // behind `default` depending on the Node version and how it was
+      // installed. Taking the namespace alone left `chromium` undefined and the
+      // check skipped without saying so — the worst possible failure for a test
+      // whose whole job is to notice things.
+      const resolved = module.chromium ? module : module.default;
+      if (resolved?.chromium) return resolved;
     } catch {
       // Try the next candidate.
     }

@@ -91,6 +91,31 @@
               Scan it, or send the link. The secret travels in the link's fragment,
               which browsers never send to the coordinator as part of a request.
             </p>
+
+            <div class="rooms">
+              <div class="rooms-head">
+                <h3>Rooms on this coordinator</h3>
+                <button id="room-new" class="btn btn-sm">New room</button>
+              </div>
+              <ul id="room-list" class="room-list"></ul>
+              <p id="room-problem" class="alert hidden"></p>
+              <div id="room-created" class="room-created hidden">
+                <div class="field-row">
+                  <label class="field grow">
+                    <span>Invite link for <b id="room-created-code" class="code"></b></span>
+                    <input id="room-created-link" readonly spellcheck="false" />
+                  </label>
+                  <button id="room-created-copy" class="btn">Copy</button>
+                </div>
+                <p class="note">
+                  A separate room: its own timeline, its own devices, its own secret.
+                  It shares this coordinator's clock service and library and nothing
+                  else, so the kitchen can play one thing while the bedroom plays
+                  another. Send this link to the devices that belong in it — this
+                  device stays where it is.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div class="segmented" role="group" aria-label="Source">
