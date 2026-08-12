@@ -21,6 +21,20 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Changed
 
+- **The release binary is 35% smaller** — 13.0 MB to 8.5 MB — from a release
+  profile that strips symbols and links with LTO across one codegen unit.
+  `cargo build` is untouched, and `--profile release-debug` keeps the symbols
+  for when a release-only problem needs a readable backtrace.
+- Fewer crates compiled. `sha2` and `hex` stayed listed as dependencies of the
+  server after the catalogue moved out to `homesync-media` and were never used
+  there again; `tokio-tungstenite` was pinned a version behind the one axum
+  already pulls, so a second copy of the whole WebSocket stack was compiled; and
+  `sha2` was two versions behind the one `rust-embed` pulls. 333 crates to 329,
+  and four fewer duplicated.
+
+  SHA-256 output is checked against published vectors, because that digest is
+  every media id and every browser-side integrity check.
+
 - **A device that cannot afford them no longer preloads or resamples.**
   Preloading the next track holds a second decoded buffer — decoded audio is
   uncompressed float PCM whatever it arrived as, about 23 MB per minute — and

@@ -25,8 +25,6 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 clap = { version = "4", features = ["derive", "env"] }
-sha2 = "0.10"
-hex = "0.4"
 ulid = "1"
 qrcode = { version = "0.14", default-features = false }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
@@ -36,7 +34,7 @@ mdns-sd = "0.20"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 rcgen = "0.14"
 time = "0.3"
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.29"
 # Outbound HTTP, for pulling a track from a URL into the library. rustls
 # because the process already links it for --tls; no default features because
 # native-tls would be a second TLS stack for no gain.
