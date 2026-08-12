@@ -294,7 +294,9 @@ export class Player {
       this.ctx = new Ctor({ latencyHint: 'playback' });
       this.gain = this.ctx.createGain();
       this.gain.connect(this.ctx.destination);
-      this.#buildEqualiser();
+      // Straight to the output until a slider says otherwise.
+      this.input = this.gain;
+      if (this.eqEngaged) this.setEqGainsDb(this.eqGainsDb);
       this.ctx.onstatechange = () => {
         if (this.ctx.state !== 'running') {
           this.suspendEvents += 1;
@@ -333,6 +335,7 @@ export class Player {
    * does.
    */
   #buildEqualiser() {
+    if (this.eqFilters) return;
     this.eqFilters = EQ_BANDS.map((band, index) => {
       const filter = this.ctx.createBiquadFilter();
       filter.type = index === 0 ? 'lowshelf' : index === EQ_BANDS.length - 1 ? 'highshelf' : 'peaking';
@@ -345,7 +348,36 @@ export class Player {
       const next = this.eqFilters[index + 1];
       filter.connect(next ?? this.gain);
     }
-    this.input = this.eqFilters[0] ?? this.gain;
+  }
+
+  /**
+   * Puts the equaliser in or out of the signal path.
+   *
+   * Five biquads used to sit in front of the output permanently, filtering
+   * every sample on every device whether or not anybody had touched a slider.
+   * At flat they change nothing audible and still cost the arithmetic — which a
+   * television, running one filter pass per band per sample, can least afford.
+   *
+   * So the chain is built on the first non-flat setting and taken out again
+   * when everything returns to flat. A running source is reconnected to the new
+   * head of the graph; going between flat filters and no filters is a
+   * pass-through either way, so there is nothing to hear.
+   */
+  #setEqualiserEngaged(engaged) {
+    if (!this.ctx) return;
+    const wanted = engaged ? (this.#buildEqualiser(), this.eqFilters[0]) : this.gain;
+    if (this.input === wanted) return;
+    this.input = wanted;
+
+    if (this.source) {
+      this.source.disconnect();
+      this.source.connect(this.input);
+    }
+  }
+
+  /** Whether any band asks for anything. */
+  get eqEngaged() {
+    return this.eqGainsDb.some((db) => db !== 0);
   }
 
   /**
@@ -356,7 +388,9 @@ export class Player {
    */
   setEqGainsDb(gainsDb) {
     this.eqGainsDb = EQ_BANDS.map((_, index) => clampDb(gainsDb[index]));
-    if (!this.ctx || !this.eqFilters) return;
+    if (!this.ctx) return;
+    this.#setEqualiserEngaged(this.eqEngaged);
+    if (!this.eqFilters) return;
     for (const [index, filter] of this.eqFilters.entries()) {
       filter.gain.setTargetAtTime(this.eqGainsDb[index], this.ctx.currentTime, 0.02);
     }

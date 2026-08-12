@@ -21,6 +21,22 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Changed
 
+- **The equaliser is out of the signal path until a slider moves.** Five biquad
+  filters sat in front of the output permanently, filtering every sample on
+  every device whether or not anyone had touched them. At flat — the default
+  nobody changes — they altered nothing audible and still cost the arithmetic,
+  worst on a television running one filter pass per band per sample. The chain
+  is now built on the first non-flat setting and taken out again on Flat, and a
+  playing source follows the change.
+- **Volume moved into the transport**, beside the scrubber, as a popover with
+  mute. It is where every media player has kept it for thirty years, and it
+  leaves the device panel to the two settings that are actually about this
+  device. The speaker icon shows silence whether it came from mute or from
+  zero, because those sound identical and a control claiming to be on while
+  nothing plays is how somebody ends up checking their cables.
+- **The equaliser moved into Advanced.** Still per-device, still saved, but a
+  five-band filter bank is not what the main view is for.
+
 - **Advanced no longer offers acoustic calibration on a room that cannot run
   it.** It needs a microphone, browsers refuse one outside a secure context, and
   on a plain-HTTP room that made the largest block in the panel a control that

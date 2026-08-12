@@ -133,7 +133,20 @@ async function join() {
     // somebody who has ticked this box knows their device better than a user
     // agent string does.
     const lightTouch = saved === null ? deviceLooksConstrained() : saved === '1';
-    $('light-touch').checked = lightTouch;
+    $('volume-toggle').addEventListener('click', toggleVolume);
+  // Anywhere else closes it. A popover that needs its own button pressed again
+  // is the kind of thing people leave open and then wonder about.
+  document.addEventListener('click', (event) => {
+    const volume = $('volume-popover');
+    if (volume.classList.contains('hidden')) return;
+    if (event.target.closest('.volume')) return;
+    setVolumeOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setVolumeOpen(false);
+  });
+
+  $('light-touch').checked = lightTouch;
     player.preloadEnabled = !lightTouch;
     player.rateCorrectionEnabled = !lightTouch;
     if (lightTouch && saved === null) {
@@ -516,13 +529,16 @@ function wireControls() {
     state.player?.setVolume(volume);
     state.youtube?.setVolume(volume, $('mute').checked);
     state.connection?.send('client_update', { volume });
+    renderVolumeButton();
   });
   $('mute').addEventListener('change', (event) => {
     state.player?.setMuted(event.target.checked);
     state.youtube?.setVolume(Number($('volume').value) / 100, event.target.checked);
     state.connection?.send('client_update', { muted: event.target.checked });
+    renderVolumeButton();
   });
 
+  renderVolumeButton();
   buildEqualiser();
   $('eq-reset').addEventListener('click', () => applyEq(EQ_BANDS.map(() => 0)));
 
@@ -562,6 +578,19 @@ function wireControls() {
 
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
+  $('volume-toggle').addEventListener('click', toggleVolume);
+  // Anywhere else closes it. A popover that needs its own button pressed again
+  // is the kind of thing people leave open and then wonder about.
+  document.addEventListener('click', (event) => {
+    const volume = $('volume-popover');
+    if (volume.classList.contains('hidden')) return;
+    if (event.target.closest('.volume')) return;
+    setVolumeOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setVolumeOpen(false);
+  });
+
   $('light-touch').addEventListener('change', (event) => setLightTouch(event.target.checked));
   $('room-new').addEventListener('click', createRoom);
   $('room-created-copy').addEventListener('click', copyCreatedRoom);
@@ -800,6 +829,29 @@ function setLightTouch(on) {
   // box is watching a device struggle now.
   if (on) player.dropPreloaded();
   log(on ? 'Going easy on this device: no preloading, no rate correction.' : 'Preloading and rate correction are on.');
+}
+
+function toggleVolume() {
+  setVolumeOpen($('volume-popover').classList.contains('hidden'));
+}
+
+function setVolumeOpen(open) {
+  $('volume-popover').classList.toggle('hidden', !open);
+  $('volume-toggle').setAttribute('aria-expanded', String(open));
+}
+
+/**
+ * Keeps the speaker button showing what the output is actually doing.
+ *
+ * Muted and "turned all the way down" are the same silence to a listener, so
+ * they get the same icon — a control that says it is on while nothing comes out
+ * is how someone ends up checking their speaker cables.
+ */
+function renderVolumeButton() {
+  const muted = $('mute').checked || Number($('volume').value) === 0;
+  $('volume-icon-on').classList.toggle('hidden', muted);
+  $('volume-icon-off').classList.toggle('hidden', !muted);
+  $('volume-value').textContent = $('mute').checked ? 'muted' : String(Math.round(Number($('volume').value)));
 }
 
 /** The room secret, which is what authorises reading and editing the library. */

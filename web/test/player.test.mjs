@@ -363,3 +363,105 @@ test('dropping the preloaded track leaves the playing one alone', () => {
   assert.equal(player.bufferMediaId, 'playing-now', 'the playing track must survive');
   assert.ok(player.buffer, 'the playing buffer must survive');
 });
+
+/* --- the equaliser only costs what it is used for -------------------------
+ *
+ * Five biquads used to sit in front of the output permanently, filtering every
+ * sample on every device whether or not anyone had touched a slider. At flat
+ * they change nothing audible and still cost the arithmetic — worst on a
+ * television, which is the device least able to spare it and the one least
+ * likely to have anybody adjusting an equaliser on it.
+ */
+
+/** A minimal AudioContext that records what gets built and connected. */
+function fakeContext() {
+  const made = { filters: 0, gains: 0 };
+  const node = (kind) => ({
+    kind,
+    connectedTo: null,
+    gain: { value: 0, setTargetAtTime() {} },
+    frequency: { value: 0 },
+    Q: { value: 0 },
+    type: '',
+    connect(target) {
+      this.connectedTo = target;
+    },
+    disconnect() {
+      this.connectedTo = null;
+    },
+  });
+  return {
+    made,
+    currentTime: 0,
+    sampleRate: 48000,
+    state: 'running',
+    destination: node('destination'),
+    createBiquadFilter() {
+      made.filters += 1;
+      return node('filter');
+    },
+    createGain() {
+      made.gains += 1;
+      return node('gain');
+    },
+  };
+}
+
+function playerWithFakeGraph() {
+  const player = new Player(clockWithOffset(0));
+  const ctx = fakeContext();
+  player.ctx = ctx;
+  player.gain = ctx.createGain();
+  player.input = player.gain;
+  return { player, ctx };
+}
+
+test('a flat equaliser builds no filters at all', () => {
+  const { player, ctx } = playerWithFakeGraph();
+  const before = ctx.made.filters;
+  player.setEqGainsDb([0, 0, 0, 0, 0]);
+  assert.equal(ctx.made.filters, before, 'nothing should have been built');
+  assert.equal(player.input, player.gain, 'audio should go straight to the output');
+  assert.equal(player.eqEngaged, false);
+});
+
+test('moving one band builds the chain and puts it in the path', () => {
+  const { player, ctx } = playerWithFakeGraph();
+  player.setEqGainsDb([4, 0, 0, 0, 0]);
+  assert.equal(ctx.made.filters, EQ_BANDS.length, 'one filter per band');
+  assert.notEqual(player.input, player.gain, 'the chain should now be the head of the graph');
+  assert.equal(player.eqEngaged, true);
+});
+
+test('returning to flat takes the filters back out of the path', () => {
+  const { player } = playerWithFakeGraph();
+  player.setEqGainsDb([6, -3, 0, 0, 2]);
+  assert.notEqual(player.input, player.gain);
+
+  player.setEqGainsDb([0, 0, 0, 0, 0]);
+  assert.equal(player.input, player.gain, 'flat must cost nothing again');
+  assert.equal(player.eqEngaged, false);
+});
+
+test('the chain is built once, not on every adjustment', () => {
+  const { player, ctx } = playerWithFakeGraph();
+  player.setEqGainsDb([1, 0, 0, 0, 0]);
+  const afterFirst = ctx.made.filters;
+  for (const db of [2, 3, 4, 5]) player.setEqGainsDb([db, 0, 0, 0, 0]);
+  assert.equal(ctx.made.filters, afterFirst, 'adjusting a slider must not rebuild the graph');
+});
+
+/** A source already playing has to follow the change, or it keeps feeding the
+ *  node that is no longer the head of the graph. */
+test('a playing source is reconnected when the equaliser comes and goes', () => {
+  const { player } = playerWithFakeGraph();
+  const source = { connectedTo: player.gain, connect(t) { this.connectedTo = t; }, disconnect() {} };
+  player.source = source;
+
+  player.setEqGainsDb([5, 0, 0, 0, 0]);
+  assert.equal(source.connectedTo, player.input, 'should now feed the filter chain');
+  assert.notEqual(source.connectedTo, player.gain);
+
+  player.setEqGainsDb([0, 0, 0, 0, 0]);
+  assert.equal(source.connectedTo, player.gain, 'should be back to the plain output');
+});
