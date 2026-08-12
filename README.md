@@ -41,7 +41,7 @@ link.
 
 - 🎵 **Music** — every device downloads the same file, verifies it, and plays it off one shared timeline
 - 📺 **YouTube together** — every device runs its own player; HomeSync keeps them lined up
-- 🎚️ **Per-device equaliser** — tame the boomy speaker in the kitchen without touching the rest
+- 🎚️ **Per-device equaliser** — tame the boomy speaker in the kitchen without touching the rest, and it costs nothing while it is flat
 - 📶 **No internet needed** — it is your LAN, your files, your machine
 - 🎛️ **Quiet drift correction** — a device whose clock runs fast is nudged back by a fraction of a percent instead of restarting the room
 - 🚪 **Several rooms** — the kitchen plays one thing while the bedroom plays another, from one coordinator
@@ -98,6 +98,12 @@ names the device when it isn't:
   <img src="docs/images/devices.png" alt="Devices panel reading '2 devices playing together', with per-device clock agreement and drift" width="700">
 </p>
 
+The two settings that are genuinely about one device, and nothing else:
+
+<p align="center">
+  <img src="docs/images/device-settings.png" alt="The device panel: 'Go easy on this device' and a timing compensation slider" width="700">
+</p>
+
 It follows your system theme:
 
 <p align="center">
@@ -122,8 +128,12 @@ cargo build --release
 ./target/release/homesync --media-dir ~/Music
 ```
 
-The binary is self-contained; copy it wherever you like. It needs no files
+About 8.5 MB, self-contained; copy it wherever you like. It needs no files
 beside it except the ones it writes itself (certificate, device profiles).
+
+The release profile strips symbols and links with LTO, which takes a few minutes
+— `cargo build` is untouched. If a problem only appears in an optimised build,
+`cargo build --profile release-debug` gives the same thing with symbols.
 
 ### Common setups
 
@@ -286,8 +296,19 @@ happens on its own.
 4. **Or measure it.** Acoustic calibration plays coded chirps and has one device
    listen, working out each speaker's real delay rather than the one it claims.
    This needs `--tls`, because browsers refuse microphone access on a plain-HTTP
-   address. It has never been run against a real microphone — see
-   [Status](#status).
+   address — on a plain-HTTP room the section is not shown at all rather than
+   offering a button that cannot work. It has never been run against a real
+   microphone; see [Status](#status).
+
+### What is where
+
+The main view is deliberately short: the queue, the transport, and the devices.
+
+- **Volume and mute** live in the transport, beside the scrubber.
+- **Timing compensation** and **Go easy on this device** are the two settings in
+  the device panel, because both describe this device rather than the room.
+- **Everything else** — equaliser, acoustic calibration, the audio-path facts,
+  the activity log and the diagnostics export — is behind **Advanced**.
 
 ### Playing to a TV
 
@@ -312,6 +333,8 @@ software fixes.
 | **Calibrate** is greyed out or silent | You are on plain HTTP. Restart with `--tls` and accept the certificate warning on the microphone device. |
 | A file will not play | The interface names it. It is a format this browser cannot decode, or the file is damaged. |
 | Devices drift apart over time | Export the diagnostics — the button is under Advanced — and open an issue with the JSON attached. |
+| A television stutters or runs out of memory | Tick **Go easy on this device** in its device panel. It stops that device decoding the next track ahead of time and correcting its own drift by resampling, both of which cost memory and processor a TV has little of. It is ticked automatically on a device that looks constrained. |
+| Playback is fine but the interface is cluttered | Almost everything optional is behind **Advanced** — equaliser, calibration, activity log, diagnostics. The main view is the queue, the transport and the devices. |
 
 ## How it works
 
@@ -363,6 +386,12 @@ A short version of the rest; the full design is in
 - **A readiness barrier.** Nothing plays until every receiver holds the verified
   file and a stable clock, with an explicit override for when you would rather
   not wait.
+- **Nothing charged for a feature you are not using.** The five-band equaliser
+  is out of the signal path entirely while it is flat, rather than filtering
+  every sample for no audible change; a device that looks short of memory or
+  processor does not preload the next track or correct its drift by resampling.
+  Both matter most on a television, which is the device with the least to
+  spare.
 - **Drift corrected by resampling.** A device whose audio clock runs fast has
   its playback rate trimmed by up to 0.2% — about 3.5 cents of pitch, under the
   5-10 cents a listener can detect — and slides back into position over the next
@@ -420,6 +449,12 @@ tested; almost none of it has been heard by a human.
   the internet, decoded and played through the interface. AAC failed, which
   turned out to be the open-source Chromium build having no licensed decoder
   rather than anything in HomeSync.
+- Doing less on a constrained device: a desktop joins with **Go easy on this
+  device** unticked and the same build with a television's user agent joins with
+  it ticked. The compressed bytes of a 12 MB FLAC are measured released as the
+  decode starts, where they used to be held twice over.
+- The metadata parsers under 81 million fuzzing executions across three targets,
+  with no crash and no out-of-bounds picture range.
 
 ### Implemented but never run against reality
 
@@ -491,12 +526,14 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
   every device restart every few seconds, and it is a test rather than a
   changelog entry because that is the only form that stays true.
-- **Seven integration tests** drive the real binary over a socket with fake
+- **Eight integration tests** drive the real binary over a socket with fake
   devices: the calibration loop against known ground truth, a live stream
-  holding its timeline across 400 frames, diagnostics access control, and the
-  join limiter — including that a device rejoining *correctly* thirty times is
-  never locked out, which is the case the design is shaped around.
-- **85 browser tests**, including the drift-correction control law run as a
+  holding its timeline across 400 frames, diagnostics access control, the join
+  limiter — including that a device rejoining *correctly* thirty times is never
+  locked out, which is the case the design is shaped around — and SHA-256
+  against published vectors, because that digest is every media id and every
+  integrity check a browser performs.
+- **98 browser tests**, including the drift-correction control law run as a
   closed loop against a simulated drifting clock — the trim changes the device's
   speed, the speed changes the drift, the next tick sees it. A control law that
   looks sensible one call at a time and oscillates forever in a loop passes the
