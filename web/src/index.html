@@ -209,6 +209,29 @@
             </button>
             <input type="range" id="seek" class="scrub" min="0" max="1000" value="0" step="1" aria-label="Position" />
             <span id="position" class="time">0:00 / 0:00</span>
+
+            <div class="volume">
+              <button id="volume-toggle" class="btn btn-icon" type="button" title="Volume"
+                      aria-label="Volume" aria-expanded="false" aria-controls="volume-popover">
+                <svg id="volume-icon-on" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" />
+                  <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
+                </svg>
+                <svg id="volume-icon-off" viewBox="0 0 24 24" aria-hidden="true" class="hidden">
+                  <path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" />
+                  <path d="M16 9.5l5 5M21 9.5l-5 5" />
+                </svg>
+              </button>
+              <div id="volume-popover" class="volume-popover hidden" role="group" aria-label="Volume">
+                <input type="range" id="volume" class="volume-slider" min="0" max="100" value="100"
+                       orient="vertical" aria-label="Volume" />
+                <span id="volume-value" class="volume-value">100</span>
+                <label class="checkbox volume-mute" for="mute">
+                  <input type="checkbox" id="mute" />
+                  <span>Mute</span>
+                </label>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -231,16 +254,6 @@
         <section id="device-panel" class="panel">
           <div class="panel-head">
             <h2>This device</h2>
-          </div>
-          <div class="slider-row">
-            <label class="field grow">
-              <span>Volume</span>
-              <input type="range" id="volume" min="0" max="100" value="100" />
-            </label>
-            <label class="switch">
-              <input type="checkbox" id="mute" />
-              <span>Mute</span>
-            </label>
           </div>
           <label class="checkbox" for="light-touch">
             <input type="checkbox" id="light-touch" />
@@ -270,28 +283,13 @@
             device.
           </p>
 
-          <hr />
-
-          <div class="panel-head">
-            <h3>Equaliser</h3>
-            <button id="eq-reset" class="btn btn-sm">Flat</button>
-          </div>
-          <div id="eq" class="eq"></div>
-          <p class="note">
-            Shapes this device's own output, so a boomy speaker can be tamed without
-            touching the rest of the room. Saved per device. Applies to
-            <strong>Music</strong> only — a YouTube player's audio never reaches this
-            page, so nothing here can filter it. Calibration chirps deliberately
-            bypass it, so a measurement still hears the speaker rather than the
-            filters.
-          </p>
         </section>
 
         <!-- Everything else -------------------------------------------------->
         <details class="panel panel-advanced">
           <summary>
             <span>Advanced</span>
-            <span class="note">Calibration, activity log, diagnostics</span>
+            <span class="note">Equaliser, calibration, activity log, diagnostics</span>
           </summary>
 
           <div class="advanced-body">
@@ -299,6 +297,23 @@
               <input type="checkbox" id="force" />
               <span>Start without waiting for every device</span>
             </label>
+
+            <hr />
+
+            <div class="panel-head">
+              <h3>Equaliser</h3>
+              <button id="eq-reset" class="btn btn-sm">Flat</button>
+            </div>
+            <div id="eq" class="eq"></div>
+            <p class="note">
+              Shapes this device's own output, so a boomy speaker can be tamed
+              without touching the rest of the room. Saved per device. Applies to
+              <strong>Music</strong> only — a YouTube player's audio never reaches
+              this page, so nothing here can filter it. Calibration chirps
+              deliberately bypass it, so a measurement still hears the speaker
+              rather than the filters. At flat it is taken out of the signal path
+              entirely and costs nothing.
+            </p>
 
             <hr />
 
