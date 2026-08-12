@@ -242,6 +242,18 @@
               <span>Mute</span>
             </label>
           </div>
+          <label class="checkbox" for="light-touch">
+            <input type="checkbox" id="light-touch" />
+            <span>Go easy on this device</span>
+          </label>
+          <p id="light-touch-note" class="note">
+            Stops this device decoding the next track ahead of time and correcting
+            its own drift by resampling. Both cost memory and processor time, which
+            a television has little of — turn this on if playback here stutters or
+            the browser runs out of memory. The cost is a gap between tracks, and
+            drift being corrected by a brief restart rather than silently.
+          </p>
+
           <div class="slider-row">
             <label class="field grow">
               <span>Timing compensation</span>

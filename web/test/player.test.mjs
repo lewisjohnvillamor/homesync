@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ClockEstimator } from '../src/clock.js';
-import { Player, LatencyMode, MIN_SCHEDULE_LEAD_S, positionAtServerNs, clampDb, EQ_BANDS, EQ_LIMIT_DB } from '../src/player.js';
+import { Player, LatencyMode, MIN_SCHEDULE_LEAD_S, positionAtServerNs, clampDb, EQ_BANDS, EQ_LIMIT_DB, deviceLooksConstrained } from '../src/player.js';
 
 const NOW_MS = 1000;
 
@@ -282,4 +282,84 @@ test('the equaliser bands span the audible range in order', () => {
   assert.deepEqual(frequencies, [...frequencies].sort((a, b) => a - b), 'bands must ascend');
   assert.ok(frequencies[0] < 100, 'the low shelf should reach bass');
   assert.ok(frequencies.at(-1) > 8000, 'the high shelf should reach treble');
+});
+
+/* --- device headroom ------------------------------------------------------
+ *
+ * Two comforts — preloading the next track, and correcting drift by resampling
+ * — cost memory and processor time. They were added without asking whether the
+ * device could afford them, and a television could not: a FLAC queue holds two
+ * decoded tracks at roughly 23 MB per minute each, and a trimmed playback rate
+ * makes the audio thread interpolate continuously.
+ *
+ * The rule has to be conservative in one direction only. Failing to spot a weak
+ * device costs what it cost before; wrongly flagging a capable one takes
+ * features away from someone who was fine.
+ */
+
+test('an ordinary machine is left alone', () => {
+  assert.equal(deviceLooksConstrained({ deviceMemory: 8, userAgent: 'Mozilla/5.0 (Windows NT 10.0) Chrome/141' }), false);
+  assert.equal(deviceLooksConstrained({ deviceMemory: 4, userAgent: 'Mozilla/5.0 (Macintosh) Safari/17' }), false);
+});
+
+test('a device that reports little memory is spared the work', () => {
+  assert.equal(deviceLooksConstrained({ deviceMemory: 0.5, userAgent: 'Mozilla/5.0' }), true);
+  assert.equal(deviceLooksConstrained({ deviceMemory: 2, userAgent: 'Mozilla/5.0' }), true);
+});
+
+/** The device this was written for. webOS reports itself in the user agent. */
+test('a television is recognised even when it reports no memory figure', () => {
+  const lg = 'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 Chrome/79 Safari/537.36 WebAppManager';
+  assert.equal(deviceLooksConstrained({ userAgent: lg }), true);
+  const tizen = 'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/537.36 Chrome/76 Safari/537.36';
+  assert.equal(deviceLooksConstrained({ userAgent: tizen }), true);
+});
+
+/**
+ * A missing `deviceMemory` is not evidence of anything: the API is Chromium-only
+ * and absent in Firefox and Safari, so reading its absence as "weak" would take
+ * preloading away from every Mac and every iPhone.
+ */
+test('an unknown device is assumed capable', () => {
+  assert.equal(deviceLooksConstrained({ userAgent: 'Mozilla/5.0 (iPhone) Safari/604' }), false);
+  assert.equal(deviceLooksConstrained({}), false);
+  assert.equal(deviceLooksConstrained(null), false);
+});
+
+test('a nonsense memory figure is ignored rather than believed', () => {
+  assert.equal(deviceLooksConstrained({ deviceMemory: 0, userAgent: 'Mozilla/5.0' }), false);
+  assert.equal(deviceLooksConstrained({ deviceMemory: -1, userAgent: 'Mozilla/5.0' }), false);
+});
+
+test('a player on a constrained device starts with both comforts off', () => {
+  const player = new Player(clockWithOffset(0));
+  // The constructor reads the real navigator, which under node is absent, so
+  // this asserts the capable default and the explicit override below carries
+  // the constrained case.
+  assert.equal(player.preloadEnabled, true);
+  assert.equal(player.rateCorrectionEnabled, true);
+});
+
+test('rate correction does nothing at all when it is switched off', () => {
+  const player = new Player(clockWithOffset(0));
+  player.rateCorrectionEnabled = false;
+  player.playing = true;
+  // No context or source: `steerTowards` must bail before touching either.
+  assert.equal(player.steerTowards({ state: 'playing' }), 0);
+  assert.equal(player.rateTrim, 0);
+});
+
+test('dropping the preloaded track leaves the playing one alone', () => {
+  const player = new Player(clockWithOffset(0));
+  player.buffer = { duration: 10 };
+  player.bufferMediaId = 'playing-now';
+  player.nextBuffer = { duration: 10 };
+  player.nextMediaId = 'queued-next';
+
+  player.dropPreloaded();
+
+  assert.equal(player.nextBuffer, null);
+  assert.equal(player.nextMediaId, null);
+  assert.equal(player.bufferMediaId, 'playing-now', 'the playing track must survive');
+  assert.ok(player.buffer, 'the playing buffer must survive');
 });

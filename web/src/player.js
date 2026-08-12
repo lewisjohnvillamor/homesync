@@ -187,6 +187,30 @@ export function rateTrimFor(driftMs, correcting = false) {
 /** Range of each band, in decibels either side of flat. */
 export const EQ_LIMIT_DB = 12;
 
+/**
+ * Whether this device should be asked to do less.
+ *
+ * Two comforts here trade resources for smoothness: preloading the next track
+ * costs a second decoded buffer, and correcting drift by resampling costs
+ * continuous interpolation in the audio thread. Both are a good trade on a
+ * laptop and a bad one on a television, which has a few hundred megabytes of
+ * browser heap and a processor with nothing spare.
+ *
+ * An unknown device is treated as capable. `deviceMemory` is coarse and absent
+ * outside Chromium, and quietly disabling features on a machine that could have
+ * managed them is worse than the occasional gap between tracks.
+ */
+export function deviceLooksConstrained(nav = typeof navigator === 'undefined' ? null : navigator) {
+  if (!nav) return false;
+  const memory = nav.deviceMemory;
+  if (typeof memory === 'number' && memory > 0 && memory <= 2) return true;
+  // A television says so in its user agent, and televisions are precisely the
+  // constrained case this project targets.
+  return /(smart-?tv|smarttv|webos|web0s|tizen|netcast|hbbtv|viera|bravia|aquos|philipstv|crkey)/i.test(
+    nav.userAgent ?? '',
+  );
+}
+
 /** Keeps a band inside the range the UI offers, and rejects nonsense. */
 export function clampDb(value) {
   const db = Number(value);
@@ -245,6 +269,11 @@ export class Player {
     this.rateAnchorAudioTime = 0;
     this.rateAnchorMediaNs = 0;
     this.rateTrimChanges = 0;
+    /* Whether this device corrects drift by resampling, and whether it decodes
+       the next track ahead of time. Both default off on a device that looks
+       unable to spare the CPU or the memory, and both can be set either way. */
+    this.rateCorrectionEnabled = !deviceLooksConstrained();
+    this.preloadEnabled = !deviceLooksConstrained();
     this.suspendEvents = 0;
     this.resyncCount = 0;
     /** @type {((message: string) => void)|null} */
@@ -388,9 +417,28 @@ export class Player {
     }
 
     onStage('decoding');
-    // decodeAudioData detaches the buffer on some engines, so decode a copy and
-    // keep the original bytes untouched for any retry.
-    return this.ctx.decodeAudioData(bytes.slice(0));
+    // Handed over rather than copied. `decodeAudioData` detaches the buffer,
+    // which is the point: the compressed bytes are freed as the decode starts
+    // instead of being held alongside it.
+    //
+    // This decoded `bytes.slice(0)` to keep the original "for any retry", but
+    // nothing retries — the function returns either way. The copy simply
+    // doubled the compressed footprint of every load, and a FLAC's compressed
+    // footprint is five to ten times an MP3's. Measured on a 12 MB FLAC: the
+    // original was still alive after decoding the copy, so both were resident.
+    return this.ctx.decodeAudioData(bytes);
+  }
+
+  /**
+   * Releases the track decoded ahead of time, without touching the one playing.
+   *
+   * Used when a device is switched to going easy: the memory it is short of is
+   * already committed, so waiting for the next track change to free it would
+   * mean the setting appeared to do nothing at the moment it was most needed.
+   */
+  dropPreloaded() {
+    this.nextBuffer = null;
+    this.nextMediaId = null;
   }
 
   /** Forgets the decoded buffer, e.g. when the controller changes source. */
@@ -533,6 +581,17 @@ export class Player {
    */
   steerTowards(transport) {
     if (!this.playing || !this.source || !this.ctx) {
+      this.rateCorrecting = false;
+      return 0;
+    }
+    // A playback rate other than 1 makes the audio thread interpolate the
+    // buffer on every render quantum, for as long as the correction lasts. On a
+    // television that is a real share of a processor which had nothing spare —
+    // and the device most likely to be drifting is the one least able to afford
+    // being corrected this way. There, drift goes back to the coordinated
+    // restart, which is audible but occasional.
+    if (!this.rateCorrectionEnabled) {
+      if (this.rateTrim !== 0) this.#applyRateTrim(0);
       this.rateCorrecting = false;
       return 0;
     }
