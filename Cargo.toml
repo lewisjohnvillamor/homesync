@@ -15,6 +15,26 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/lewisjohnvillamor/homesync"
 
+# The coordinator is meant to be copied onto a machine and run, so the shipped
+# artefact is worth a little build time. Link-time optimisation across one
+# codegen unit also matters more than usual here: the scheduling path is small,
+# hot, and spread across five crates that inlining can finally see through.
+#
+# Debug info is dropped from release only. `cargo build` — what anyone
+# developing runs — is untouched, and a backtrace from a release binary can
+# still be got by building with `--profile release-debug`.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+
+# A release build that keeps its symbols, for when a release-only problem needs
+# a readable backtrace.
+[profile.release-debug]
+inherits = "release"
+strip = false
+debug = true
+
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

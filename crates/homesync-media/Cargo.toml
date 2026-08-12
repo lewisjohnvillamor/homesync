@@ -10,5 +10,5 @@ description = "Media catalogue, container metadata parsing and byte-range delive
 homesync-protocol = { path = "../homesync-protocol" }
 hex = "0.4"
 mime_guess = "2"
-sha2 = "0.10"
+sha2 = "0.11"
 tracing = { workspace = true }
