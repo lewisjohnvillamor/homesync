@@ -17,6 +17,35 @@ Run `http://<coordinator>:8080/probe.html` on a device to fill in a row.
 - **Stability** — whether repeated calibrations agree. A device with unstable
   latency cannot be compensated by any fixed value, however good the software.
 
+## Formats, measured
+
+Real encoded files — downloaded, not synthesised — selected in the interface and
+played, on Chromium 141 (the Playwright build, which is **open-source**
+Chromium).
+
+| Format | File | Decoded | Played |
+| --- | --- | --- | --- |
+| MP3 | `sample-6s.mp3`, ID3v2.4 | yes | yes |
+| WAV | `sample-6s.wav`, RIFF | yes | yes |
+| FLAC | `sample3.flac` | yes | yes |
+| Ogg Vorbis | `Example.ogg` | yes | yes |
+| Opus | `sample3.opus`, Ogg container | yes | yes |
+| **AAC / M4A** | `sample3.m4a`, `ftypM4A` | **no** | — |
+
+**The AAC result is a property of that browser, not of HomeSync.** Open-source
+Chromium ships without the AAC decoder; `canPlayType('audio/mp4;
+codecs="mp4a.40.2"')` returns `""` on this build and `"probably"` on Google
+Chrome, Edge and Safari, which license it. So `.m4a` files are expected to work
+on the browsers most people actually use, and to fail on a distro-built
+Chromium — and that is worth knowing before blaming the file.
+
+HomeSync names the file when this happens rather than leaving the room waiting.
+A control file — an HTML error page a CDN had served with a `.ogg` extension —
+was refused the same way, by name.
+
+Untested here: AAC on a browser that licenses it. That needs Chrome, Edge or
+Safari, none of which are on this machine.
+
 ## Results
 
 | Device | Browser | Clock rate | Output latency | Measured latency | Stability | Verdict |
