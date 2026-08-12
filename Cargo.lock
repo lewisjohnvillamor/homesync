@@ -916,6 +916,17 @@ name = "homesync-dsp"
 version = "0.1.0"
 
 [[package]]
+name = "homesync-media"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "homesync-protocol",
+ "mime_guess",
+ "sha2 0.10.9",
+ "tracing",
+]
+
+[[package]]
 name = "homesync-protocol"
 version = "0.1.0"
 dependencies = [
@@ -935,6 +946,7 @@ dependencies = [
  "homesync-audio",
  "homesync-clock",
  "homesync-dsp",
+ "homesync-media",
  "homesync-protocol",
  "local-ip-address",
  "mdns-sd",

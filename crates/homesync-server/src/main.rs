@@ -6,7 +6,6 @@ mod config;
 mod discovery;
 mod http;
 mod join_limit;
-mod media;
 mod profiles;
 mod room;
 mod simulate;
@@ -17,7 +16,7 @@ mod ws;
 
 use clap::Parser;
 use config::Config;
-use media::MediaLibrary;
+use homesync_media::MediaLibrary;
 use qrcode::render::unicode;
 use qrcode::QrCode;
 use room::Room;

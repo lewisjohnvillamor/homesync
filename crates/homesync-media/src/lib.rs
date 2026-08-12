@@ -50,10 +50,13 @@ enum Source {
 /// of coordinator memory for something almost nobody looks at twice. The
 /// endpoint re-reads the range on demand.
 #[derive(Debug, Clone)]
-struct ArtworkRef {
-    content_type: String,
-    offset: u64,
-    len: u32,
+pub struct ArtworkRef {
+    /// MIME type, always beginning `image/`.
+    pub content_type: String,
+    /// Where the picture starts in the file.
+    pub offset: u64,
+    /// How many bytes it runs for. Never zero.
+    pub len: u32,
 }
 
 /// Largest embedded picture served. Beyond this the file is more likely to be
@@ -250,6 +253,17 @@ pub fn has_audio_extension(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Finds a cover picture in arbitrary bytes, for fuzzing and for callers who
+/// have a file in hand rather than a catalogue entry.
+///
+/// The parsers underneath read lengths and offsets out of the file itself, so
+/// this is the widest attack surface in the crate — public so `cargo fuzz` can
+/// reach it, and so the invariant it promises can be stated: any range returned
+/// lies inside `bytes`, is non-empty, and describes an image.
+pub fn probe_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
+    embedded_artwork(bytes)
 }
 
 /// Finds an embedded cover picture and returns where it sits in the file.
@@ -517,6 +531,15 @@ impl ByteRange {
     pub fn len(&self) -> u64 {
         self.end - self.start + 1
     }
+
+    /// Always false, and present because a public `len` without one reads as an
+    /// oversight. Both ends are inclusive, so the smallest range this type can
+    /// express is one byte — an empty range is not representable rather than
+    /// merely unusual, and `parse_range` refuses the headers that would ask for
+    /// one.
+    pub fn is_empty(&self) -> bool {
+        false
+    }
 }
 
 /// Parses a single-range `Range: bytes=...` header against a known length.
@@ -770,7 +793,7 @@ mod tests {
     ///
     /// Written out by hand rather than shipping a binary fixture, so the thing
     /// under test — the lengths — is visible in the test itself.
-    fn flac_with_picture(mime: &str, data: &[u8], declared_len: Option<u32>) -> Vec<u8> {
+    pub(super) fn flac_with_picture(mime: &str, data: &[u8], declared_len: Option<u32>) -> Vec<u8> {
         let mut picture = Vec::new();
         picture.extend_from_slice(&3u32.to_be_bytes()); // Picture type: front cover.
         picture.extend_from_slice(&(mime.len() as u32).to_be_bytes());
@@ -851,7 +874,7 @@ mod tests {
     }
 
     /// An ID3v2 tag holding one APIC frame, in either major version.
-    fn mp3_with_cover(major: u8, encoding: u8, mime: &[u8], description: &[u8], data: &[u8]) -> Vec<u8> {
+    pub(super) fn mp3_with_cover(major: u8, encoding: u8, mime: &[u8], description: &[u8], data: &[u8]) -> Vec<u8> {
         let mut body = vec![encoding];
         body.extend_from_slice(mime);
         body.push(0);
@@ -892,7 +915,7 @@ mod tests {
         out
     }
 
-    fn atom(name: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    pub(super) fn atom(name: &[u8; 4], body: &[u8]) -> Vec<u8> {
         let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
         out.extend_from_slice(name);
         out.extend_from_slice(body);
@@ -900,7 +923,7 @@ mod tests {
     }
 
     /// An M4A: `ftyp`, then moov > udta > meta > ilst > covr > data.
-    fn m4a_with_cover(format: u8, data: &[u8]) -> Vec<u8> {
+    pub(super) fn m4a_with_cover(format: u8, data: &[u8]) -> Vec<u8> {
         let mut data_body = vec![0, 0, 0, format, 0, 0, 0, 0];
         data_body.extend_from_slice(data);
         let covr = atom(b"covr", &atom(b"data", &data_body));
@@ -982,6 +1005,221 @@ mod tests {
         // room is worse than a track that is not offered.
         for name in ["a.wma", "b.ape", "c.dsf", "d.txt"] {
             assert!(!has_audio_extension(Path::new(name)), "{name}");
+        }
+    }
+}
+
+/// Randomised robustness testing for the metadata parsers.
+///
+/// These parsers are the only code here that walks structures whose lengths and
+/// offsets come from a file somebody else wrote. Every other test in this file
+/// checks a case someone thought of; this one checks the cases nobody did.
+///
+/// Deterministic on purpose. A fuzzer that seeds itself from the clock finds a
+/// crash once, in CI, and then cannot reproduce it — so the generator is a
+/// plain xorshift and the seed is printed in every failure message.
+///
+/// A separate `cargo fuzz` target under `fuzz/` does the coverage-guided
+/// version. This one runs on stable, on every `cargo test`, forever.
+#[cfg(test)]
+mod fuzz {
+    use super::*;
+
+    /// xorshift64*. Not cryptographic, and does not need to be — it needs to be
+    /// reproducible and dependency-free.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            if bound == 0 {
+                0
+            } else {
+                (self.next() % bound as u64) as usize
+            }
+        }
+
+        fn byte(&mut self) -> u8 {
+            (self.next() & 0xff) as u8
+        }
+    }
+
+    /// A valid file of each kind, to be mutated.
+    ///
+    /// Mutating something valid reaches far deeper than random bytes do: random
+    /// input is rejected by the magic-number check in the first line and never
+    /// exercises a single length calculation.
+    fn seeds() -> Vec<Vec<u8>> {
+        let png = b"\x89PNG\r\n\x1a\nsome pixels here to make it worth reading";
+        vec![
+            super::tests::flac_with_picture("image/png", png, None),
+            super::tests::mp3_with_cover(3, 0, b"image/jpeg", b"cover", png),
+            super::tests::mp3_with_cover(4, 1, b"image/png", &[0x41, 0x00], png),
+            super::tests::m4a_with_cover(13, png),
+            b"fLaC".to_vec(),
+            b"ID3\x04\x00\x00\x00\x00\x00\x00".to_vec(),
+        ]
+    }
+
+    /// The invariant that matters.
+    ///
+    /// A returned range is later re-read from the file on disk, so a parser
+    /// that hands back an offset past the end has misread the structure. It is
+    /// not a memory-safety problem — the read is checked and degrades to "no
+    /// artwork" — but it means the parse was wrong, and a wrong parse is how a
+    /// parser ends up returning somebody else's bytes.
+    fn check(bytes: &[u8], seed: u64, what: &str) {
+        let Some(art) = embedded_artwork(bytes) else { return };
+        let offset = art.offset as usize;
+        let end = offset
+            .checked_add(art.len as usize)
+            .unwrap_or_else(|| panic!("{what} seed {seed}: offset + length overflowed"));
+        assert!(
+            end <= bytes.len(),
+            "{what} seed {seed}: picture at {offset}..{end} runs past the {} byte file",
+            bytes.len()
+        );
+        assert!(art.len > 0, "{what} seed {seed}: a zero-length picture was accepted");
+        assert!(
+            art.content_type.starts_with("image/"),
+            "{what} seed {seed}: accepted content type {:?}",
+            art.content_type
+        );
+    }
+
+    #[test]
+    fn random_bytes_are_never_fatal() {
+        let mut rng = Rng(0x1234_5678_9abc_def0);
+        for round in 0..2_000 {
+            let len = rng.below(512);
+            let bytes: Vec<u8> = (0..len).map(|_| rng.byte()).collect();
+            check(&bytes, round, "random");
+        }
+    }
+
+    /// Random bytes behind a real magic number, so the walkers actually run.
+    #[test]
+    fn random_bodies_behind_a_valid_magic_number_are_never_fatal() {
+        let mut rng = Rng(0xfeed_face_dead_beef);
+        let magics: [&[u8]; 3] = [b"fLaC", b"ID3\x04\x00\x00", b"\x00\x00\x00\x18ftyp"];
+        for round in 0..3_000 {
+            let magic = magics[rng.below(magics.len())];
+            let mut bytes = magic.to_vec();
+            for _ in 0..rng.below(400) {
+                bytes.push(rng.byte());
+            }
+            check(&bytes, round, "magic-prefixed");
+        }
+    }
+
+    /// Truncation is the commonest real corruption: an interrupted copy, a full
+    /// disk, a download that stopped. Every prefix of a good file must be
+    /// refused rather than misread.
+    #[test]
+    fn every_truncation_of_a_valid_file_is_survived() {
+        for (index, seed) in seeds().into_iter().enumerate() {
+            for cut in 0..seed.len() {
+                check(&seed[..cut], index as u64, "truncated");
+            }
+        }
+    }
+
+    /// One flipped byte, which is what a failing drive or a bad cable produces.
+    /// Length fields are the interesting targets and this finds them by
+    /// accident often enough.
+    #[test]
+    fn single_byte_mutations_are_survived() {
+        let mut rng = Rng(0x0bad_c0de_0bad_c0de);
+        for (index, seed) in seeds().into_iter().enumerate() {
+            for round in 0..4_000 {
+                let mut bytes = seed.clone();
+                if bytes.is_empty() {
+                    continue;
+                }
+                let at = rng.below(bytes.len());
+                bytes[at] = rng.byte();
+                check(&bytes, (index * 10_000 + round) as u64, "one-byte mutation");
+            }
+        }
+    }
+
+    /// Several mutations at once, which gets past structures that survive one.
+    #[test]
+    fn multi_byte_mutations_are_survived() {
+        let mut rng = Rng(0xdefe_c8ed_defe_c8ed);
+        for (index, seed) in seeds().into_iter().enumerate() {
+            for round in 0..2_000 {
+                let mut bytes = seed.clone();
+                if bytes.is_empty() {
+                    continue;
+                }
+                for _ in 0..1 + rng.below(8) {
+                    let at = rng.below(bytes.len());
+                    bytes[at] = rng.byte();
+                }
+                check(&bytes, (index * 10_000 + round) as u64, "multi-byte mutation");
+            }
+        }
+    }
+
+    /// Lengths at their extremes, which is where an addition overflows or a
+    /// subtraction wraps. Written deliberately rather than waited for.
+    #[test]
+    fn extreme_length_fields_are_survived() {
+        let png = b"\x89PNG\r\n\x1a\npixels";
+        for declared in [0u32, 1, u32::MAX, u32::MAX - 1, i32::MAX as u32, MAX_ARTWORK_BYTES, MAX_ARTWORK_BYTES + 1] {
+            let file = super::tests::flac_with_picture("image/png", png, Some(declared));
+            check(&file, declared as u64, "declared flac length");
+        }
+    }
+
+    /// The other parsers that read numbers out of a file.
+    #[test]
+    fn the_range_header_parser_survives_anything() {
+        let mut rng = Rng(0xa5a5_5a5a_a5a5_5a5a);
+        let shapes = ["bytes=", "bytes=-", "bytes=0-", "bytes=-0", "bytes=9999999999999999999-", "", "bytes=1-2-3"];
+        for _ in 0..3_000 {
+            let mut header = shapes[rng.below(shapes.len())].to_string();
+            for _ in 0..rng.below(12) {
+                header.push(rng.byte() as char);
+            }
+            // Must not panic; any answer is acceptable.
+            let _ = parse_range(Some(&header), rng.next() % 1_000_000);
+            let _ = parse_range(Some(&header), 0);
+        }
+    }
+
+    /// WAV duration is read from the header of a file the coordinator did not
+    /// write, so it gets the same treatment.
+    #[test]
+    fn the_wav_header_reader_survives_anything() {
+        let mut rng = Rng(0x5eed_5eed_5eed_5eed);
+        for _ in 0..3_000 {
+            let mut bytes = Vec::from(*b"RIFF");
+            for _ in 0..rng.below(200) {
+                bytes.push(rng.byte());
+            }
+            let _ = wav_duration_ns(&bytes);
+        }
+    }
+
+    /// Names taken from a URL end up as paths on disk.
+    #[test]
+    fn a_download_name_never_escapes_its_folder() {
+        let mut rng = Rng(0xc0ff_eec0_ffee_c0ff);
+        for _ in 0..3_000 {
+            let raw: String = (0..rng.below(40)).map(|_| rng.byte() as char).collect();
+            let name = safe_download_name(&raw);
+            assert!(!name.contains('/'), "{raw:?} produced {name:?}");
+            assert!(!name.contains('\\'), "{raw:?} produced {name:?}");
+            assert!(!name.starts_with('.'), "{raw:?} produced {name:?}");
+            assert!(!name.is_empty(), "{raw:?} produced an empty name");
         }
     }
 }

@@ -15,6 +15,57 @@ import { sha256Hex } from './sha256.js';
  */
 export const MIN_SCHEDULE_LEAD_S = 0.06;
 
+/**
+ * Codec queries that give a straight answer, by container family.
+ *
+ * Asking about a container is not enough and is actively misleading: an
+ * open-source Chromium answers "maybe" to `audio/mp4` — it knows the container
+ * — while answering "" to `audio/mp4; codecs="mp4a.40.2"`, which is the AAC
+ * decoder it does not ship. The codec-specific question is the only one worth
+ * asking, so only families that have one are judged at all.
+ *
+ * Everything else — WAV, MP3, FLAC, AIFF — is deliberately never flagged.
+ * There is no codec parameter convention for them, `canPlayType` is free to
+ * answer "" for a format the browser can nonetheless decode through
+ * `decodeAudioData`, and a warning on a file that plays perfectly is worse than
+ * no warning at all: it teaches people to ignore the one that matters.
+ */
+const DECODER_PROBES = {
+  'audio/m4a': ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="mp4a.40.5"', 'audio/mp4; codecs="alac"'],
+  'audio/m4b': ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="mp4a.40.5"'],
+  'audio/x-m4a': ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="alac"'],
+  'audio/mp4': ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="mp4a.40.5"'],
+  'video/mp4': ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="mp4a.40.5"'],
+  'audio/aac': ['audio/aac', 'audio/mp4; codecs="mp4a.40.2"'],
+  'audio/webm': ['audio/webm; codecs=opus', 'audio/webm; codecs=vorbis'],
+  'video/webm': ['audio/webm; codecs=opus', 'audio/webm; codecs=vorbis'],
+  'audio/ogg': ['audio/ogg; codecs=vorbis', 'audio/ogg; codecs=opus'],
+};
+
+/**
+ * Whether this browser is known to have no decoder for a track's format.
+ *
+ * Answers `false` unless it is *sure*, which is the whole discipline of it. The
+ * one failure this exists for is real and measured: an `.m4a` library looks
+ * fine on an open-source Chromium right up until every track fails to decode,
+ * because the AAC decoder is licensed and not shipped. Chrome, Edge and Safari
+ * license it and play the same files without complaint.
+ *
+ * Advisory. A flagged track can still be selected, and the real answer still
+ * comes from `decodeAudioData`.
+ */
+export function browserRefusesType(contentType, probe = null) {
+  if (!contentType) return false;
+  const probes = DECODER_PROBES[contentType.toLowerCase()];
+  // No reliable question to ask about this family, so no opinion is offered.
+  if (!probes) return false;
+
+  const element = probe ?? (typeof document === 'undefined' ? null : document.createElement('audio'));
+  if (!element || typeof element.canPlayType !== 'function') return false;
+
+  return !probes.some((type) => element.canPlayType(type) !== '');
+}
+
 /** How the device's own output latency is being compensated. */
 export const LatencyMode = {
   /** `getOutputTimestamp()` maps audio time to when sound is actually heard. */

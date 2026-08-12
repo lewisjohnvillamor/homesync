@@ -4,7 +4,7 @@
  */
 
 import { Connection } from './net.js';
-import { Player, LatencyMode, positionAtServerNs, EQ_BANDS, EQ_LIMIT_DB, clampDb } from './player.js';
+import { Player, LatencyMode, positionAtServerNs, EQ_BANDS, EQ_LIMIT_DB, browserRefusesType, clampDb } from './player.js';
 import { usingFallbackDigest } from './sha256.js';
 import { LiveReceiver } from './live.js';
 import { YoutubePlayer, parseVideoId } from './youtube.js';
@@ -1172,15 +1172,46 @@ function renderMediaOptions(items) {
     for (const item of items) {
       const option = document.createElement('option');
       option.value = item.id;
-      option.textContent = item.title;
+      // Marked in the list rather than left to fail on selection. A device
+      // whose browser has no decoder for a container reports the problem only
+      // after the whole file has been fetched and rejected, by which point the
+      // room is already waiting for it.
+      const refused = browserRefusesType(item.content_type);
+      option.textContent = refused ? `${item.title} — this device has no decoder` : item.title;
+      option.dataset.undecodable = refused ? 'yes' : '';
       select.append(option);
     }
     select.dataset.signature = signature;
+    announceUndecodable(items);
   }
   // Always parked on the placeholder: this control adds to the queue, so
   // leaving it showing a title would suggest it reflects what is playing.
   select.value = '';
   state.selectedItem = items.find((i) => i.id === state.transport?.media_id) ?? null;
+}
+
+/**
+ * Says once, up front, when this device cannot decode part of the library.
+ *
+ * The per-track failure message already exists, but it arrives after somebody
+ * has queued the track and the room has stalled on this device. Saying it while
+ * the library is being listed turns a mystery into a known limitation — and it
+ * is a limitation of the browser, not of the file, which is worth stating
+ * because the two have completely different remedies.
+ */
+function announceUndecodable(items) {
+  const refused = items.filter((item) => !item.builtin && browserRefusesType(item.content_type));
+  const notice = $('codec-notice');
+  if (!refused.length) {
+    notice.classList.add('hidden');
+    return;
+  }
+  const kinds = [...new Set(refused.map((item) => item.content_type))].join(', ');
+  notice.textContent =
+    `This browser has no decoder for ${refused.length} ${refused.length === 1 ? 'track' : 'tracks'} ` +
+    `in the library (${kinds}). They are marked in the list. Other devices may play them fine — ` +
+    `Chrome, Edge and Safari license decoders that an open-source Chromium build does not ship.`;
+  notice.classList.remove('hidden');
 }
 
 /** Draws the queue, marking the track the room is on. */

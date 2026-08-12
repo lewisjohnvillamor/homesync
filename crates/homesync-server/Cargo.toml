@@ -11,6 +11,7 @@ name = "homesync"
 path = "src/main.rs"
 
 [dependencies]
+homesync-media = { path = "../homesync-media" }
 homesync-protocol = { path = "../homesync-protocol" }
 homesync-clock = { path = "../homesync-clock" }
 homesync-audio = { path = "../homesync-audio" }

@@ -1,0 +1,38 @@
+[package]
+name = "homesync-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Kept out of the workspace on purpose. Fuzzing needs nightly and libFuzzer, and
+# a workspace member would drag that requirement into every ordinary `cargo
+# build` — the exact opposite of "clone it and run it".
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+homesync-media = { path = "../crates/homesync-media" }
+
+[[bin]]
+name = "artwork"
+path = "fuzz_targets/artwork.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "range_header"
+path = "fuzz_targets/range_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "download_name"
+path = "fuzz_targets/download_name.rs"
+test = false
+doc = false
+bench = false
