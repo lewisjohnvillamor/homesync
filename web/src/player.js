@@ -129,7 +129,7 @@ export const RATE_DEADBAND_MS = 4;
  *
  * Small enough that it cannot overshoot the release threshold from outside it.
  */
-export const MIN_ACTIVE_TRIM = 0.0002;
+const MIN_ACTIVE_TRIM = 0.0002;
 
 /**
  * Drift that ends one, in ms.

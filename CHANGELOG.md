@@ -21,6 +21,15 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Changed
 
+- **Advanced no longer offers acoustic calibration on a room that cannot run
+  it.** It needs a microphone, browsers refuse one outside a secure context, and
+  on a plain-HTTP room that made the largest block in the panel a control that
+  could never work. One line now says why, and points at the thing that does the
+  same job less precisely. `--tls` brings the whole section back.
+- `log()` no longer assumes the activity panel exists, so the markup can be
+  trimmed without breaking the client on the first line it tries to write.
+- Four constants that nothing imported are no longer exported.
+
 - **The release binary is 35% smaller** — 13.0 MB to 8.5 MB — from a release
   profile that strips symbols and links with LTO across one codegen unit.
   `cargo build` is untouched, and `--profile release-debug` keeps the symbols

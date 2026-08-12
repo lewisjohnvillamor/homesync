@@ -188,6 +188,15 @@ async function join() {
   connection.send('client_update', { microphone_available: CalibrationMicrophone.available() });
   connection.connect();
 
+  // Calibration needs a microphone, and browsers refuse one outside a secure
+  // context. On a plain-HTTP room the whole section is a control that cannot
+  // work, so it is not shown at all — the same rule applied to the codec
+  // warning and to the QR code on a loopback address. Offering something
+  // unusable is worse than offering nothing: it reads as broken.
+  const calibrationPossible = window.isSecureContext && CalibrationMicrophone.available();
+  $('calibration-section').classList.toggle('hidden', !calibrationPossible);
+  $('calibration-unavailable').classList.toggle('hidden', calibrationPossible);
+
   $('join-panel').classList.add('hidden');
   $('room-panel').classList.remove('hidden');
   void refreshFolders();
@@ -1551,6 +1560,11 @@ function setPill(element, text, kind) {
 
 function log(message) {
   const element = $('log');
+  // Null-safe deliberately. Thirty-five call sites reach this during startup
+  // and joining, so without the guard removing the activity panel from the
+  // markup would not simplify the interface, it would break the client on the
+  // first line it tried to write.
+  if (!element) return;
   const stamp = new Date().toLocaleTimeString();
   element.textContent = `${stamp}  ${message}\n${element.textContent}`.slice(0, 8000);
 }
