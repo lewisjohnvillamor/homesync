@@ -348,6 +348,11 @@ async function onCalibration(type, message) {
 async function loadMedia(item) {
   const player = state.player;
   const token = ++state.loadToken;
+  // Cleared as the load *starts*, not only when one succeeds. A failure
+  // message that outlives the track it was about goes on naming a file nobody
+  // is trying to play any more — so switching away from a broken track to a
+  // working one left the old complaint on screen, attached to the wrong name.
+  showMediaProblem('');
   try {
     await player.load(item, (stage) => log(`${item.title}: ${stage}…`));
     // The controller may have changed source while this download was running.

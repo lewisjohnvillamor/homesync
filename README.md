@@ -207,6 +207,15 @@ networks**, or no device will be able to reach it.
 `wav`, `mp3`, `m4a`, `m4b`, `mp4`, `aac`, `ogg`, `oga`, `opus`, `flac`, `webm`,
 `aif` and `aiff`, with embedded cover art from FLAC, MP3 and MP4 files.
 
+MP3, WAV, FLAC, Ogg Vorbis and Opus are **confirmed playing** — real encoded
+files, selected in the interface and played, not fixtures. AAC in an `.m4a` is
+the one to know about: it works on Chrome, Edge and Safari, and fails on an
+open-source Chromium build, which ships without the licensed decoder. That is
+the browser's limitation rather than HomeSync's, and when it happens the
+interface names the file instead of leaving the room waiting for a device that
+will never be ready. Measurements are in
+[`docs/compatibility.md`](docs/compatibility.md).
+
 `wma`, `ape`, `wv` and `dsf` are deliberately **not** listed, because no browser
 decodes them — and a track in the queue that cannot play stops the room, which is
 worse than not offering it. If a file will not decode, the interface says so and
@@ -407,6 +416,10 @@ tested; almost none of it has been heard by a human.
   there. Chromium honours `playbackRate` at 0.998 and 1.002 on a live source.
 - Join limiting: eleven wrong secrets in a row against the real binary earns a
   refusal, and a device rejoining *correctly* thirty times never does.
+- Formats: real encoded MP3, WAV, FLAC, Ogg Vorbis and Opus files fetched from
+  the internet, decoded and played through the interface. AAC failed, which
+  turned out to be the open-source Chromium build having no licensed decoder
+  rather than anything in HomeSync.
 
 ### Implemented but never run against reality
 
