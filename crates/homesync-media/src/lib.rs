@@ -44,8 +44,8 @@ enum Source {
 
 /// Where a track's embedded cover art sits inside its file.
 ///
-/// A range rather than the picture itself. The scan already holds every file's
-/// bytes long enough to hash them, so finding the art costs nothing extra —
+/// A range rather than the picture itself. The scan already has the file's
+/// opening bytes in hand to hash them, so finding the art costs nothing extra —
 /// but a folder of albums with a 400 kB cover each would be tens of megabytes
 /// of coordinator memory for something almost nobody looks at twice. The
 /// endpoint re-reads the range on demand.
@@ -123,10 +123,8 @@ impl MediaLibrary {
         }
 
         for path in paths {
-            match std::fs::read(&path) {
-                Ok(bytes) => {
-                    let digest = sha256_hex(&bytes);
-                    let artwork = embedded_artwork(&bytes);
+            match scan_file(&path, SCAN_WINDOW) {
+                Ok(scanned) => {
                     let title = path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -135,19 +133,19 @@ impl MediaLibrary {
                         item: MediaItem {
                             // The content hash is the identifier, so the same
                             // file keeps its id across restarts and renames.
-                            id: digest[..16].to_string(),
+                            id: scanned.digest[..16].to_string(),
                             title,
-                            bytes: bytes.len() as u64,
-                            sha256: digest,
+                            bytes: scanned.len,
+                            sha256: scanned.digest,
                             content_type: content_type_for(&path),
-                            duration_ns: wav_duration_ns(&bytes),
-                            has_artwork: artwork.is_some(),
+                            duration_ns: scanned.duration_ns,
+                            has_artwork: scanned.artwork.is_some(),
                             builtin: false,
                         },
                         // Held as a path, not as bytes: a media directory of
                         // albums should not be resident in memory.
                         source: Source::File(path.clone()),
-                        artwork,
+                        artwork: scanned.artwork,
                     });
                 }
                 Err(error) => {
@@ -219,6 +217,164 @@ impl MediaLibrary {
             Source::File(path) => Some(std::fs::read(path)),
         }
     }
+
+    /// Where one item's bytes live, so a caller can stream them.
+    ///
+    /// Exists because `read` materialises the whole item: a 40 MB FLAC costs
+    /// 40 MB of coordinator memory per request, and a range request costs that
+    /// plus the range. Handing back the location instead lets the HTTP layer
+    /// seek to the range it was asked for and stream it in fixed-size chunks.
+    ///
+    /// Only ids already in the catalogue resolve to a path, so this is no
+    /// wider a door than `read`.
+    pub fn source(&self, id: &str) -> Option<ItemSource> {
+        match &self.entries.get(id)?.source {
+            Source::Memory(bytes) => Some(ItemSource::Memory(Arc::clone(bytes))),
+            Source::File(path) => Some(ItemSource::File(path.clone())),
+        }
+    }
+}
+
+/// Where an item's bytes live, as handed to the byte-serving endpoint.
+#[derive(Debug, Clone)]
+pub enum ItemSource {
+    /// Synthesised at startup; already in memory, and shared rather than copied.
+    Memory(Arc<Vec<u8>>),
+    /// A file to be opened and streamed.
+    File(PathBuf),
+}
+
+/// How much of a file the scan keeps in memory to read metadata out of.
+///
+/// The scan needs two things from a file: its hash, which streams, and its
+/// tags, which do not — the parsers below index into a slice. Keeping a bounded
+/// window rather than the whole file caps the scan's memory at this size
+/// however long the track is, which is what makes an audiobook or a live set
+/// cost the same to index as a three-minute song.
+///
+/// 16 MiB because a picture can be up to `MAX_ARTWORK_BYTES` (8 MiB) and the
+/// tag carrying it sits ahead of it, so this holds any cover we would accept
+/// plus a generous amount of tag in front. Every ordinary music file is smaller
+/// than the window and so is read whole, exactly as before.
+const SCAN_WINDOW: usize = 16 * 1024 * 1024;
+
+/// What one pass over a media file yields.
+struct ScannedFile {
+    len: u64,
+    digest: String,
+    artwork: Option<ArtworkRef>,
+    duration_ns: Option<u64>,
+}
+
+/// Reads a media file once, in chunks, and returns everything the catalogue
+/// needs from it.
+///
+/// One sequential pass: every byte goes through the hasher, and the first
+/// `window` bytes are also kept so the tag parsers have something to index
+/// into. Peak memory is `window` plus one chunk, not the size of the file.
+///
+/// `window` is a parameter rather than the constant so tests can exercise the
+/// windowed path without writing a 16 MiB file.
+fn scan_file(path: &Path, window: usize) -> std::io::Result<ScannedFile> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut head: Vec<u8> = Vec::new();
+    let mut chunk = vec![0u8; 64 * 1024];
+    let mut len: u64 = 0;
+
+    loop {
+        let read = file.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&chunk[..read]);
+        len += read as u64;
+        if head.len() < window {
+            let want = (window - head.len()).min(read);
+            head.extend_from_slice(&chunk[..want]);
+        }
+    }
+
+    let digest = hex::encode(hasher.finalize());
+    let truncated = len > head.len() as u64;
+
+    // The parsers bound themselves by the slice they are given, so on a
+    // truncated window they refuse a picture that runs past its end rather
+    // than returning a range that is really there. For an MP4 that is the
+    // common case and not an edge one: `moov` is often written after the audio,
+    // which puts the cover at the far end of the file. So look for it.
+    let mut artwork = embedded_artwork(&head);
+    if artwork.is_none() && truncated && looks_like_mp4(&head) {
+        artwork = mp4_artwork_far(&mut file, len, window);
+    }
+    // A range the window could not see the end of would be a promise the
+    // artwork endpoint cannot keep.
+    if let Some(art) = &artwork {
+        if art.offset.saturating_add(art.len as u64) > len {
+            artwork = None;
+        }
+    }
+
+    let duration_ns = wav_duration_ns(&head, len);
+    Ok(ScannedFile { len, digest, artwork, duration_ns })
+}
+
+fn looks_like_mp4(bytes: &[u8]) -> bool {
+    bytes.len() > 8 && &bytes[4..8] == b"ftyp"
+}
+
+/// Finds a cover in an MP4 whose `moov` atom sits beyond the scan window.
+///
+/// Top-level MP4 atoms are a flat list of length-prefixed boxes, so `moov` can
+/// be found with a handful of seeks and no reading of the audio in between.
+/// Only that one atom is then read — it holds the tags, and is small next to
+/// the file it describes. Offsets inside it are rebased to the file so the
+/// artwork endpoint can seek straight to the picture.
+fn mp4_artwork_far(file: &mut std::fs::File, len: u64, window: usize) -> Option<ArtworkRef> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut at: u64 = 0;
+    while at + 8 <= len {
+        file.seek(SeekFrom::Start(at)).ok()?;
+        let mut header = [0u8; 8];
+        file.read_exact(&mut header).ok()?;
+        let size = u32::from_be_bytes(header[0..4].try_into().ok()?) as u64;
+        let name = &header[4..8];
+        // 0 means "runs to the end of the file"; 1 means a 64-bit size follows
+        // the header. Anything under the header itself is malformed, and
+        // walking it would not terminate.
+        let size = match size {
+            0 => len - at,
+            1 => {
+                let mut wide = [0u8; 8];
+                file.read_exact(&mut wide).ok()?;
+                u64::from_be_bytes(wide)
+            }
+            other => other,
+        };
+        if size < 8 || at.checked_add(size)? > len {
+            return None;
+        }
+        if name == b"moov" {
+            // A `moov` larger than the window is not a tag block, it is a
+            // malformed file — refuse it rather than let a size field in the
+            // file decide how much memory to allocate.
+            if size > window as u64 {
+                return None;
+            }
+            let mut buffer = vec![0u8; size as usize];
+            file.seek(SeekFrom::Start(at)).ok()?;
+            file.read_exact(&mut buffer).ok()?;
+            // The buffer begins at the `moov` header, which is exactly what
+            // `mp4_artwork` expects to walk from.
+            let found = mp4_artwork(&buffer)?;
+            return Some(ArtworkRef { offset: found.offset.checked_add(at)?, ..found });
+        }
+        at += size;
+    }
+    None
 }
 
 /// Lowercase hex SHA-256.
@@ -586,7 +742,12 @@ pub fn parse_range(header: Option<&str>, len: u64) -> Option<Result<ByteRange, (
 /// Duration of a PCM WAV file, or `None` if the bytes are not a WAV we can
 /// read. Receivers report their own decoded duration, so this is only a
 /// convenience for the controller UI.
-fn wav_duration_ns(bytes: &[u8]) -> Option<u64> {
+///
+/// `total_len` is the length of the whole file, which may be longer than
+/// `bytes` when only a window of it was read. A `data` chunk that claims more
+/// than the file holds is clamped to the file, not to the window — otherwise a
+/// long WAV would report the duration of the part that happened to be read.
+fn wav_duration_ns(bytes: &[u8], total_len: u64) -> Option<u64> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return None;
     }
@@ -603,7 +764,7 @@ fn wav_duration_ns(bytes: &[u8]) -> Option<u64> {
             if rate == 0 {
                 return None;
             }
-            let data_len = size.min(bytes.len().saturating_sub(body)) as u64;
+            let data_len = (size as u64).min(total_len.saturating_sub(body as u64));
             return Some(data_len * 1_000_000_000 / rate);
         }
         // Chunks are word aligned.
@@ -688,7 +849,7 @@ mod tests {
         let wav = click_track_wav();
         assert_eq!(&wav[0..4], b"RIFF");
         assert_eq!(&wav[8..12], b"WAVE");
-        let duration = wav_duration_ns(&wav).expect("duration");
+        let duration = wav_duration_ns(&wav, wav.len() as u64).expect("duration");
         let expected = CLICK_SECONDS * 1_000_000_000;
         assert_eq!(duration, expected, "click track should be exactly {CLICK_SECONDS}s");
     }
@@ -979,6 +1140,134 @@ mod tests {
         }
     }
 
+    fn scratch(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("homesync-scan-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("scratch dir");
+        path
+    }
+
+    /// An M4A with the tags written after the audio, as a recorder that cannot
+    /// know the audio's length in advance has to do.
+    fn m4a_with_trailing_moov(audio_bytes: usize, cover: &[u8]) -> Vec<u8> {
+        let front = m4a_with_cover(14, cover);
+        // Split the fixture back into its two top-level atoms so the moov can
+        // be moved behind a slab of audio.
+        let ftyp_len = u32::from_be_bytes(front[0..4].try_into().unwrap()) as usize;
+        let (ftyp, moov) = front.split_at(ftyp_len);
+
+        let mut out = ftyp.to_vec();
+        out.extend_from_slice(&atom(b"mdat", &vec![0x5au8; audio_bytes]));
+        out.extend_from_slice(moov);
+        out
+    }
+
+    #[test]
+    fn a_file_larger_than_the_window_still_hashes_whole() {
+        // The scan reads in chunks and keeps only a window, so the hash it
+        // reports has to be the hash of the file and not of the window.
+        let dir = scratch("hash");
+        let path = dir.join("long.flac");
+        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&path, &bytes).expect("write");
+
+        let scanned = scan_file(&path, 4096).expect("scan");
+        assert_eq!(scanned.len, bytes.len() as u64);
+        assert_eq!(scanned.digest, sha256_hex(&bytes));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cover_inside_the_window_survives_a_windowed_scan() {
+        let dir = scratch("window-cover");
+        let path = dir.join("song.mp3");
+        let file = mp3_with_cover(4, 0, b"image/png", b"", PNG);
+        // Pad well past the window so the scan takes the streaming path.
+        let mut bytes = file.clone();
+        bytes.extend_from_slice(&vec![0u8; 200_000]);
+        std::fs::write(&path, &bytes).expect("write");
+
+        let scanned = scan_file(&path, 8192).expect("scan");
+        let art = scanned.artwork.expect("a picture");
+        assert_eq!(&bytes[art.offset as usize..art.offset as usize + PNG.len()], PNG);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cover_past_the_window_is_found_by_seeking_to_moov() {
+        // An audiobook or a long recording puts `moov` at the end, far beyond
+        // anything the scan keeps in memory. Walking the top-level atoms by
+        // seek finds it without reading the audio in between.
+        let dir = scratch("far-cover");
+        let path = dir.join("book.m4b");
+        let bytes = m4a_with_trailing_moov(200_000, PNG);
+        std::fs::write(&path, &bytes).expect("write");
+
+        let scanned = scan_file(&path, 4096).expect("scan");
+        let art = scanned.artwork.expect("a picture");
+        assert_eq!(art.content_type, "image/png");
+        // The offset has to be into the file, not into the moov buffer that
+        // was parsed — getting the rebase wrong serves the wrong bytes.
+        assert_eq!(&bytes[art.offset as usize..art.offset as usize + PNG.len()], PNG);
+        assert!(art.offset > 4096, "the picture is past the window at {}", art.offset);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_windowed_scan_agrees_with_reading_the_whole_file() {
+        // The window is an optimisation, so a file small enough to fit and the
+        // same file scanned through a keyhole have to describe it identically.
+        let dir = scratch("agree");
+        let path = dir.join("song.mp3");
+        let tagged = mp3_with_cover(3, 0, b"image/jpeg", b"cover", PNG);
+        let mut bytes = tagged.clone();
+        bytes.extend_from_slice(&vec![0u8; 100_000]);
+        std::fs::write(&path, &bytes).expect("write");
+
+        let whole = scan_file(&path, SCAN_WINDOW).expect("scan");
+        let windowed = scan_file(&path, tagged.len() + 16).expect("scan");
+        assert_eq!(whole.digest, windowed.digest);
+        assert_eq!(whole.len, windowed.len);
+        assert_eq!(whole.artwork.map(|a| a.offset), windowed.artwork.map(|a| a.offset));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_long_wav_reports_its_whole_duration_from_a_window() {
+        // The `data` chunk header is at the front, but its length has to be
+        // clamped against the file rather than against the bytes that were
+        // read, or a long recording reports the window's duration.
+        let dir = scratch("wav-duration");
+        let path = dir.join("click.wav");
+        let bytes = click_track_wav();
+        std::fs::write(&path, &bytes).expect("write");
+
+        let scanned = scan_file(&path, 1024).expect("scan");
+        assert_eq!(scanned.duration_ns, Some(CLICK_SECONDS * 1_000_000_000));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_moov_bigger_than_the_window_is_refused() {
+        // The size comes out of the file, so honouring it would let a
+        // malformed file choose how much memory the scan allocates.
+        let dir = scratch("huge-moov");
+        let path = dir.join("bad.m4a");
+        let bytes = m4a_with_trailing_moov(100_000, &vec![0u8; 50_000]);
+        std::fs::write(&path, &bytes).expect("write");
+
+        let scanned = scan_file(&path, 4096).expect("scan");
+        assert!(scanned.artwork.is_none(), "a moov past the window budget should not be read");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_m4a_with_an_unknown_picture_format_is_refused() {
         // Only 13 and 14 are defined. Serving anything else would hand the
@@ -1205,7 +1494,7 @@ mod fuzz {
             for _ in 0..rng.below(200) {
                 bytes.push(rng.byte());
             }
-            let _ = wav_duration_ns(&bytes);
+            let _ = wav_duration_ns(&bytes, bytes.len() as u64);
         }
     }
 

@@ -226,37 +226,51 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
     let Some(item) = app.media_item(&id) else {
         return (StatusCode::NOT_FOUND, "no such media").into_response();
     };
-    let bytes = match app.media_read(&id) {
-        Some(Ok(bytes)) => bytes,
-        Some(Err(error)) => {
+    let Some(source) = app.media_source(&id) else {
+        return (StatusCode::NOT_FOUND, "no such media").into_response();
+    };
+
+    // Measured now rather than taken from the catalogue: a file replaced since
+    // the scan would otherwise have ranges computed against a length it no
+    // longer has.
+    let total = match source_len(&source).await {
+        Ok(total) => total,
+        Err(error) => {
             tracing::error!(%id, %error, "failed to read media");
             return (StatusCode::INTERNAL_SERVER_ERROR, "failed to read media").into_response();
         }
-        None => return (StatusCode::NOT_FOUND, "no such media").into_response(),
     };
 
-    let total = bytes.len() as u64;
     let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
 
-    let mut response = match homesync_media::parse_range(range_header, total) {
+    let (status, start, len, content_range) = match homesync_media::parse_range(range_header, total) {
         Some(Err(())) => {
             let mut response = (StatusCode::RANGE_NOT_SATISFIABLE, "range not satisfiable").into_response();
             insert(&mut response, header::CONTENT_RANGE, format!("bytes */{total}"));
             return response;
         }
-        Some(Ok(range)) => {
-            let slice = bytes[range.start as usize..=range.end as usize].to_vec();
-            let mut response = (StatusCode::PARTIAL_CONTENT, Body::from(slice)).into_response();
-            insert(&mut response, header::CONTENT_RANGE, format!("bytes {}-{}/{}", range.start, range.end, total));
-            insert(&mut response, header::CONTENT_LENGTH, range.len().to_string());
-            response
-        }
-        None => {
-            let mut response = Body::from(bytes).into_response();
-            insert(&mut response, header::CONTENT_LENGTH, total.to_string());
-            response
+        Some(Ok(range)) => (
+            StatusCode::PARTIAL_CONTENT,
+            range.start,
+            range.len(),
+            Some(format!("bytes {}-{}/{}", range.start, range.end, total)),
+        ),
+        None => (StatusCode::OK, 0, total, None),
+    };
+
+    let body = match media_body(source, start, len).await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::error!(%id, %error, "failed to read media");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "failed to read media").into_response();
         }
     };
+
+    let mut response = (status, body).into_response();
+    insert(&mut response, header::CONTENT_LENGTH, len.to_string());
+    if let Some(content_range) = content_range {
+        insert(&mut response, header::CONTENT_RANGE, content_range);
+    }
 
     insert(&mut response, header::CONTENT_TYPE, item.content_type.clone());
     insert(&mut response, header::ACCEPT_RANGES, "bytes".to_string());
@@ -265,6 +279,47 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
     insert(&mut response, header::CACHE_CONTROL, "public, max-age=31536000, immutable".to_string());
     response
 }
+
+/// Current length of an item's bytes.
+async fn source_len(source: &homesync_media::ItemSource) -> std::io::Result<u64> {
+    match source {
+        homesync_media::ItemSource::Memory(bytes) => Ok(bytes.len() as u64),
+        homesync_media::ItemSource::File(path) => Ok(tokio::fs::metadata(path).await?.len()),
+    }
+}
+
+/// A body carrying `len` bytes of `source` starting at `start`.
+///
+/// A file is seeked to and streamed in fixed-size chunks rather than read into
+/// memory. That is what keeps a 40 MB track from costing 40 MB of coordinator
+/// memory per listener — the endpoint holds one chunk at a time, whatever the
+/// size of the file or the number of devices pulling it at once.
+async fn media_body(source: homesync_media::ItemSource, start: u64, len: u64) -> std::io::Result<Body> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    match source {
+        // Already in memory and shared, so slicing it is the whole job. Only
+        // the synthesised click track takes this path.
+        homesync_media::ItemSource::Memory(bytes) => {
+            let from = (start as usize).min(bytes.len());
+            let to = from.saturating_add(len as usize).min(bytes.len());
+            Ok(Body::from(bytes[from..to].to_vec()))
+        }
+        homesync_media::ItemSource::File(path) => {
+            let mut file = tokio::fs::File::open(&path).await?;
+            if start > 0 {
+                file.seek(std::io::SeekFrom::Start(start)).await?;
+            }
+            // `take` bounds the stream to the range even if the file grew
+            // between the length measurement and this read.
+            let stream = tokio_util::io::ReaderStream::with_capacity(file.take(len), MEDIA_CHUNK_BYTES);
+            Ok(Body::from_stream(stream))
+        }
+    }
+}
+
+/// How much of a track is in memory at once while it is being served.
+const MEDIA_CHUNK_BYTES: usize = 64 * 1024;
 
 fn insert(response: &mut Response, name: header::HeaderName, value: String) {
     if let Ok(value) = HeaderValue::from_str(&value) {

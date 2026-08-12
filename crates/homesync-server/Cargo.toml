@@ -19,6 +19,9 @@ homesync-dsp = { path = "../homesync-dsp" }
 
 axum = { version = "0.8", features = ["ws", "macros"] }
 tokio.workspace = true
+# Only for `ReaderStream`, which turns a seeked file into a chunked response
+# body. Already in the tree under reqwest, so this adds a feature, not a crate.
+tokio-util = { version = "0.7", features = ["io"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
