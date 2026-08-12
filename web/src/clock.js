@@ -10,10 +10,10 @@
  */
 
 /** Samples retained in the rolling window. */
-export const WINDOW = 60;
+const WINDOW = 60;
 
 /** Accepted samples required before the estimate may be called stable. */
-export const MIN_SAMPLES_FOR_STABLE = 8;
+const MIN_SAMPLES_FOR_STABLE = 8;
 
 /**
  * Offset uncertainty at or below which the estimate is stable, in nanoseconds.
@@ -23,7 +23,7 @@ export const MIN_SAMPLES_FOR_STABLE = 8;
 export const STABLE_UNCERTAINTY_NS = 5e6;
 
 /** An offset jump larger than this may be a discontinuity rather than jitter. */
-export const DISCONTINUITY_NS = 100e6;
+const DISCONTINUITY_NS = 100e6;
 
 /**
  * Consecutive samples that must agree on a jump before it is believed. One

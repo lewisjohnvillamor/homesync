@@ -307,6 +307,7 @@
 
             <hr />
 
+            <div id="calibration-section">
             <h3>Acoustic calibration</h3>
             <p class="note">
               Every other number here is measured in software. This one uses a
@@ -336,6 +337,15 @@
                 <tbody></tbody>
               </table>
             </div>
+
+            </div>
+            <p id="calibration-unavailable" class="note hidden">
+              <strong>Acoustic calibration is unavailable here.</strong> Browsers
+              only grant microphone access on a secure origin, so it needs the
+              coordinator started with <code class="code">--tls</code> and this page
+              opened over <code class="code">https</code>. Until then, timing
+              compensation by ear does the same job less precisely.
+            </p>
 
             <hr />
 
