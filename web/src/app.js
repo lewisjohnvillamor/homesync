@@ -4,7 +4,16 @@
  */
 
 import { Connection } from './net.js';
-import { Player, LatencyMode, positionAtServerNs, EQ_BANDS, EQ_LIMIT_DB, browserRefusesType, clampDb } from './player.js';
+import {
+  Player,
+  LatencyMode,
+  positionAtServerNs,
+  EQ_BANDS,
+  EQ_LIMIT_DB,
+  browserRefusesType,
+  clampDb,
+  deviceLooksConstrained,
+} from './player.js';
 import { usingFallbackDigest } from './sha256.js';
 import { LiveReceiver } from './live.js';
 import { YoutubePlayer, parseVideoId } from './youtube.js';
@@ -118,6 +127,17 @@ async function join() {
     } catch (error) {
       log(`Could not start audio: ${error.message}`);
       return;
+    }
+    const saved = localStorage.getItem('homesync.lightTouch');
+    // Unset means "trust the detection"; an explicit choice always wins, because
+    // somebody who has ticked this box knows their device better than a user
+    // agent string does.
+    const lightTouch = saved === null ? deviceLooksConstrained() : saved === '1';
+    $('light-touch').checked = lightTouch;
+    player.preloadEnabled = !lightTouch;
+    player.rateCorrectionEnabled = !lightTouch;
+    if (lightTouch && saved === null) {
+      log('This device looks memory- or CPU-limited, so preloading and rate correction start off.');
     }
     player.setManualOffsetMs(Number($('offset').value));
     player.setEqGainsDb(savedEq());
@@ -533,6 +553,7 @@ function wireControls() {
 
   $('invite-toggle').addEventListener('click', toggleInvite);
   $('invite-copy').addEventListener('click', copyInvite);
+  $('light-touch').addEventListener('change', (event) => setLightTouch(event.target.checked));
   $('room-new').addEventListener('click', createRoom);
   $('room-created-copy').addEventListener('click', copyCreatedRoom);
 
@@ -724,6 +745,12 @@ async function preloadNext() {
   const player = state.player;
   if (!snapshot || !player?.ctx || state.transport?.mode !== 'controlled_audio') return;
 
+  // Preloading holds a second decoded track in memory. Decoded audio is
+  // uncompressed float PCM whatever it arrived as — roughly 23 MB per minute —
+  // so two five-minute tracks is a quarter of a gigabyte, which a television
+  // does not have. There the gap between tracks is the lesser cost.
+  if (!player.preloadEnabled) return;
+
   const nextId = snapshot.queue?.[(snapshot.queue_index ?? 0) + 1];
   if (!nextId || player.nextMediaId === nextId || state.preloading === nextId) return;
   const item = snapshot.media.items.find((m) => m.id === nextId);
@@ -746,6 +773,24 @@ async function preloadNext() {
   } finally {
     if (state.preloading === nextId) state.preloading = null;
   }
+}
+
+/**
+ * Turns the two resource-hungry comforts off, or back on.
+ *
+ * Saved per device rather than per room: it describes the hardware, and the
+ * hardware does not change when somebody joins a different room.
+ */
+function setLightTouch(on) {
+  localStorage.setItem('homesync.lightTouch', on ? '1' : '0');
+  const player = state.player;
+  if (!player) return;
+  player.preloadEnabled = !on;
+  player.rateCorrectionEnabled = !on;
+  // Applied immediately rather than at the next track: somebody ticking this
+  // box is watching a device struggle now.
+  if (on) player.dropPreloaded();
+  log(on ? 'Going easy on this device: no preloading, no rate correction.' : 'Preloading and rate correction are on.');
 }
 
 /** The room secret, which is what authorises reading and editing the library. */

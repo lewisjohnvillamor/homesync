@@ -8,6 +8,34 @@ Entries say what changed and, where it matters, what has and has not been
 verified. A feature that exists but has never run against real hardware is
 listed as such rather than as done — see [Status](README.md#status).
 
+## [Unreleased]
+
+### Fixed
+
+- **Every media load held two copies of the compressed file.** The decoder was
+  handed `bytes.slice(0)` to keep the original "for any retry" — but nothing
+  retries, so the copy only ever doubled the compressed footprint. Measured on a
+  12 MB FLAC: the original was still resident after decoding the copy. FLAC felt
+  it worst because its compressed size is five to ten times an MP3's, which is
+  why a television ran out of memory on FLAC and nowhere else.
+
+### Changed
+
+- **A device that cannot afford them no longer preloads or resamples.**
+  Preloading the next track holds a second decoded buffer — decoded audio is
+  uncompressed float PCM whatever it arrived as, about 23 MB per minute — and
+  correcting drift by resampling makes the audio thread interpolate
+  continuously. Both were added without asking whether the device could spare
+  the memory or the processor. A television can spare neither.
+
+  Televisions and devices reporting 2 GB or less now start with both off. An
+  unknown device is assumed capable, because `deviceMemory` is Chromium-only and
+  guessing "weak" would take features from every Mac and iPhone.
+
+- **"Go easy on this device"**, a per-device setting, so the guess can be
+  overridden either way. Ticking it frees the preloaded track immediately rather
+  than at the next track change.
+
 ## [0.1.0] — 2026-08-12
 
 First tagged release. Every milestone in the technical specification is
