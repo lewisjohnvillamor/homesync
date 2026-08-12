@@ -3,6 +3,7 @@ members = [
     "crates/homesync-protocol",
     "crates/homesync-clock",
     "crates/homesync-dsp",
+    "crates/homesync-media",
     "crates/homesync-audio",
     "crates/homesync-server",
 ]

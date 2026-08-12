@@ -4,10 +4,10 @@ use crate::calibration::CalibrationRegistry;
 use crate::clock::ServerClock;
 use crate::config::Config;
 use crate::join_limit::JoinLimiter;
-use crate::media::MediaLibrary;
 use crate::profiles::ProfileStore;
 use crate::room::Room;
 use crate::stream::StreamHandle;
+use homesync_media::MediaLibrary;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, RwLock};
@@ -143,8 +143,8 @@ impl App {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "download".to_string());
-        let name = crate::media::safe_download_name(&name);
-        if !crate::media::has_audio_extension(std::path::Path::new(&name)) {
+        let name = homesync_media::safe_download_name(&name);
+        if !homesync_media::has_audio_extension(std::path::Path::new(&name)) {
             return Err("that URL does not end in an audio file this build can decode".into());
         }
 

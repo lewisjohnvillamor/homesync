@@ -13,6 +13,16 @@ homesync-cert-names.json
 homesync-devices.json
 *.json.tmp
 
+# Fuzzing artefacts. The corpus is machine-generated and grows without bound;
+# the targets and the harness are the parts worth keeping.
+# `cargo fuzz` nests its working directories under fuzz/fuzz, so both depths
+# are covered. The corpus in particular must stay out: it accumulates whatever
+# was fed to it, which here included third-party sample audio.
+/fuzz/target
+/fuzz/Cargo.lock
+**/corpus/
+**/artifacts/
+
 # Tracks fetched from a URL. The default download folder is the working
 # directory, so without this the first fetch puts someone else's music in
 # `git status` and one careless `git add .` commits it.

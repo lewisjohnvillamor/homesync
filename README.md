@@ -479,7 +479,7 @@ belong — including the failures.
 Formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **244 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+- **253 Rust unit tests.** Clock estimation against synthetic latency, jitter,
   drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and skew; the room state machine;
@@ -496,7 +496,7 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   holding its timeline across 400 frames, diagnostics access control, and the
   join limiter — including that a device rejoining *correctly* thirty times is
   never locked out, which is the case the design is shaped around.
-- **76 browser tests**, including the drift-correction control law run as a
+- **85 browser tests**, including the drift-correction control law run as a
   closed loop against a simulated drifting clock — the trim changes the device's
   speed, the speed changes the drift, the next tick sees it. A control law that
   looks sensible one call at a time and oscillates forever in a loop passes the
@@ -508,10 +508,38 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   receivers through join, warm-up, verification, decode, the readiness barrier,
   play/pause/resume, compensation, a live PCM stream and a YouTube rendezvous.
 
-Not tested: no fuzzing of the media metadata parsers, which are the code most
-exposed to untrusted bytes; no property-based tests; no load or soak run; and no
-browser other than Chromium, which matters because Safari is a target and its
-Web Audio behaviour differs.
+### Fuzzing
+
+The metadata parsers walk ID3 frames, MP4 atoms and FLAC blocks using lengths
+read out of the file itself — the only code here that trusts a stranger's
+arithmetic. Two harnesses cover it:
+
+- A **deterministic mutation harness** in the normal suite, so it runs on stable
+  Rust with no extra toolchain on every `cargo test`. It truncates valid files at
+  every length, flips bytes in them, and generates random bodies behind real
+  magic numbers. Seeded from a constant, so a failure can be reproduced rather
+  than merely reported.
+- **Coverage-guided targets** under `fuzz/`, for going deeper:
+
+  ```sh
+  cargo +nightly fuzz run artwork
+  ```
+
+  Three targets: `artwork`, `range_header` and `download_name`. Kept out of the
+  workspace so nightly and libFuzzer never become a requirement for an ordinary
+  build.
+
+Both assert the invariant that matters, which is not merely "does not crash": a
+returned picture range must lie inside the file, be non-empty, and describe an
+image. A parser that hands back an offset past the end has misread the
+structure even if nothing panics.
+
+**81 million executions across the three targets have found nothing.** That is
+evidence, not proof — a clean fuzzing run means the bugs are not shallow.
+
+Still not tested: no property-based tests, no load or soak run, and no browser
+other than Chromium, which matters because Safari is a target and its Web Audio
+behaviour differs.
 
 ## Security
 
@@ -546,6 +574,11 @@ system, you can [buy me a coffee](https://www.paypal.com/paypalme/lewisjohnvilla
 <a href="https://www.paypal.com/paypalme/lewisjohnvillamor/199">
   <img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-PayPal-00457C?logo=paypal&logoColor=white" alt="Buy me a coffee on PayPal">
 </a>
+
+## Changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) — including, for each release, what has *not*
+been verified.
 
 ## Licence
 

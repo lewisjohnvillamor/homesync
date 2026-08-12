@@ -1337,3 +1337,14 @@ td {
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
 }
+
+/* A limitation of this browser rather than a failure — softer than an alert,
+   louder than a note, because it changes what the person should expect. */
+.note-warn {
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--text);
+  font-size: var(--step--1);
+}

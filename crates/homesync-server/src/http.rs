@@ -1,7 +1,6 @@
 //! HTTP surface: the embedded web app, media delivery and read-only APIs.
 
 use crate::calibration::{self, RecordingUpload};
-use crate::media;
 use crate::state::App;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
@@ -239,7 +238,7 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
     let total = bytes.len() as u64;
     let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
 
-    let mut response = match media::parse_range(range_header, total) {
+    let mut response = match homesync_media::parse_range(range_header, total) {
         Some(Err(())) => {
             let mut response = (StatusCode::RANGE_NOT_SATISFIABLE, "range not satisfiable").into_response();
             insert(&mut response, header::CONTENT_RANGE, format!("bytes */{total}"));
