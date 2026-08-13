@@ -81,9 +81,11 @@ impl App {
         self.media.read().expect("media lock").contains(id)
     }
 
-    /// Reads one item's bytes. `None` when the id is not in the catalogue.
-    pub fn media_read(&self, id: &str) -> Option<std::io::Result<Vec<u8>>> {
-        self.media.read().expect("media lock").read(id)
+    /// Where one item's bytes live. `None` when the id is not in the
+    /// catalogue. A location rather than the bytes, so the byte endpoint can
+    /// stream a range instead of holding the whole track in memory.
+    pub fn media_source(&self, id: &str) -> Option<homesync_media::ItemSource> {
+        self.media.read().expect("media lock").source(id)
     }
 
     /// Reads one item's embedded cover picture, if it has one.

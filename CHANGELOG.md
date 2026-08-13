@@ -12,6 +12,18 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Fixed
 
+- **The coordinator read a whole track into memory to serve any part of it.**
+  `GET /api/v1/media/{id}` read the entire file and then, for a range request,
+  copied the range out of it — so a 1 MB range of a 40 MB FLAC cost 41 MB, and
+  range support cost more memory than not having it. Nothing was shared between
+  requests either, so five devices pulling the same track cost five copies. The
+  endpoint now seeks to the range and streams it in 64 kB chunks: peak memory is
+  a chunk, whatever the size of the track or the number of listeners. Measured
+  on a 100 MB file with four devices fetching it at once, peak resident memory
+  went from 429 MB to 43 MB, and serving no longer raises the high-water mark
+  the startup scan set. This is the server-side half of the memory problem whose
+  client-side half was the duplicated decode buffer below.
+
 - **Every media load held two copies of the compressed file.** The decoder was
   handed `bytes.slice(0)` to keep the original "for any retry" — but nothing
   retries, so the copy only ever doubled the compressed footprint. Measured on a
@@ -20,6 +32,17 @@ listed as such rather than as done — see [Status](README.md#status).
   why a television ran out of memory on FLAC and nowhere else.
 
 ### Changed
+
+- **The startup scan no longer buffers whole files to hash them.** Each file was
+  read entirely into memory so it could be hashed and its tags read, which made
+  indexing a long recording or an audiobook cost as much memory as the file. The
+  scan now streams the hash in chunks and keeps a bounded 16 MiB window for the
+  tag parsers, so indexing costs the same whatever the length of the track. An
+  MP4 that writes its tags after its audio — the usual shape for a long
+  recording — has its `moov` atom located by seeking the top-level boxes rather
+  than by reading the audio in between, so covers past the window are still
+  found. Indexing that same 100 MB file went from 120 MB of peak memory to
+  43 MB.
 
 - **The equaliser is out of the signal path until a slider moves.** Five biquad
   filters sat in front of the output permanently, filtering every sample on
