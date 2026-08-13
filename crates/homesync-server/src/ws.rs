@@ -271,10 +271,13 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             if let Some(role) = update.role {
                 client.info.role = role;
             }
+            let mut compensation_changed = false;
             if let Some(offset) = update.manual_offset_ms {
                 // Compensation beyond a second is never a real device latency;
                 // clamping keeps a slipped slider from making audio vanish.
-                client.info.manual_offset_ms = offset.clamp(-1000.0, 1000.0);
+                let clamped = offset.clamp(-1000.0, 1000.0);
+                compensation_changed = clamped != client.info.manual_offset_ms;
+                client.info.manual_offset_ms = clamped;
             }
             if let Some(volume) = update.volume {
                 client.info.volume = volume.clamp(0.0, 1.0);
@@ -286,6 +289,11 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.microphone_available = available;
             }
 
+            // A controller has no audio output, so it has nothing to re-converge
+            // — and a rendezvous sent to one would start the video playing on a
+            // device that was only meant to be driving the room.
+            let renders_audio = client.info.role.renders_audio();
+
             let remembered = client.info.clone();
             app.profiles.update(&session.device_id, |profile| {
                 profile.name = remembered.name.clone();
@@ -294,6 +302,20 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             });
 
             let now = app.now_ns();
+            // A receiver playing its own audio applies new compensation itself,
+            // by rescheduling. A YouTube receiver cannot: its start instant was
+            // decided by the last rendezvous, and the compensation only enters
+            // the arithmetic when one is issued. Without this, moving the slider
+            // during a video changed the number on screen and the number the
+            // coordinator reports, and nothing a listener could hear, until the
+            // next play, seek or drift correction happened to arrive.
+            //
+            // Only this device is re-converged, for the reason `send_youtube_
+            // rendezvous` documents: moving the room timeline to chase one
+            // device restarts every other device.
+            if compensation_changed && renders_audio {
+                send_youtube_rendezvous(app, room, now, Some(&session.client_id));
+            }
             let snapshot = room.snapshot(app.media_manifest(), app.now_ns());
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;

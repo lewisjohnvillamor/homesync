@@ -675,8 +675,15 @@ export class Player {
     }
   }
 
-  /** Sets manual compensation and reschedules if audio is already running. */
+  /**
+   * Sets manual compensation and reschedules if audio is already running.
+   *
+   * Rescheduling means stopping and restarting the source, so a value that has
+   * not moved must not do it: a reconnect, a restored profile and the slider
+   * settling on where it already was all arrive here.
+   */
   setManualOffsetMs(ms, transport) {
+    if (this.manualOffsetMs === ms) return;
     this.manualOffsetMs = ms;
     if (this.playing && transport) {
       this.resyncCount += 1;

@@ -12,6 +12,26 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Fixed
 
+- **Timing compensation did nothing audible during a YouTube video.** A device
+  playing its own audio applies a new compensation itself, by rescheduling the
+  buffer it holds. A YouTube receiver cannot: its start instant was fixed by the
+  last rendezvous, and the compensation only enters the arithmetic when a new
+  one is issued — which a `client_update` did not do. So moving the slider
+  changed the number on screen and the number the coordinator reported, and
+  nothing a listener could hear, until the next play, seek or drift correction
+  happened to arrive. Exactly the case the panel exists for — a television that
+  emits sound late — was the case it could not fix. Changing compensation now
+  re-converges that one device, leaving the room's timeline and every other
+  device alone.
+
+- **Dragging the compensation slider restarted the audio at every step.** The
+  value was applied on each `input` event, and applying it stops and restarts
+  this device's source, so a drag across the range was a burst of restarts. The
+  number now follows the slider immediately and the change is applied once it
+  settles, or at once when the slider is released or a value is typed. Setting a
+  compensation the device already has no longer reschedules at all, which also
+  stops a reconnect or a restored profile interrupting playback.
+
 - **The coordinator read a whole track into memory to serve any part of it.**
   `GET /api/v1/media/{id}` read the entire file and then, for a range request,
   copied the range out of it — so a 1 MB range of a 40 MB FLAC cost 41 MB, and
