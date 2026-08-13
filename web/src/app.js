@@ -24,6 +24,15 @@ const $ = (id) => document.getElementById(id);
 /** UI refresh rate. Fast enough to look live, slow enough to stay cheap. */
 const UI_INTERVAL_MS = 250;
 
+/**
+ * How long the compensation slider must be still before the value is applied.
+ *
+ * Short enough that nudging the slider and listening still feels immediate —
+ * which matters, because the only way to set this is by ear — and long enough
+ * that a drag across the whole range applies once rather than at every step.
+ */
+const OFFSET_COMMIT_MS = 150;
+
 const state = {
   /** @type {Connection|null} */ connection: null,
   /** @type {Player|null} */ player: null,
@@ -512,17 +521,34 @@ function wireControls() {
   seek.addEventListener('pointerup', commitSeek);
   seek.addEventListener('change', commitSeek);
 
-  const applyOffset = (value) => {
+  // Applying compensation restarts this device's audio and asks the
+  // coordinator to re-converge it, so a drag across the slider must not do it
+  // once per pixel. The number on screen follows the slider immediately; the
+  // change is applied once the slider has been still for a moment, and at once
+  // when it is released or typed into.
+  let offsetPending = null;
+  const applyOffset = (value, { immediate = false } = {}) => {
     const ms = clampOffset(Number(value));
     $('offset').value = String(ms);
     $('offset-number').value = String(ms);
     localStorage.setItem('homesync.offsetMs', String(ms));
-    state.player?.setManualOffsetMs(ms, state.transport);
-    state.live?.setCompensationMs(totalCompensationMs());
-    state.connection?.send('client_update', { manual_offset_ms: ms });
+
+    if (offsetPending !== null) {
+      clearTimeout(offsetPending);
+      offsetPending = null;
+    }
+    const commit = () => {
+      offsetPending = null;
+      state.player?.setManualOffsetMs(ms, state.transport);
+      state.live?.setCompensationMs(totalCompensationMs());
+      state.connection?.send('client_update', { manual_offset_ms: ms });
+    };
+    if (immediate) commit();
+    else offsetPending = setTimeout(commit, OFFSET_COMMIT_MS);
   };
   $('offset').addEventListener('input', (e) => applyOffset(e.target.value));
-  $('offset-number').addEventListener('change', (e) => applyOffset(e.target.value));
+  $('offset').addEventListener('change', (e) => applyOffset(e.target.value, { immediate: true }));
+  $('offset-number').addEventListener('change', (e) => applyOffset(e.target.value, { immediate: true }));
 
   $('volume').addEventListener('input', (event) => {
     const volume = Number(event.target.value) / 100;

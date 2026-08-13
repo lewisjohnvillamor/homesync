@@ -152,6 +152,25 @@ test('positive manual compensation starts the device earlier', () => {
   assert.ok(Math.abs(ctx.sources[0].started.when - 11.875) < 1e-6, 'should start 25 ms earlier');
 });
 
+test('setting the same compensation twice does not restart the audio', () => {
+  // Rescheduling stops and restarts the source, which is audible. A reconnect,
+  // a restored profile and a slider settling back where it started all send
+  // the value the device already has.
+  const ctx = new FakeContext({ currentTime: 10, outputTimestamp: { contextTime: 9.9, performanceTime: NOW_MS } });
+  const player = makePlayer(ctx);
+  const transport = playing(serverNsIn(2));
+  player.applyTransport(transport);
+  assert.equal(ctx.sources.length, 1);
+
+  player.setManualOffsetMs(20, transport);
+  assert.equal(ctx.sources.length, 2, 'a new value should reschedule');
+
+  player.setManualOffsetMs(20, transport);
+  player.setManualOffsetMs(20, transport);
+  assert.equal(ctx.sources.length, 2, 'an unchanged value should not reschedule');
+  assert.equal(player.manualOffsetMs, 20);
+});
+
 test('a late join skips into the media instead of trailing the room', () => {
   const ctx = new FakeContext({ currentTime: 10, outputTimestamp: { contextTime: 9.9, performanceTime: NOW_MS } });
   const player = makePlayer(ctx);
