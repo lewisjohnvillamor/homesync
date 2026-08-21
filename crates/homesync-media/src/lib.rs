@@ -255,7 +255,12 @@ fn scan_file(path: &Path, window: usize) -> std::io::Result<ScannedFile> {
 
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    let mut head: Vec<u8> = Vec::new();
+    // Sized up front rather than grown. A `Vec` that reaches the window by
+    // doubling holds the old buffer and the new one at the moment it reallocs,
+    // so the scan's true peak was half again what the window claims. The file's
+    // own length caps it, so a short file does not reserve for a long one.
+    let reserve = file.metadata()?.len().min(window as u64) as usize;
+    let mut head: Vec<u8> = Vec::with_capacity(reserve);
     let mut chunk = vec![0u8; 64 * 1024];
     let mut len: u64 = 0;
 
@@ -302,6 +307,16 @@ fn looks_like_mp4(bytes: &[u8]) -> bool {
     bytes.len() > 8 && &bytes[4..8] == b"ftyp"
 }
 
+/// Top-level atoms the walk will visit before giving up.
+///
+/// A real MP4 has a handful — `ftyp`, `moov`, `mdat`, perhaps `free`. The cap
+/// exists because the walk costs a seek and a read per atom, and an atom may
+/// declare itself the minimum eight bytes long: a file of nothing but those
+/// asks for one syscall pair per eight bytes of it, turning a 300 MB download
+/// into tens of millions of them. Bounding the walk costs nothing a real file
+/// will ever notice.
+const MAX_TOP_LEVEL_ATOMS: usize = 4096;
+
 /// Finds a cover in an MP4 whose `moov` atom sits beyond the scan window.
 ///
 /// Top-level MP4 atoms are a flat list of length-prefixed boxes, so `moov` can
@@ -313,7 +328,10 @@ fn mp4_artwork_far(file: &mut std::fs::File, len: u64, window: usize) -> Option<
     use std::io::{Read, Seek, SeekFrom};
 
     let mut at: u64 = 0;
-    while at + 8 <= len {
+    for _ in 0..MAX_TOP_LEVEL_ATOMS {
+        if at + 8 > len {
+            return None;
+        }
         file.seek(SeekFrom::Start(at)).ok()?;
         let mut header = [0u8; 8];
         file.read_exact(&mut header).ok()?;
@@ -1228,6 +1246,53 @@ mod tests {
 
         let scanned = scan_file(&path, 1024).expect("scan");
         assert_eq!(scanned.duration_ns, Some(CLICK_SECONDS * 1_000_000_000));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_of_minimum_size_atoms_does_not_walk_forever() {
+        // The walk costs a seek and a read per atom, and an atom may declare
+        // itself the minimum eight bytes long. A file of nothing but those is a
+        // request for one syscall pair per eight bytes of it, which is a way to
+        // make a rescan take minutes over a file that plays nothing.
+        let dir = scratch("atom-flood");
+        let path = dir.join("flood.m4a");
+        let mut bytes = atom(b"ftyp", b"M4A ");
+        while bytes.len() < 8 * (MAX_TOP_LEVEL_ATOMS + 5_000) {
+            bytes.extend_from_slice(&atom(b"free", b""));
+        }
+        std::fs::write(&path, &bytes).expect("write");
+
+        let started = std::time::Instant::now();
+        let scanned = scan_file(&path, 4096).expect("scan");
+        assert!(scanned.artwork.is_none(), "there is no cover in this file to find");
+        // Generous: the point is that the walk stops, not that it is quick.
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "the walk should give up, not grind");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_cover_within_the_atom_budget_is_still_found() {
+        // The cap must not be so tight that an ordinary file trips it. This one
+        // carries a realistic handful of leading atoms before its `moov`.
+        let dir = scratch("atom-budget");
+        let path = dir.join("ok.m4b");
+        let front = m4a_with_cover(14, PNG);
+        let ftyp_len = u32::from_be_bytes(front[0..4].try_into().unwrap()) as usize;
+        let (ftyp, moov) = front.split_at(ftyp_len);
+        let mut bytes = ftyp.to_vec();
+        for _ in 0..8 {
+            bytes.extend_from_slice(&atom(b"free", &[0u8; 64]));
+        }
+        bytes.extend_from_slice(&atom(b"mdat", &vec![0x5au8; 100_000]));
+        bytes.extend_from_slice(moov);
+        std::fs::write(&path, &bytes).expect("write");
+
+        let scanned = scan_file(&path, 4096).expect("scan");
+        let art = scanned.artwork.expect("a picture");
+        assert_eq!(&bytes[art.offset as usize..art.offset as usize + PNG.len()], PNG);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
