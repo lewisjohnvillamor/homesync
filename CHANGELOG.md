@@ -10,6 +10,22 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ## [Unreleased]
 
+### Security
+
+- **A crafted MP4 could stall a rescan.** The walk that finds a `moov` atom past
+  the scan window costs a seek and a read per top-level atom, and an atom may
+  declare itself the minimum eight bytes long — so a file of nothing but those
+  asks for one syscall pair per eight bytes of it. Measured: a 30 MB file of
+  minimum-size atoms took 2.0 s to index against 0.5 s for an ordinary file of
+  the same size, and the fetch limit allows ten times that. It is reachable by
+  anyone who can drop a file in a media folder or call the library fetch. The
+  walk now gives up after 4096 top-level atoms, which no real file approaches;
+  the same crafted file now costs exactly what its size says it should.
+
+- **`h2` updated to 0.4.18** for RUSTSEC-2026-0258, unbounded empty DATA frames.
+  It arrives under `reqwest` and `axum`, so it sits on both the outbound fetch
+  path and the coordinator's own listener.
+
 ### Fixed
 
 - **Timing compensation did nothing audible during a YouTube video.** A device
@@ -58,7 +74,10 @@ listed as such rather than as done — see [Status](README.md#status).
   read entirely into memory so it could be hashed and its tags read, which made
   indexing a long recording or an audiobook cost as much memory as the file. The
   scan now streams the hash in chunks and keeps a bounded 16 MiB window for the
-  tag parsers, so indexing costs the same whatever the length of the track. An
+  tag parsers, sized up front rather than grown — a window reached by doubling
+  holds the old buffer and the new one at the moment it reallocates, which cost
+  a further 8 MB of peak that the bound did not describe. Indexing now costs the
+  same whatever the length of the track. An
   MP4 that writes its tags after its audio — the usual shape for a long
   recording — has its `moov` atom located by seeking the top-level boxes rather
   than by reading the audio in between, so covers past the window are still
