@@ -236,7 +236,7 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
     let total = match source_len(&source).await {
         Ok(total) => total,
         Err(error) => {
-            tracing::error!(%id, %error, "failed to read media");
+            tracing::error!(%id, %error, "failed to measure media");
             return (StatusCode::INTERNAL_SERVER_ERROR, "failed to read media").into_response();
         }
     };
@@ -280,6 +280,9 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
     response
 }
 
+/// How much of a track is in memory at once while it is being served.
+const MEDIA_CHUNK_BYTES: usize = 64 * 1024;
+
 /// Current length of an item's bytes.
 async fn source_len(source: &homesync_media::ItemSource) -> std::io::Result<u64> {
     match source {
@@ -317,9 +320,6 @@ async fn media_body(source: homesync_media::ItemSource, start: u64, len: u64) ->
         }
     }
 }
-
-/// How much of a track is in memory at once while it is being served.
-const MEDIA_CHUNK_BYTES: usize = 64 * 1024;
 
 fn insert(response: &mut Response, name: header::HeaderName, value: String) {
     if let Ok(value) = HeaderValue::from_str(&value) {

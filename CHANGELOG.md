@@ -26,11 +26,12 @@ listed as such rather than as done — see [Status](README.md#status).
 
 - **Dragging the compensation slider restarted the audio at every step.** The
   value was applied on each `input` event, and applying it stops and restarts
-  this device's source, so a drag across the range was a burst of restarts. The
-  number now follows the slider immediately and the change is applied once it
-  settles, or at once when the slider is released or a value is typed. Setting a
-  compensation the device already has no longer reschedules at all, which also
-  stops a reconnect or a restored profile interrupting playback.
+  this device's source, so a drag across the range was a burst of restarts — and
+  so was holding an arrow key on it. The number now follows the slider
+  immediately and the value is applied once it settles; typing into the box
+  beside it still applies at once. Setting a compensation the device already has
+  no longer reschedules at all, which also stops a reconnect or a restored
+  profile interrupting playback.
 
 - **The coordinator read a whole track into memory to serve any part of it.**
   `GET /api/v1/media/{id}` read the entire file and then, for a range request,

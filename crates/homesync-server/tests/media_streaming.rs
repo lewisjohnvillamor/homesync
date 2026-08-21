@@ -30,7 +30,7 @@ impl Drop for Coordinator {
 /// Writes a WAV of `TRACK_BYTES` with a non-repeating body, so a chunk served
 /// twice or in the wrong order shows up as a mismatch rather than matching by
 /// luck.
-fn media_dir(name: &str) -> (PathBuf, Vec<u8>) {
+fn media_with_track(name: &str) -> (PathBuf, Vec<u8>) {
     let mut dir = std::env::temp_dir();
     dir.push(format!("homesync-stream-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -113,7 +113,7 @@ fn track_id(bytes: &[u8]) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_whole_track_arrives_byte_for_byte() {
-    let (dir, expected) = media_dir("whole");
+    let (dir, expected) = media_with_track("whole");
     let port = WHOLE_FILE_PORT;
     let _coordinator = start_coordinator(port, &dir).await;
 
@@ -130,7 +130,7 @@ async fn a_whole_track_arrives_byte_for_byte() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_range_is_seeked_to_rather_than_sliced_out_of_a_buffer() {
-    let (dir, expected) = media_dir("range");
+    let (dir, expected) = media_with_track("range");
     let port = RANGE_PORT;
     let _coordinator = start_coordinator(port, &dir).await;
 

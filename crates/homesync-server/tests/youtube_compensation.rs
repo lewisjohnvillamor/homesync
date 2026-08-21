@@ -132,7 +132,7 @@ async fn changing_compensation_re_converges_a_youtube_receiver() {
     controller
         .send(frame(Payload::SelectSource(SelectSource {
             mode: SourceMode::Youtube,
-            youtube_video_id: Some("dQw4w9WgXcQ".into()),
+            youtube_video_id: Some("aaaaaaaaaaa".into()),
             ..Default::default()
         })))
         .await
@@ -142,9 +142,7 @@ async fn changing_compensation_re_converges_a_youtube_receiver() {
     // The play itself rendezvouses everybody; that is the known-good path and
     // not what is under test.
     let initial = drain_rendezvous(&mut receiver).await;
-    assert!(!initial.is_empty(), "playing a video should rendezvous the receiver");
-    let baseline_lead = initial.last().expect("a rendezvous").start_latency_ms;
-    let baseline_epoch = initial.last().expect("a rendezvous").epoch;
+    let baseline = initial.last().expect("playing a video should rendezvous the receiver").clone();
 
     // The controller's own compensation must not disturb the room: it renders
     // no audio, so there is nothing to converge.
@@ -166,12 +164,12 @@ async fn changing_compensation_re_converges_a_youtube_receiver() {
 
     let after = drain_rendezvous(&mut receiver).await;
     let rendezvous = after.last().expect("changing compensation should issue a rendezvous");
-    assert!(rendezvous.epoch > baseline_epoch, "a rendezvous should be a new epoch, not a repeat");
+    assert!(rendezvous.epoch > baseline.epoch, "a rendezvous should be a new epoch, not a repeat");
     assert!(
-        (rendezvous.start_latency_ms - (baseline_lead - 50.0)).abs() < 1e-6,
+        (rendezvous.start_latency_ms - (baseline.start_latency_ms - 50.0)).abs() < 1e-6,
         "the lead should carry the new compensation: {} against a baseline of {}",
         rendezvous.start_latency_ms,
-        baseline_lead
+        baseline.start_latency_ms
     );
 
     // Sending the same value again is not a change, and re-converging on it

@@ -17,9 +17,8 @@ use std::sync::Arc;
 /// Identifier of the synthesised click track.
 pub const BUILTIN_CLICK_ID: &str = "builtin-click";
 
-/// File extensions the scanner accepts. Decoding happens in the browser, so
-/// this list only needs to match what `AudioContext.decodeAudioData` handles.
-/// Extensions the scanner picks up.
+/// Extensions the scanner picks up. Decoding happens in the browser, so this
+/// list only needs to match what `AudioContext.decodeAudioData` handles.
 ///
 /// The list is what browsers can actually decode, not everything that is
 /// music. `mp4` and `m4b` join `m4a` because all three are the same container
@@ -34,9 +33,13 @@ const AUDIO_EXTENSIONS: &[&str] =
     &["wav", "mp3", "m4a", "m4b", "mp4", "aac", "ogg", "oga", "opus", "flac", "webm", "aif", "aiff"];
 
 /// Where the bytes of one media item live.
+///
+/// Public because it is what the byte-serving endpoint is handed: a location
+/// rather than the bytes, so it can seek to the range it was asked for and
+/// stream it instead of holding the whole track in memory.
 #[derive(Debug, Clone)]
-enum Source {
-    /// Synthesised at startup and held in memory.
+pub enum ItemSource {
+    /// Synthesised at startup and held in memory. Shared, not copied.
     Memory(Arc<Vec<u8>>),
     /// A file inside the configured media directory.
     File(PathBuf),
@@ -67,7 +70,7 @@ const MAX_ARTWORK_BYTES: u32 = 8 * 1024 * 1024;
 #[derive(Debug, Clone)]
 struct Entry {
     item: MediaItem,
-    source: Source,
+    source: ItemSource,
     artwork: Option<ArtworkRef>,
 }
 
@@ -99,7 +102,7 @@ impl MediaLibrary {
                 has_artwork: false,
                 builtin: true,
             },
-            source: Source::Memory(Arc::new(click)),
+            source: ItemSource::Memory(Arc::new(click)),
             artwork: None,
         });
 
@@ -144,7 +147,7 @@ impl MediaLibrary {
                         },
                         // Held as a path, not as bytes: a media directory of
                         // albums should not be resident in memory.
-                        source: Source::File(path.clone()),
+                        source: ItemSource::File(path.clone()),
                         artwork: scanned.artwork,
                     });
                 }
@@ -177,7 +180,6 @@ impl MediaLibrary {
         self.entries.get(id).map(|e| &e.item)
     }
 
-    /// Whether the catalogue contains `id`.
     /// Reads one item's embedded cover picture, with its MIME type.
     ///
     /// Re-read from the file rather than held in memory: the catalogue keeps
@@ -189,8 +191,8 @@ impl MediaLibrary {
         let from = art.offset as usize;
         let to = from + art.len as usize;
         match &entry.source {
-            Source::Memory(bytes) => Some((art.content_type.clone(), bytes.get(from..to)?.to_vec())),
-            Source::File(path) => {
+            ItemSource::Memory(bytes) => Some((art.content_type.clone(), bytes.get(from..to)?.to_vec())),
+            ItemSource::File(path) => {
                 use std::io::{Read, Seek, SeekFrom};
                 let mut file = std::fs::File::open(path).ok()?;
                 file.seek(SeekFrom::Start(art.offset)).ok()?;
@@ -203,45 +205,18 @@ impl MediaLibrary {
         }
     }
 
+    /// Whether the catalogue contains `id`.
     pub fn contains(&self, id: &str) -> bool {
         self.entries.contains_key(id)
     }
 
-    /// Reads the bytes of one item.
+    /// Where one item's bytes live.
     ///
     /// Only ids already in the catalogue resolve to a path, so no request can
     /// name an arbitrary file on disk (spec section 16).
-    pub fn read(&self, id: &str) -> Option<std::io::Result<Vec<u8>>> {
-        match &self.entries.get(id)?.source {
-            Source::Memory(bytes) => Some(Ok(bytes.as_ref().clone())),
-            Source::File(path) => Some(std::fs::read(path)),
-        }
-    }
-
-    /// Where one item's bytes live, so a caller can stream them.
-    ///
-    /// Exists because `read` materialises the whole item: a 40 MB FLAC costs
-    /// 40 MB of coordinator memory per request, and a range request costs that
-    /// plus the range. Handing back the location instead lets the HTTP layer
-    /// seek to the range it was asked for and stream it in fixed-size chunks.
-    ///
-    /// Only ids already in the catalogue resolve to a path, so this is no
-    /// wider a door than `read`.
     pub fn source(&self, id: &str) -> Option<ItemSource> {
-        match &self.entries.get(id)?.source {
-            Source::Memory(bytes) => Some(ItemSource::Memory(Arc::clone(bytes))),
-            Source::File(path) => Some(ItemSource::File(path.clone())),
-        }
+        self.entries.get(id).map(|entry| entry.source.clone())
     }
-}
-
-/// Where an item's bytes live, as handed to the byte-serving endpoint.
-#[derive(Debug, Clone)]
-pub enum ItemSource {
-    /// Synthesised at startup; already in memory, and shared rather than copied.
-    Memory(Arc<Vec<u8>>),
-    /// A file to be opened and streamed.
-    File(PathBuf),
 }
 
 /// How much of a file the scan keeps in memory to read metadata out of.
@@ -321,6 +296,8 @@ fn scan_file(path: &Path, window: usize) -> std::io::Result<ScannedFile> {
     Ok(ScannedFile { len, digest, artwork, duration_ns })
 }
 
+/// Whether these opening bytes are an MP4 family container: a size, then the
+/// `ftyp` brand at offset 4.
 fn looks_like_mp4(bytes: &[u8]) -> bool {
     bytes.len() > 8 && &bytes[4..8] == b"ftyp"
 }
@@ -876,7 +853,9 @@ mod tests {
     fn builtin_bytes_match_the_advertised_hash_and_length() {
         let library = MediaLibrary::load(&[PathBuf::from("/nonexistent/homesync/media")]);
         let item = library.item(BUILTIN_CLICK_ID).expect("item").clone();
-        let bytes = library.read(BUILTIN_CLICK_ID).expect("present").expect("read");
+        let ItemSource::Memory(bytes) = library.source(BUILTIN_CLICK_ID).expect("present") else {
+            panic!("the built-in click track is synthesised, so it lives in memory");
+        };
         assert_eq!(bytes.len() as u64, item.bytes);
         assert_eq!(sha256_hex(&bytes), item.sha256);
     }
@@ -884,8 +863,8 @@ mod tests {
     #[test]
     fn unknown_ids_never_resolve_to_a_path() {
         let library = MediaLibrary::load(&[PathBuf::from("/nonexistent/homesync/media")]);
-        assert!(library.read("../../etc/passwd").is_none());
-        assert!(library.read("/etc/passwd").is_none());
+        assert!(library.source("../../etc/passwd").is_none());
+        assert!(library.source("/etc/passwd").is_none());
     }
 
     #[test]
