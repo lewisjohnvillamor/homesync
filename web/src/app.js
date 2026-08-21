@@ -521,11 +521,9 @@ function wireControls() {
   seek.addEventListener('pointerup', commitSeek);
   seek.addEventListener('change', commitSeek);
 
-  // Applying compensation restarts this device's audio and asks the
-  // coordinator to re-converge it, so a drag across the slider must not do it
-  // once per pixel. The number on screen follows the slider immediately; the
-  // change is applied once the slider has been still for a moment, and at once
-  // when it is released or typed into.
+  // Applying compensation restarts this device's audio and asks the coordinator
+  // to re-converge it, so a drag must not do it at every step. The number on
+  // screen follows the slider immediately; the value is applied once it settles.
   let offsetPending = null;
   const applyOffset = (value, { immediate = false } = {}) => {
     const ms = clampOffset(Number(value));
@@ -533,12 +531,8 @@ function wireControls() {
     $('offset-number').value = String(ms);
     localStorage.setItem('homesync.offsetMs', String(ms));
 
-    if (offsetPending !== null) {
-      clearTimeout(offsetPending);
-      offsetPending = null;
-    }
+    clearTimeout(offsetPending);
     const commit = () => {
-      offsetPending = null;
       state.player?.setManualOffsetMs(ms, state.transport);
       state.live?.setCompensationMs(totalCompensationMs());
       state.connection?.send('client_update', { manual_offset_ms: ms });
@@ -546,8 +540,9 @@ function wireControls() {
     if (immediate) commit();
     else offsetPending = setTimeout(commit, OFFSET_COMMIT_MS);
   };
+  // The slider debounces; the number box does not, because typing a value and
+  // leaving the field is already a deliberate, single act.
   $('offset').addEventListener('input', (e) => applyOffset(e.target.value));
-  $('offset').addEventListener('change', (e) => applyOffset(e.target.value, { immediate: true }));
   $('offset-number').addEventListener('change', (e) => applyOffset(e.target.value, { immediate: true }));
 
   $('volume').addEventListener('input', (event) => {
