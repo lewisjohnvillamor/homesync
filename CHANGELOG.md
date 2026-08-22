@@ -40,6 +40,14 @@ listed as such rather than as done — see [Status](README.md#status).
   re-converges that one device, leaving the room's timeline and every other
   device alone.
 
+- **A duplicate copy of the volume popover's wiring had been spliced into the
+  join path**, in the middle of the block that decides whether a device should
+  go easy on itself. `wireControls` already registers all three listeners at
+  page load, so the copy added nothing — except one more document-level click
+  listener on every join, and a block of `join()` that no longer read in order.
+  Removed; verified in a browser that the popover still opens and closes and
+  that a join now adds no listeners at all.
+
 - **Dragging the compensation slider restarted the audio at every step.** The
   value was applied on each `input` event, and applying it stops and restarts
   this device's source, so a drag across the range was a burst of restarts — and
