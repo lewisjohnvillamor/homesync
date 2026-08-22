@@ -142,20 +142,7 @@ async function join() {
     // somebody who has ticked this box knows their device better than a user
     // agent string does.
     const lightTouch = saved === null ? deviceLooksConstrained() : saved === '1';
-    $('volume-toggle').addEventListener('click', toggleVolume);
-  // Anywhere else closes it. A popover that needs its own button pressed again
-  // is the kind of thing people leave open and then wonder about.
-  document.addEventListener('click', (event) => {
-    const volume = $('volume-popover');
-    if (volume.classList.contains('hidden')) return;
-    if (event.target.closest('.volume')) return;
-    setVolumeOpen(false);
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setVolumeOpen(false);
-  });
-
-  $('light-touch').checked = lightTouch;
+    $('light-touch').checked = lightTouch;
     player.preloadEnabled = !lightTouch;
     player.rateCorrectionEnabled = !lightTouch;
     if (lightTouch && saved === null) {
