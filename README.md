@@ -20,8 +20,18 @@ every device joins from its browser.
 </div>
 
 <p align="center">
-  <img src="docs/images/room.png" alt="The HomeSync room: a queue with cover art playing on two devices, each reporting its clock agreement and drift" width="820">
+  <img src="docs/images/demo.gif" alt="A phone joins a room, two speakers join after it, a track is queued and played, and the device panel reports each speaker's clock agreement and drift" width="760">
 </p>
+
+<div align="center">
+<sub>
+
+A real recording: the actual binary, three real browsers, one room.
+The numbers are the coordinator's own telemetry — and it is
+<a href="#status">a picture of the interface, not proof of the sound</a>.
+
+</sub>
+</div>
 
 ---
 
@@ -82,6 +92,13 @@ cargo run --release -- --media-dir ~/Music
 ```
 
 ## Screenshots
+
+The room with a real library in it — cover art, a queue, and two devices each
+reporting how well its clock agrees with the coordinator:
+
+<p align="center">
+  <img src="docs/images/room.png" alt="The HomeSync room: a queue with cover art playing on two devices, each reporting its clock agreement and drift" width="820">
+</p>
 
 | Invite a device, and run more than one room | The room, on a phone |
 | --- | --- |
@@ -422,6 +439,13 @@ docs/                      Protocol, calibration, checkpoints, compatibility
 
 **This is the section to read before trusting anything.** The software is well
 tested; almost none of it has been heard by a human.
+
+**The animation at the top is not evidence of sound.** It is a real recording —
+the real binary, three real browsers, and the coordinator's own telemetry rather
+than captions written over a mock-up — but headless Chromium renders into a null
+audio sink. It shows that the interface and the protocol do what they say. It
+cannot show that two speakers in a room sound like one. Only the checkpoints
+below, and ears, can do that.
 
 ### Verified here
 
