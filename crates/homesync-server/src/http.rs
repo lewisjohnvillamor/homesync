@@ -258,8 +258,18 @@ async fn media_bytes(State(app): State<Arc<App>>, Path(id): Path<String>, header
         None => (StatusCode::OK, 0, total, None),
     };
 
-    let body = match media_body(source, start, len).await {
-        Ok(body) => body,
+    let body = match media_body(&app, source, start, len).await {
+        Ok(Some(body)) => body,
+        // Every stream slot is taken. Refusing now is the honest answer: the
+        // alternative is to hold this connection open waiting for one, which
+        // consumes the resource the limit exists to protect.
+        Ok(None) => {
+            tracing::warn!(%id, "refused a media request: every stream slot is in use");
+            let mut response =
+                (StatusCode::SERVICE_UNAVAILABLE, "too many downloads in progress; try again shortly").into_response();
+            insert(&mut response, header::RETRY_AFTER, "2".to_string());
+            return response;
+        }
         Err(error) => {
             tracing::error!(%id, %error, "failed to read media");
             return (StatusCode::INTERNAL_SERVER_ERROR, "failed to read media").into_response();
@@ -297,27 +307,72 @@ async fn source_len(source: &homesync_media::ItemSource) -> std::io::Result<u64>
 /// memory. That is what keeps a 40 MB track from costing 40 MB of coordinator
 /// memory per listener — the endpoint holds one chunk at a time, whatever the
 /// size of the file or the number of devices pulling it at once.
-async fn media_body(source: homesync_media::ItemSource, start: u64, len: u64) -> std::io::Result<Body> {
+///
+/// `Ok(None)` means every stream slot was taken.
+async fn media_body(
+    app: &App,
+    source: homesync_media::ItemSource,
+    start: u64,
+    len: u64,
+) -> std::io::Result<Option<Body>> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     match source {
-        // Already in memory and shared, so slicing it is the whole job. Only
-        // the synthesised click track takes this path.
+        // Already in memory and shared, so slicing it is the whole job — and it
+        // holds no file open, so it is not rationed. Only the synthesised click
+        // track takes this path.
         homesync_media::ItemSource::Memory(bytes) => {
             let from = (start as usize).min(bytes.len());
             let to = from.saturating_add(len as usize).min(bytes.len());
-            Ok(Body::from(bytes[from..to].to_vec()))
+            Ok(Some(Body::from(bytes[from..to].to_vec())))
         }
         homesync_media::ItemSource::File(path) => {
+            // Taken before the file is opened, so a refusal costs nothing, and
+            // held by the reader below until the response is finished or
+            // dropped.
+            let Ok(permit) = Arc::clone(&app.media_streams).try_acquire_owned() else {
+                return Ok(None);
+            };
+
             let mut file = tokio::fs::File::open(&path).await?;
             if start > 0 {
                 file.seek(std::io::SeekFrom::Start(start)).await?;
             }
             // `take` bounds the stream to the range even if the file grew
             // between the length measurement and this read.
-            let stream = tokio_util::io::ReaderStream::with_capacity(file.take(len), MEDIA_CHUNK_BYTES);
-            Ok(Body::from_stream(stream))
+            let reader = MediaReader { inner: file.take(len), _permit: permit };
+            let stream = tokio_util::io::ReaderStream::with_capacity(reader, MEDIA_CHUNK_BYTES);
+            Ok(Some(Body::from_stream(stream)))
         }
+    }
+}
+
+/// The reader behind a streamed media response.
+///
+/// Exists for what it owns rather than what it reads: the permit, released the
+/// moment this is dropped — whether the response finished, the client hung up,
+/// or the connection died.
+///
+/// An idle timeout was tried here and removed, because it could not work at
+/// this layer and measuring it said so: a client that stops reading blocks the
+/// *socket*, and hyper then stops polling the body, so this reader is never
+/// asked for another byte and never learns anything is wrong. Thirty-two
+/// deliberately silent readers still held every slot after forty seconds. What
+/// the cap gives is a bound — a silent client can hold a slot, but only one,
+/// and only until its connection dies. Bounding that wait too needs a timeout
+/// on the socket rather than on the file behind it.
+struct MediaReader {
+    inner: tokio::io::Take<tokio::fs::File>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl tokio::io::AsyncRead for MediaReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
     }
 }
 

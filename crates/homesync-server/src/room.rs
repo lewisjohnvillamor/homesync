@@ -872,10 +872,11 @@ impl Room {
         });
 
         let level = findings.first().map(|(level, _)| *level).unwrap_or(HealthLevel::Ok);
-        let summary = match findings.first() {
-            Some((_, first)) if findings.len() == 1 => first.clone(),
-            Some((_, first)) => format!("{first}, and {} other issue(s)", findings.len() - 1),
-            None => self.healthy_summary(),
+        let summary = match findings.as_slice() {
+            [] => self.healthy_summary(),
+            [(_, only)] => only.clone(),
+            [(_, first), _] => format!("{first}, and one other problem"),
+            [(_, first), rest @ ..] => format!("{first}, and {} other problems", rest.len()),
         };
 
         RoomHealth { level, summary, findings: findings.into_iter().map(|(_, text)| text).collect() }
@@ -1719,7 +1720,24 @@ mod tests {
         assert_eq!(health.level, HealthLevel::Bad);
         assert!(health.summary.starts_with("Phone"), "worst first: {}", health.summary);
         assert_eq!(health.findings.len(), 2, "both are still reported: {:?}", health.findings);
-        assert!(health.summary.contains("other issue"), "{}", health.summary);
+        assert!(health.summary.ends_with(", and one other problem"), "{}", health.summary);
+    }
+
+    #[test]
+    fn the_summary_counts_the_rest_in_words_a_person_would_use() {
+        // This line is the most-read sentence in the interface, so "and 2 other
+        // issue(s)" — a plural nobody chose, in brackets — is not good enough.
+        let mut room = youtube_room("TV");
+        for name in ["Phone", "Kitchen", "Study"] {
+            add(&mut room, name, Role::Speaker);
+            room.set_clock_report(name, ClockReport { quality: ClockQuality::ResyncRequired, ..stable_clock() });
+        }
+        let now = LEAD + 5_000_000_000;
+        report(&mut room, "TV", "playing", now, 0.08);
+
+        let health = room.health(now);
+        assert!(health.summary.ends_with("and 3 other problems"), "{}", health.summary);
+        assert!(!health.summary.contains("(s)"), "no bracketed plurals: {}", health.summary);
     }
 
     #[test]

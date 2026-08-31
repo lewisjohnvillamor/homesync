@@ -10,7 +10,8 @@ use crate::stream::StreamHandle;
 use homesync_media::MediaLibrary;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use tokio::sync::Semaphore;
 
 /// Everything an HTTP or WebSocket handler needs.
 ///
@@ -43,6 +44,13 @@ pub struct App {
     pub profiles: ProfileStore,
     /// A ceiling on how fast one address can get join attempts wrong.
     pub join_limiter: JoinLimiter,
+    /// A ceiling on how many media responses may be streaming at once.
+    ///
+    /// A streamed response holds an open file for as long as the client takes
+    /// to read it, which is what a reader that never finishes can exhaust. The
+    /// old code read the file into memory and closed it immediately, so this
+    /// only became worth bounding when serving started streaming.
+    pub media_streams: Arc<Semaphore>,
     /// The room created at startup, which is never reaped.
     default_room: String,
 }
@@ -56,6 +64,20 @@ pub const EMPTY_ROOM_TTL_NS: u64 = 30 * 60 * 1_000_000_000;
 /// Six Crockford base-32 characters from a fresh ULID's random section.
 fn random_room_code() -> String {
     ulid::Ulid::new().to_string().chars().rev().take(6).collect::<String>().to_uppercase()
+}
+
+/// How many media responses may stream at once.
+///
+/// Every device in a room fetches the track it is about to play, and may fetch
+/// the one after it as well, so the ceiling is drawn from the room size rather
+/// than guessed. The floor covers a coordinator configured for a very small
+/// room that still has several rooms running.
+///
+/// Past the ceiling a request is refused rather than queued: queueing would
+/// hold the connection *and* the memory behind it, which is the thing being
+/// rationed.
+fn media_stream_limit(config: &Config) -> usize {
+    config.max_clients.saturating_mul(4).max(32)
 }
 
 /// Ceiling on a fetched file.
@@ -201,6 +223,7 @@ impl App {
         room: Room,
         profiles: ProfileStore,
     ) -> Self {
+        let stream_limit = media_stream_limit(&config);
         let mut rooms = HashMap::new();
         let default_room = room.code.clone();
         rooms.insert(room.code.clone(), room);
@@ -215,6 +238,7 @@ impl App {
             calibration: CalibrationRegistry::default(),
             profiles,
             join_limiter: JoinLimiter::default(),
+            media_streams: Arc::new(Semaphore::new(stream_limit)),
             default_room,
         }
     }

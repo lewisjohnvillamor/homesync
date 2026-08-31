@@ -12,6 +12,21 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Security
 
+- **The media endpoint now hands out a bounded number of streams.** Serving a
+  track by streaming it, rather than reading it into memory, traded memory for a
+  file descriptor held open for as long as the client takes to read — so a
+  client that never finishes reading held one indefinitely. The number in flight
+  is now capped at four per configured room seat, with a floor of 32; past that
+  a request is refused with 503 and a `Retry-After` rather than queued, because
+  queueing holds the connection the cap exists to ration. The built-in click
+  track is exempt: it lives in memory and opens nothing.
+
+  Bounded, not eliminated. A client that stops reading still holds its one slot
+  until its connection ends. An idle timeout on the reader was written for this
+  and then removed, because measuring it showed it could not work: a stalled
+  client blocks the socket, hyper stops polling the body, and the reader is
+  never asked for another byte. Closing that gap needs a timeout on the socket.
+
 - **A crafted MP4 could stall a rescan.** The walk that finds a `moov` atom past
   the scan window costs a seek and a read per top-level atom, and an atom may
   declare itself the minimum eight bytes long — so a file of nothing but those
@@ -27,6 +42,10 @@ listed as such rather than as done — see [Status](README.md#status).
   path and the coordinator's own listener.
 
 ### Fixed
+
+- **The room health line said "and 2 other issue(s)".** A bracketed plural
+  nobody would say out loud, in the single most-read sentence in the interface.
+  It now says "and one other problem" or "and 3 other problems".
 
 - **Timing compensation did nothing audible during a YouTube video.** A device
   playing its own audio applies a new compensation itself, by rescheduling the
@@ -221,6 +240,21 @@ Status section of the README is the honest account of that.
   a sound.
 
 ### Security
+
+- **The media endpoint now hands out a bounded number of streams.** Serving a
+  track by streaming it, rather than reading it into memory, traded memory for a
+  file descriptor held open for as long as the client takes to read — so a
+  client that never finishes reading held one indefinitely. The number in flight
+  is now capped at four per configured room seat, with a floor of 32; past that
+  a request is refused with 503 and a `Retry-After` rather than queued, because
+  queueing holds the connection the cap exists to ration. The built-in click
+  track is exempt: it lives in memory and opens nothing.
+
+  Bounded, not eliminated. A client that stops reading still holds its one slot
+  until its connection ends. An idle timeout on the reader was written for this
+  and then removed, because measuring it showed it could not work: a stalled
+  client blocks the socket, hyper stops polling the body, and the reader is
+  never asked for another byte. Closing that gap needs a timeout on the socket.
 
 - Fetch-by-URL cannot be aimed at the local network: hosts are resolved and
   refused if they land on loopback, private, link-local, carrier-grade-NAT or
