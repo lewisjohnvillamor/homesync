@@ -139,7 +139,24 @@
               </label>
               <button id="queue-clear" class="btn">Clear</button>
             </div>
+
+            <div class="queue-modes">
+              <button id="shuffle" class="btn btn-toggle" type="button" aria-pressed="false"
+                      title="Shuffle">Shuffle</button>
+              <button id="repeat" class="btn btn-toggle" type="button" aria-pressed="false"
+                      title="Repeat">Repeat: off</button>
+              <span class="grow"></span>
+              <input type="text" id="playlist-name" class="playlist-name" maxlength="60"
+                     placeholder="Name this queue" aria-label="Playlist name" />
+              <button id="playlist-save" class="btn" type="button">Save</button>
+            </div>
+
             <ol id="queue" class="queue"></ol>
+
+            <div id="playlists" class="playlists hidden">
+              <span class="playlists-label">Saved</span>
+              <div id="playlist-list" class="playlist-list"></div>
+            </div>
 
             <details class="folders">
               <summary>Where the music comes from</summary>
@@ -223,12 +240,23 @@
                 </svg>
               </button>
               <div id="volume-popover" class="volume-popover hidden" role="group" aria-label="Volume">
-                <input type="range" id="volume" class="volume-slider" min="0" max="100" value="100"
-                       orient="vertical" aria-label="Volume" />
-                <span id="volume-value" class="volume-value">100</span>
+                <div class="volume-columns">
+                  <div class="volume-column">
+                    <input type="range" id="room-volume" class="volume-slider" min="0" max="100" value="100"
+                           orient="vertical" aria-label="Volume everywhere" />
+                    <span id="room-volume-value" class="volume-value">100</span>
+                    <span class="volume-label">Everywhere</span>
+                  </div>
+                  <div class="volume-column">
+                    <input type="range" id="volume" class="volume-slider" min="0" max="100" value="100"
+                           orient="vertical" aria-label="Volume on this device" />
+                    <span id="volume-value" class="volume-value">100</span>
+                    <span class="volume-label">This device</span>
+                  </div>
+                </div>
                 <label class="switch volume-mute" for="mute">
                   <input type="checkbox" id="mute" />
-                  <span>Mute</span>
+                  <span>Mute this device</span>
                 </label>
               </div>
             </div>

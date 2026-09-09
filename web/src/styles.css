@@ -1398,7 +1398,94 @@ td {
   text-align: center;
 }
 
+.volume-columns {
+  display: flex;
+  gap: 14px;
+}
+
+.volume-column {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+/* Which slider is which has to be readable at a glance, because one of them
+   changes what the whole house is doing. */
+.volume-label {
+  font-size: var(--step--2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 .volume-mute {
   font-size: var(--step--1);
   white-space: nowrap;
+}
+
+
+/* Shuffle, repeat and playlists ------------------------------------------- */
+
+.queue-modes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.queue-modes .grow {
+  flex: 1 1 auto;
+}
+
+/* A toggle reads as pressed rather than merely hovered, because whether
+   shuffle is on is a question people ask the interface constantly. */
+.btn-toggle.on {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--text);
+}
+
+.playlist-name {
+  min-width: 0;
+  flex: 0 1 14rem;
+}
+
+.playlists {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.playlists-label {
+  font-size: var(--step--1);
+  color: var(--text-dim);
+}
+
+.playlist-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.playlist {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.playlist-load {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-delete {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
 }

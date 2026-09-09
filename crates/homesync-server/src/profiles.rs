@@ -56,6 +56,19 @@ pub struct RoomIdentity {
     pub name: Option<String>,
 }
 
+/// A queue somebody saved and named.
+///
+/// Media ids rather than filenames, because an id is a content hash: a saved
+/// playlist survives the files being renamed or moved between folders, and
+/// quietly loses only the tracks that are genuinely no longer there.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Playlist {
+    /// What somebody called it.
+    pub name: String,
+    /// Media ids, in play order.
+    pub media_ids: Vec<String>,
+}
+
 /// On-disk shape. Versioned so a future format change can be recognised
 /// rather than silently misread.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,11 +87,15 @@ struct StoredProfiles {
     /// Every room, default first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     rooms: Vec<RoomIdentity>,
+    /// Saved queues, by name. Absent in files written before playlists existed,
+    /// which is why it defaults rather than being required.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    playlists: Vec<Playlist>,
 }
 
 impl Default for StoredProfiles {
     fn default() -> Self {
-        Self { version: 1, devices: HashMap::new(), room: None, rooms: Vec::new() }
+        Self { version: 1, devices: HashMap::new(), room: None, rooms: Vec::new(), playlists: Vec::new() }
     }
 }
 
@@ -93,6 +110,9 @@ pub struct ProfileStore {
     /// Every room, default first. The default is the one whose invite link the
     /// banner prints, so it keeps its place across restarts.
     rooms: Mutex<Vec<RoomIdentity>>,
+    /// Saved queues, kept sorted by name so the list does not reorder itself
+    /// between snapshots.
+    playlists: Mutex<Vec<Playlist>>,
 }
 
 impl ProfileStore {
@@ -103,10 +123,16 @@ impl ProfileStore {
     /// nuisance, refusing to start is worse.
     pub fn load(path: Option<PathBuf>) -> Self {
         let Some(path) = path else {
-            return Self { path: None, profiles: Mutex::new(HashMap::new()), rooms: Mutex::new(Vec::new()) };
+            return Self {
+                path: None,
+                profiles: Mutex::new(HashMap::new()),
+                rooms: Mutex::new(Vec::new()),
+                playlists: Mutex::new(Vec::new()),
+            };
         };
 
         let mut rooms = Vec::new();
+        let mut playlists = Vec::new();
         let profiles = match std::fs::read_to_string(&path) {
             Ok(text) => match serde_json::from_str::<StoredProfiles>(&text) {
                 Ok(stored) if stored.version == FORMAT_VERSION => {
@@ -114,6 +140,7 @@ impl ProfileStore {
                     // `rooms` wins when present; `room` is what a file written
                     // before multiple rooms existed carries instead.
                     rooms = if stored.rooms.is_empty() { stored.room.into_iter().collect() } else { stored.rooms };
+                    playlists = stored.playlists;
                     stored.devices
                 }
                 Ok(stored) => {
@@ -136,7 +163,12 @@ impl ProfileStore {
             }
         };
 
-        Self { path: Some(path), profiles: Mutex::new(profiles), rooms: Mutex::new(rooms) }
+        Self {
+            path: Some(path),
+            profiles: Mutex::new(profiles),
+            rooms: Mutex::new(rooms),
+            playlists: Mutex::new(playlists),
+        }
     }
 
     /// The default room remembered from a previous run, if any.
@@ -218,7 +250,49 @@ impl ProfileStore {
     pub fn clear(&self) {
         self.profiles.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.rooms.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.playlists.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.save();
+    }
+
+    /// Names of every saved queue, alphabetically.
+    pub fn playlist_names(&self) -> Vec<String> {
+        self.playlists.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|p| p.name.clone()).collect()
+    }
+
+    /// The media ids saved under `name`, if anything is.
+    pub fn playlist(&self, name: &str) -> Option<Vec<String>> {
+        let playlists = self.playlists.lock().unwrap_or_else(|e| e.into_inner());
+        playlists.iter().find(|p| p.name == name).map(|p| p.media_ids.clone())
+    }
+
+    /// Saves `media_ids` under `name`, replacing anything already saved there.
+    ///
+    /// Kept sorted, so the list a room is shown does not reorder itself between
+    /// snapshots for no reason a person could see.
+    pub fn save_playlist(&self, name: String, media_ids: Vec<String>) {
+        {
+            let mut playlists = self.playlists.lock().unwrap_or_else(|e| e.into_inner());
+            match playlists.iter_mut().find(|p| p.name == name) {
+                Some(existing) => existing.media_ids = media_ids,
+                None => playlists.push(Playlist { name, media_ids }),
+            }
+            playlists.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        self.save();
+    }
+
+    /// Forgets the queue saved under `name`. Returns whether there was one.
+    pub fn delete_playlist(&self, name: &str) -> bool {
+        let removed = {
+            let mut playlists = self.playlists.lock().unwrap_or_else(|e| e.into_inner());
+            let before = playlists.len();
+            playlists.retain(|p| p.name != name);
+            playlists.len() != before
+        };
+        if removed {
+            self.save();
+        }
+        removed
     }
 
     /// Writes the file, replacing it atomically.
@@ -237,6 +311,7 @@ impl ProfileStore {
             // and invalidating every saved invite link.
             room: rooms.first().cloned(),
             rooms: rooms.clone(),
+            playlists: self.playlists.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             tracing::error!("could not serialise device profiles");

@@ -10,6 +10,34 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ## [Unreleased]
 
+### Added
+
+- **One volume for the whole house.** The volume control was per-device, so
+  turning the music down meant visiting every device in turn — the one control
+  people reach for first in multi-room audio, and it was not there. The popover
+  now holds two sliders: *Everywhere* and *This device*. The room's gain
+  multiplies each device's own rather than replacing it, so turning the house
+  down keeps whatever balance somebody set between a loud kitchen speaker and a
+  quiet television. It belongs to the room, so it moves on every device at once.
+
+- **Shuffle and repeat.** Both belong to the room rather than to a device, for
+  the reason everything else here does: two devices disagreeing about the next
+  track is the failure this project exists to prevent. Repeat cycles off, all
+  and one. Shuffle keeps the track that is playing where it is and shuffles what
+  follows, and plays every track once before any of them twice — a shuffle that
+  rolls a die at each advance can play the same song three times running, which
+  is the thing people actually complain about.
+
+  What receivers preload is derived from the same function that decides what
+  plays next, and a test pins them together across every combination of the two
+  modes. If they disagreed, every track change would become a stall while the
+  wrong buffer was thrown away.
+
+- **Saved playlists.** Name the current queue, and it survives restarts beside
+  the device profiles. Saved as content hashes rather than filenames, so a
+  playlist keeps working when files are renamed or moved between folders, and
+  quietly drops only the tracks that genuinely are not there any more.
+
 ### Security
 
 - **The media endpoint now hands out a bounded number of streams.** Serving a
@@ -42,6 +70,13 @@ listed as such rather than as done — see [Status](README.md#status).
   path and the coordinator's own listener.
 
 ### Fixed
+
+- **Adding tracks quickly lost some of them.** Each queue edit read the last
+  snapshot, changed it and sent it back, and a snapshot takes a round trip — so
+  adding three tracks in quick succession had the second and third both read the
+  queue as it was before the first. Measured in a browser: three selections
+  produced a queue of two. The client now edits the queue it last sent rather
+  than the one it was last told about.
 
 - **The room health line said "and 2 other issue(s)".** A bracketed plural
   nobody would say out loud, in the single most-read sentence in the interface.
