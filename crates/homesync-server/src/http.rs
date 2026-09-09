@@ -432,7 +432,7 @@ async fn diagnostics(State(app): State<Arc<App>>, Query(query): Query<Diagnostic
         .values()
         .filter(|room| room.secret == query.secret)
         .map(|room| DiagnosticsRoom {
-            snapshot: room.snapshot(manifest.clone(), now),
+            snapshot: room.snapshot(manifest.clone(), app.profiles.playlist_names(), now),
             last_calibration: room.last_calibration.clone(),
         })
         .collect();

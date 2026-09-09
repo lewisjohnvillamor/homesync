@@ -44,13 +44,24 @@ class FakeContext {
     this.currentTime = currentTime;
     this.ts = outputTimestamp;
     this.sources = [];
+    this.gains = [];
     if (!outputTimestamp) delete this.getOutputTimestamp;
   }
   getOutputTimestamp() {
     return this.ts;
   }
   createGain() {
-    return { gain: { setTargetAtTime() {} }, connect() {} };
+    const gain = {
+      target: 1,
+      gain: {
+        setTargetAtTime(value) {
+          gain.target = value;
+        },
+      },
+      connect() {},
+    };
+    this.gains.push(gain);
+    return gain;
   }
   createBufferSource() {
     const source = new FakeSource();
@@ -169,6 +180,31 @@ test('setting the same compensation twice does not restart the audio', () => {
   player.setManualOffsetMs(20, transport);
   assert.equal(ctx.sources.length, 2, 'an unchanged value should not reschedule');
   assert.equal(player.manualOffsetMs, 20);
+});
+
+test('the room gain scales this device rather than replacing it', () => {
+  // One control for the house has to keep the balance somebody set between a
+  // loud kitchen speaker and a quiet television, which means multiplying the
+  // two rather than the room winning.
+  const ctx = new FakeContext({ currentTime: 10, outputTimestamp: { contextTime: 9.9, performanceTime: NOW_MS } });
+  const player = makePlayer(ctx);
+  const gain = player.gain;
+
+  player.setVolume(0.5);
+  assert.equal(gain.target, 0.5, 'at full room volume the device sets its own level');
+
+  player.setRoomVolume(0.4);
+  assert.ok(Math.abs(gain.target - 0.2) < 1e-9, `0.5 x 0.4 should be 0.2, was ${gain.target}`);
+
+  // Mute is this device going silent, whatever the house is doing.
+  player.setMuted(true);
+  assert.equal(gain.target, 0);
+  player.setMuted(false);
+  assert.ok(Math.abs(gain.target - 0.2) < 1e-9, 'unmuting returns to the combined level');
+
+  // Out of range values cannot turn the room up past unity.
+  player.setRoomVolume(4);
+  assert.equal(gain.target, 0.5, 'a room gain above one is clamped');
 });
 
 test('a late join skips into the media instead of trailing the room', () => {

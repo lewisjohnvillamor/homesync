@@ -249,6 +249,14 @@ export class Player {
     /** Compensation in ms derived from acoustic calibration. */
     this.acousticOffsetMs = 0;
     this.volume = 1;
+    /**
+     * The room's own gain, which every device in it is scaled by.
+     *
+     * Multiplied by this device's volume rather than replacing it, so turning
+     * the house down keeps whatever balance somebody set between a loud kitchen
+     * speaker and a quiet television.
+     */
+    this.roomVolume = 1;
     this.muted = false;
 
     this.latencyMode = LatencyMode.ReportedLatency;
@@ -696,6 +704,12 @@ export class Player {
     this.#applyGain();
   }
 
+  /** Sets the room-wide gain this device is scaled by. */
+  setRoomVolume(volume) {
+    this.roomVolume = Math.max(0, Math.min(1, volume));
+    this.#applyGain();
+  }
+
   setMuted(muted) {
     this.muted = muted;
     this.#applyGain();
@@ -729,7 +743,7 @@ export class Player {
 
   #applyGain() {
     if (!this.gain || !this.ctx) return;
-    const target = this.muted ? 0 : this.volume;
+    const target = this.muted ? 0 : this.volume * this.roomVolume;
     // A short ramp instead of a step: an instant gain change on a running
     // buffer is an audible click.
     this.gain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.01);

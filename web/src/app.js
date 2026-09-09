@@ -51,6 +51,8 @@ const state = {
   streamEpoch: -1,
   /** Whether compensation has been reconciled with the coordinator yet. */
   offsetReconciled: false,
+  /** Queue sent to the coordinator and not yet reflected in a snapshot. */
+  /** @type {string[]|null} */ pendingQueue: null,
   role: 'speaker',
   seeking: false,
   loadToken: 0,
@@ -259,11 +261,27 @@ function onJoinRejected(error) {
 
 function onSnapshot(snapshot) {
   state.snapshot = snapshot;
+  // The coordinator has spoken, so its queue is the queue again.
+  state.pendingQueue = null;
   $('room-code-label').textContent = snapshot.room_code;
   renderMediaOptions(snapshot.media.items);
   renderQueue();
+  renderPlaybackModes();
+  renderPlaylists();
   renderMicrophoneOptions();
   void preloadNext();
+
+  // The room's gain is the coordinator's to decide, so it arrives here for
+  // every device including the one that moved the slider.
+  const roomVolume = typeof snapshot.room_volume === 'number' ? snapshot.room_volume : 1;
+  state.player?.setRoomVolume(roomVolume);
+  state.youtube?.setVolume((Number($('volume').value) / 100) * roomVolume, $('mute').checked);
+  // Not while somebody is dragging it, or their own change fights the snapshot
+  // that answers it.
+  if (document.activeElement !== $('room-volume')) {
+    $('room-volume').value = String(Math.round(roomVolume * 100));
+    $('room-volume-value').textContent = String(Math.round(roomVolume * 100));
+  }
 
   // The coordinator owns acoustic compensation, so it arrives here rather than
   // being decided locally.
@@ -442,7 +460,7 @@ function wireControls() {
     const id = event.target.value;
     event.target.value = '';
     if (!id) return;
-    sendQueue([...(state.snapshot?.queue ?? []), id]);
+    sendQueue([...pendingQueue(), id]);
   });
 
   $('queue-clear').addEventListener('click', () => sendQueue([]));
@@ -532,16 +550,54 @@ function wireControls() {
   $('offset').addEventListener('input', (e) => applyOffset(e.target.value));
   $('offset-number').addEventListener('change', (e) => applyOffset(e.target.value, { immediate: true }));
 
+  // The room's gain is the coordinator's, not this device's, so it is sent
+  // rather than applied locally; the snapshot that comes back is what moves
+  // every device including this one.
+  $('room-volume').addEventListener('input', (event) => {
+    const volume = Number(event.target.value) / 100;
+    $('room-volume-value').textContent = String(Math.round(volume * 100));
+    state.connection?.send('room_volume', { volume });
+  });
+
+  $('shuffle').addEventListener('click', () => {
+    state.connection?.send('playback_modes', {
+      shuffle: !(state.snapshot?.shuffle ?? false),
+      repeat: state.snapshot?.repeat ?? 'off',
+    });
+  });
+
+  // One button cycling three states rather than three controls: repeat has an
+  // obvious order and nobody wants a dropdown for it.
+  $('repeat').addEventListener('click', () => {
+    const order = ['off', 'all', 'one'];
+    const next = order[(order.indexOf(state.snapshot?.repeat ?? 'off') + 1) % order.length];
+    state.connection?.send('playback_modes', { shuffle: state.snapshot?.shuffle ?? false, repeat: next });
+  });
+
+  const savePlaylist = () => {
+    const name = $('playlist-name').value.trim();
+    if (!name) {
+      log('Give the queue a name before saving it.');
+      return;
+    }
+    state.connection?.send('playlist', { action: 'save', name });
+    $('playlist-name').value = '';
+  };
+  $('playlist-save').addEventListener('click', savePlaylist);
+  $('playlist-name').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') savePlaylist();
+  });
+
   $('volume').addEventListener('input', (event) => {
     const volume = Number(event.target.value) / 100;
     state.player?.setVolume(volume);
-    state.youtube?.setVolume(volume, $('mute').checked);
+    state.youtube?.setVolume(volume * (state.snapshot?.room_volume ?? 1), $('mute').checked);
     state.connection?.send('client_update', { volume });
     renderVolumeButton();
   });
   $('mute').addEventListener('change', (event) => {
     state.player?.setMuted(event.target.checked);
-    state.youtube?.setVolume(Number($('volume').value) / 100, event.target.checked);
+    state.youtube?.setVolume((Number($('volume').value) / 100) * (state.snapshot?.room_volume ?? 1), event.target.checked);
     state.connection?.send('client_update', { muted: event.target.checked });
     renderVolumeButton();
   });
@@ -762,7 +818,20 @@ function applyEq(gainsDb) {
  * already there. Sending it on every edit would restart playback each time an
  * entry moved.
  */
+/**
+ * The queue as it will be once the coordinator has caught up.
+ *
+ * Every queue edit is a read-modify-write of the last snapshot, and snapshots
+ * take a round trip to arrive. Adding three tracks quickly meant the second and
+ * third both read the queue as it was before the first, and two of the three
+ * silently vanished. Remembering what was just sent closes that window.
+ */
+function pendingQueue() {
+  return state.pendingQueue ?? state.snapshot?.queue ?? [];
+}
+
 function sendQueue(mediaIds, startAt) {
+  state.pendingQueue = [...mediaIds];
   state.connection?.send('select_source', {
     mode: 'controlled_audio',
     queue: mediaIds,
@@ -1329,6 +1398,52 @@ function announceUndecodable(items) {
 }
 
 /** Draws the queue, marking the track the room is on. */
+/** Reflects the room's shuffle and repeat settings on their buttons. */
+function renderPlaybackModes() {
+  const shuffle = state.snapshot?.shuffle ?? false;
+  const repeat = state.snapshot?.repeat ?? 'off';
+
+  $('shuffle').setAttribute('aria-pressed', String(shuffle));
+  $('shuffle').classList.toggle('on', shuffle);
+
+  const labels = { off: 'Repeat: off', all: 'Repeat: all', one: 'Repeat: one' };
+  $('repeat').textContent = labels[repeat] ?? labels.off;
+  $('repeat').setAttribute('aria-pressed', String(repeat !== 'off'));
+  $('repeat').classList.toggle('on', repeat !== 'off');
+}
+
+/** Lists the saved queues, with a way to load or forget each. */
+function renderPlaylists() {
+  const names = state.snapshot?.playlists ?? [];
+  const panel = $('playlists');
+  panel.classList.toggle('hidden', names.length === 0);
+
+  const list = $('playlist-list');
+  list.innerHTML = '';
+  for (const name of names) {
+    const row = document.createElement('span');
+    row.className = 'playlist';
+
+    const load = document.createElement('button');
+    load.className = 'btn playlist-load';
+    load.type = 'button';
+    load.textContent = name;
+    load.title = `Play "${name}"`;
+    load.addEventListener('click', () => state.connection?.send('playlist', { action: 'load', name }));
+
+    const remove = document.createElement('button');
+    remove.className = 'btn btn-icon playlist-delete';
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = `Forget "${name}"`;
+    remove.setAttribute('aria-label', `Forget the playlist ${name}`);
+    remove.addEventListener('click', () => state.connection?.send('playlist', { action: 'delete', name }));
+
+    row.append(load, remove);
+    list.append(row);
+  }
+}
+
 function renderQueue() {
   const list = $('queue');
   const snapshot = state.snapshot;

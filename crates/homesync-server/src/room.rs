@@ -6,8 +6,8 @@
 
 use homesync_protocol::{
     BufferReport, CalibrationProgress, CalibrationResult, ClientInfo, ClockQuality, ClockReport, DiagnosticReport,
-    Envelope, ErrorMessage, HealthLevel, MediaManifest, Payload, Role, RoomHealth, RoomSnapshot, SourceMode,
-    StreamInfo, Transport, TransportState, YoutubeState,
+    Envelope, ErrorMessage, HealthLevel, MediaManifest, Payload, RepeatMode, Role, RoomHealth, RoomSnapshot,
+    SourceMode, StreamInfo, Transport, TransportState, YoutubeState,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -163,6 +163,23 @@ pub struct Room {
     pub queue: Vec<String>,
     /// Index into `queue` of the track the transport is currently on.
     pub queue_index: usize,
+    /// Gain every receiver in this room is scaled by.
+    ///
+    /// Multiplied by each device's own volume rather than replacing it, so
+    /// turning the house down keeps whatever balance somebody set between a
+    /// loud kitchen speaker and a quiet television.
+    pub volume: f32,
+    /// Whether the queue plays in a shuffled order.
+    pub shuffle: bool,
+    /// What happens at the end of the queue.
+    pub repeat: RepeatMode,
+    /// The order shuffle plays the queue in: a permutation of its indices.
+    ///
+    /// Held rather than rolled at each advance so the order is a property of
+    /// the room that every device can be told about, and so a track cannot come
+    /// up twice before the rest have had a turn. Rebuilt whenever the queue
+    /// changes or shuffle is switched on.
+    shuffle_order: Vec<usize>,
     /// Decoded durations reported by receivers, keyed by media id.
     ///
     /// The coordinator cannot work these out for itself: it only parses WAV
@@ -199,6 +216,10 @@ impl Room {
             last_calibration: None,
             queue: Vec::new(),
             queue_index: 0,
+            volume: 1.0,
+            shuffle: false,
+            repeat: RepeatMode::Off,
+            shuffle_order: Vec::new(),
             durations_ns: BTreeMap::new(),
             rendezvous_epoch: 0,
             youtube_anchored_epoch: None,
@@ -343,8 +364,78 @@ impl Room {
     }
 
     /// The media id that should follow the current one, if any.
+    ///
+    /// This is also what receivers preload, so it has to agree exactly with
+    /// what `advance_queue` will do — a device that preloads the wrong track
+    /// has to download and decode at the moment it was supposed to start.
     pub fn next_in_queue(&self) -> Option<&str> {
-        self.queue.get(self.queue_index + 1).map(String::as_str)
+        self.next_index().and_then(|index| self.queue.get(index)).map(String::as_str)
+    }
+
+    /// The queue position that follows the current one under the room's modes.
+    ///
+    /// `None` means the queue is finished: the last track of a list that is not
+    /// repeating. Repeat-one is deliberately *not* handled here — it is not a
+    /// different next track, it is the same one again, and `advance_queue`
+    /// treats it as such.
+    fn next_index(&self) -> Option<usize> {
+        if self.queue.is_empty() {
+            return None;
+        }
+        if self.repeat == RepeatMode::One {
+            return Some(self.queue_index);
+        }
+
+        let order: Vec<usize> = if self.shuffle && self.shuffle_order.len() == self.queue.len() {
+            self.shuffle_order.clone()
+        } else {
+            (0..self.queue.len()).collect()
+        };
+        let at = order.iter().position(|index| *index == self.queue_index)?;
+        match order.get(at + 1) {
+            Some(next) => Some(*next),
+            // Past the end. Repeating wraps to the start of the same order,
+            // which under shuffle is the same permutation again rather than a
+            // fresh one: a reshuffle on every lap would let a track that just
+            // played come straight back.
+            None if self.repeat == RepeatMode::All => order.first().copied(),
+            None => None,
+        }
+    }
+
+    /// Sets shuffle and repeat, rebuilding the shuffled order when needed.
+    pub fn set_playback_modes(&mut self, shuffle: bool, repeat: RepeatMode) {
+        if shuffle && !self.shuffle {
+            self.reshuffle();
+        }
+        self.shuffle = shuffle;
+        self.repeat = repeat;
+        self.dirty = true;
+    }
+
+    /// Builds a fresh shuffled order, keeping the current track where it is.
+    ///
+    /// The track playing now stays first: shuffling should change what comes
+    /// next, not interrupt what is already sounding.
+    fn reshuffle(&mut self) {
+        let mut rest: Vec<usize> = (0..self.queue.len()).filter(|index| *index != self.queue_index).collect();
+
+        // Fisher-Yates, seeded from a fresh ULID's random section. There is no
+        // random number generator in the dependency list and this does not
+        // warrant one: nothing here is security-sensitive, it only has to be
+        // unpredictable enough that an album does not play in the same order
+        // twice.
+        let seed = ulid::Ulid::new().0 as u64;
+        let mut state = seed | 1;
+        for i in (1..rest.len()).rev() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            rest.swap(i, (state % (i as u64 + 1)) as usize);
+        }
+
+        self.shuffle_order = if self.queue.is_empty() { Vec::new() } else { vec![self.queue_index] };
+        self.shuffle_order.extend(rest);
     }
 
     /// Whether the current track has played to its end.
@@ -372,8 +463,9 @@ impl Room {
         if self.track_finished(now_ns) != Some(true) {
             return None;
         }
-        let next = self.next_in_queue()?.to_string();
-        self.queue_index += 1;
+        let next_index = self.next_index()?;
+        let next = self.queue.get(next_index)?.to_string();
+        self.queue_index = next_index;
         self.transport.media_id = Some(next.clone());
         self.transport.anchor_media_ns = 0;
         self.transport.anchor_server_ns = now_ns + self.start_lead_ns;
@@ -430,11 +522,17 @@ impl Room {
         });
         if playing_same {
             self.queue = media_ids;
+            if self.shuffle {
+                self.reshuffle();
+            }
             self.dirty = true;
             return;
         }
         self.queue = media_ids;
         self.queue_index = 0;
+        if self.shuffle {
+            self.reshuffle();
+        }
         let first = self.queue.first().cloned();
         self.select_source(SourceMode::ControlledAudio, first, None, now_ns);
     }
@@ -927,7 +1025,7 @@ impl Room {
     }
 
     /// Full room state for publication.
-    pub fn snapshot(&self, media: MediaManifest, now_ns: u64) -> RoomSnapshot {
+    pub fn snapshot(&self, media: MediaManifest, playlists: Vec<String>, now_ns: u64) -> RoomSnapshot {
         RoomSnapshot {
             room_code: self.code.clone(),
             owner_client_id: self.owner.clone(),
@@ -937,6 +1035,10 @@ impl Room {
             start_lead_ms: self.start_lead_ns as f64 / 1e6,
             queue: self.queue.clone(),
             queue_index: self.queue_index,
+            room_volume: self.volume,
+            shuffle: self.shuffle,
+            repeat: self.repeat,
+            playlists,
             health: self.health(now_ns),
             starting_when_ready: if self.pending_play { self.blockers() } else { Vec::new() },
             stream: self.stream.clone(),
@@ -1049,7 +1151,7 @@ mod tests {
         room.set_clock_report("a", stable_clock());
         assert!(room.play(0, false).is_ok());
         assert_ne!(room.transport.state, TransportState::Playing, "b is not ready");
-        let waiting = room.snapshot(MediaManifest::default(), 0).starting_when_ready;
+        let waiting = room.snapshot(MediaManifest::default(), Vec::new(), 0).starting_when_ready;
         assert!(waiting.iter().any(|r| r.contains('b')), "the blocking device should be named: {waiting:?}");
 
         room.set_ready("b", "m1");
@@ -1354,7 +1456,7 @@ mod tests {
     #[test]
     fn snapshot_reports_the_configured_lead_in_milliseconds() {
         let room = room();
-        let snapshot = room.snapshot(MediaManifest::default(), 0);
+        let snapshot = room.snapshot(MediaManifest::default(), Vec::new(), 0);
         assert_eq!(snapshot.start_lead_ms, 2000.0);
         assert_eq!(snapshot.room_code, "ABC123");
     }
@@ -1531,6 +1633,113 @@ mod tests {
         room.set_ready("a", "one");
         room.play(0, false).expect("play");
         room
+    }
+
+    /// A room part-way through a three-track queue, with every duration known
+    /// so the transport can be advanced deterministically.
+    fn three_track_room() -> Room {
+        let mut room = room();
+        add_ready(&mut room, "a", "one");
+        room.set_queue(vec!["one".into(), "two".into(), "three".into()], 0);
+        for id in ["one", "two", "three"] {
+            room.note_duration(id, 1_000_000_000);
+        }
+        room.set_ready("a", "one");
+        room.play(0, false).expect("play");
+        room
+    }
+
+    /// Runs the current track to its end and returns what started after it.
+    ///
+    /// Measured from the transport's own anchor rather than from a running
+    /// total: every advance re-anchors the timeline a start lead into the
+    /// future, so counting elapsed time independently drifts behind it.
+    fn finish_track(room: &mut Room, at_ns: &mut u64) -> Option<String> {
+        *at_ns = room.transport.anchor_server_ns + 1_500_000_000;
+        let started = room.advance_queue(*at_ns);
+        if let Some(id) = &started {
+            room.set_ready("a", id);
+        }
+        started
+    }
+
+    #[test]
+    fn a_queue_that_is_not_repeating_stops_at_the_end() {
+        let mut room = three_track_room();
+        let mut now = 0;
+        assert_eq!(finish_track(&mut room, &mut now).as_deref(), Some("two"));
+        assert_eq!(finish_track(&mut room, &mut now).as_deref(), Some("three"));
+        assert_eq!(finish_track(&mut room, &mut now), None, "the last track should be the last");
+    }
+
+    #[test]
+    fn repeat_all_wraps_to_the_top() {
+        let mut room = three_track_room();
+        room.set_playback_modes(false, RepeatMode::All);
+        let mut now = 0;
+        for expected in ["two", "three", "one", "two"] {
+            assert_eq!(finish_track(&mut room, &mut now).as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn repeat_one_plays_the_same_track_again() {
+        let mut room = three_track_room();
+        room.set_playback_modes(false, RepeatMode::One);
+        let mut now = 0;
+        for _ in 0..3 {
+            assert_eq!(finish_track(&mut room, &mut now).as_deref(), Some("one"));
+        }
+        assert_eq!(room.queue_index, 0, "repeat-one does not move through the queue");
+    }
+
+    #[test]
+    fn shuffle_plays_every_track_once_before_any_of_them_twice() {
+        // The property that matters. A shuffle that picks at random each time
+        // can play the same song three times running, which is what people
+        // actually complain about.
+        let mut room = three_track_room();
+        room.set_playback_modes(true, RepeatMode::Off);
+        let mut now = 0;
+
+        let mut played = vec!["one".to_string()];
+        while let Some(next) = finish_track(&mut room, &mut now) {
+            played.push(next);
+        }
+        let mut sorted = played.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 3, "every track exactly once: {played:?}");
+        assert_eq!(played.first().map(String::as_str), Some("one"), "shuffling must not interrupt what is playing");
+    }
+
+    #[test]
+    fn what_receivers_preload_is_what_will_actually_play_next() {
+        // Receivers decode `next_in_queue` ahead of time. If it disagrees with
+        // where `advance_queue` goes, every track change becomes a stall while
+        // the wrong buffer is thrown away and the right one is fetched.
+        for (shuffle, repeat) in
+            [(false, RepeatMode::Off), (false, RepeatMode::All), (true, RepeatMode::Off), (false, RepeatMode::One)]
+        {
+            let mut room = three_track_room();
+            room.set_playback_modes(shuffle, repeat);
+            let mut now = 0;
+            for _ in 0..3 {
+                let predicted = room.next_in_queue().map(str::to_string);
+                let actual = finish_track(&mut room, &mut now);
+                assert_eq!(predicted, actual, "shuffle={shuffle} repeat={repeat:?}");
+                if actual.is_none() {
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_room_starts_at_full_volume_and_reports_it() {
+        let room = room();
+        assert_eq!(room.volume, 1.0);
+        assert_eq!(room.snapshot(MediaManifest::default(), Vec::new(), 0).room_volume, 1.0);
     }
 
     #[test]
@@ -1977,7 +2186,7 @@ mod tests {
         assert!(room.pending_play);
         assert_eq!(room.transport.state, TransportState::Ready);
 
-        let snapshot = room.snapshot(MediaManifest::default(), 0);
+        let snapshot = room.snapshot(MediaManifest::default(), Vec::new(), 0);
         assert!(!snapshot.starting_when_ready.is_empty(), "the room must say what it waits for");
         assert!(snapshot.starting_when_ready[0].contains('a'), "{:?}", snapshot.starting_when_ready);
     }
@@ -1999,7 +2208,7 @@ mod tests {
         assert!(!room.pending_play);
         // The same lead a manual start gets: receivers need the warning either way.
         assert_eq!(room.transport.anchor_server_ns, LEAD + LEAD);
-        assert!(room.snapshot(MediaManifest::default(), 0).starting_when_ready.is_empty());
+        assert!(room.snapshot(MediaManifest::default(), Vec::new(), 0).starting_when_ready.is_empty());
     }
 
     #[test]

@@ -51,6 +51,8 @@ link.
 
 - 🎵 **Music** — every device downloads the same file, verifies it, and plays it off one shared timeline
 - 📺 **YouTube together** — every device runs its own player; HomeSync keeps them lined up
+- 🔊 **One volume for the house** — turn everything down at once, or set a single device's level; the room's gain scales each device rather than overriding it
+- 🔀 **Shuffle, repeat and saved playlists** — shuffle plays every track once before any of them twice, repeat does off/all/one, and a named queue survives a restart
 - 🎚️ **Per-device equaliser** — tame the boomy speaker in the kitchen without touching the rest, and it costs nothing while it is flat
 - 📶 **No internet needed** — it is your LAN, your files, your machine
 - 🎛️ **Quiet drift correction** — a device whose clock runs fast is nudged back by a fraction of a percent instead of restarting the room

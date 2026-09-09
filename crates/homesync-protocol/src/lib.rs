@@ -109,6 +109,12 @@ pub enum Payload {
     Volume(Volume),
     /// Controller command: mute or unmute a receiver.
     Mute(Mute),
+    /// Controller command: set the gain every receiver is scaled by.
+    RoomVolume(RoomVolume),
+    /// Controller command: set shuffle and repeat for the room's queue.
+    PlaybackModes(PlaybackModes),
+    /// Controller command: save, load or delete a named queue.
+    Playlist(PlaylistCommand),
 
     // ---- live system audio (Mode C) --------------------------------------
     /// Controller starts capturing and distributing system audio.
@@ -485,6 +491,55 @@ pub struct YoutubeRendezvous {
     pub start_latency_ms: f64,
 }
 
+/// A gain for every receiver in the room at once.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RoomVolume {
+    /// Linear gain in `0.0..=1.0`, multiplied by each device's own volume.
+    pub volume: f32,
+}
+
+/// What the queue does when it reaches the end of the list.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RepeatMode {
+    /// Stop. The room falls silent when the last track ends.
+    #[default]
+    Off,
+    /// Start the list again from the top.
+    All,
+    /// Play the current track again, forever, until somebody says otherwise.
+    One,
+}
+
+/// Shuffle and repeat, which belong to the room rather than to a device.
+///
+/// A room plays one timeline, so these cannot be per-device: two devices
+/// disagreeing about what comes next is the one thing the whole project exists
+/// to prevent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PlaybackModes {
+    pub shuffle: bool,
+    pub repeat: RepeatMode,
+}
+
+/// Save, load or delete a named queue.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PlaylistCommand {
+    /// Store the room's current queue under `name`, replacing any queue already
+    /// saved with that name.
+    Save { name: String },
+    /// Replace the room's queue with the one saved under `name`.
+    Load { name: String },
+    /// Forget the queue saved under `name`.
+    Delete { name: String },
+}
+
+/// Default for `room_volume` in a snapshot written before it existed.
+fn unity_gain() -> f32 {
+    1.0
+}
+
 /// Controller's request to begin acoustic calibration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CalibrationStart {
@@ -789,6 +844,22 @@ pub struct RoomSnapshot {
     /// Index into `queue` of the track currently on the transport.
     #[serde(default)]
     pub queue_index: usize,
+    /// Gain every receiver in this room is scaled by, in `0.0..=1.0`.
+    ///
+    /// One control for the whole house, multiplied by each device's own volume
+    /// rather than replacing it — so turning the room down keeps the balance
+    /// somebody set between a loud kitchen speaker and a quiet television.
+    #[serde(default = "unity_gain")]
+    pub room_volume: f32,
+    /// Whether the queue plays in a shuffled order.
+    #[serde(default)]
+    pub shuffle: bool,
+    /// What happens when the queue reaches its end.
+    #[serde(default)]
+    pub repeat: RepeatMode,
+    /// Names of the saved queues on this coordinator, alphabetically.
+    #[serde(default)]
+    pub playlists: Vec<String>,
     /// Plain-language reading of whether the room is in sync.
     #[serde(default)]
     pub health: RoomHealth,
