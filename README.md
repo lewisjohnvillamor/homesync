@@ -1,18 +1,8 @@
-```
-██╗  ██╗ ██████╗ ███╗   ███╗███████╗███████╗██╗   ██╗███╗   ██╗ ██████╗
-██║  ██║██╔═══██╗████╗ ████║██╔════╝██╔════╝╚██╗ ██╔╝████╗  ██║██╔════╝
-███████║██║   ██║██╔████╔██║█████╗  ███████╗ ╚████╔╝ ██╔██╗ ██║██║
-██╔══██║██║   ██║██║╚██╔╝██║██╔══╝  ╚════██║  ╚██╔╝  ██║╚██╗██║██║
-██║  ██║╚██████╔╝██║ ╚═╝ ██║███████╗███████║   ██║   ██║ ╚████║╚██████╗
-╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═══╝ ╚═════╝
-```
+<p align="center">
+  <img src="docs/images/banner.webp" alt="HomeSync — play the same music, in time, on every device in your house. Three devices on one timeline, every one starting at the same instant." width="900">
+</p>
 
 <div align="center">
-
-**Play the same music, in time, on every device in your house.**
-
-One Rust binary. No accounts, no cloud, no app to install —
-every device joins from its browser.
 
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
