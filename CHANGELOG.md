@@ -12,6 +12,19 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Added
 
+- **A project banner**, built from the interface's own colour tokens and brand
+  mark rather than drawn separately, so the README and the app look like the
+  same piece of work. The figure is the idea rather than decoration: three
+  devices, one timeline, and the single instant every one of them starts on.
+  Two shapes — a wide one for the README and a stacked one at 1280x640 for
+  GitHub's social preview, which is a different composition rather than the same
+  one letterboxed. Regenerate with `docs/demo/build-banner.mjs` and
+  `build-banner.py`.
+
+  WebP for the README at 67 kB: the background is a smooth gradient, which is
+  what PNG compresses worst — the same image is 621 kB as a PNG. The social card
+  stays PNG because GitHub's uploader for it does not take WebP.
+
 - **One volume for the whole house.** The volume control was per-device, so
   turning the music down meant visiting every device in turn — the one control
   people reach for first in multi-room audio, and it was not there. The popover

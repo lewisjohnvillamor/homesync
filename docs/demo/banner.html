@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: #0b0e13;
+    --surface: #12171f;
+    --line: #232c38;
+    --text: #e9eef5;
+    --text-dim: #94a3b4;
+    --text-faint: #64748b;
+    --accent: #5aa9ff;
+    --ok: #3ddc97;
+    --violet: #8b5cf6;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: transparent;
+  }
+
+  .banner {
+    position: relative;
+    width: var(--w);
+    height: var(--h);
+    overflow: hidden;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    /* Rounded, with the corners left transparent, so the banner reads as a
+       card on a README page rather than a rectangle butted against it. */
+    border-radius: calc(var(--unit) * 0.28);
+    box-shadow: inset 0 0 0 1px #ffffff12;
+  }
+
+  /* The app's drifting background, held still. */
+  .aurora { position: absolute; inset: 0; overflow: hidden; }
+  .aurora span {
+    position: absolute;
+    display: block;
+    width: 70vmax;
+    height: 70vmax;
+    border-radius: 50%;
+    filter: blur(10px);
+  }
+  .aurora .a {
+    top: -34%; left: -14%;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--accent) 52%, transparent), transparent 62%);
+  }
+  .aurora .b {
+    top: -46%; right: -22%;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--ok) 34%, transparent), transparent 62%);
+  }
+  .aurora .c {
+    bottom: -62%; left: 26%;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--violet) 46%, transparent), transparent 62%);
+  }
+
+  /* Keeps the text legible over the brightest part of the gradient. */
+  .veil {
+    position: absolute; inset: 0;
+    background: linear-gradient(100deg, #0b0e13 18%, #0b0e13cc 46%, #0b0e1366 78%, #0b0e1300 100%);
+  }
+
+  .inner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap);
+    width: 100%;
+    padding: 0 var(--pad);
+  }
+
+  .words { min-width: 0; flex: 0 1 auto; }
+  .sub { }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--unit) * 0.62);
+  }
+
+  .mark {
+    width: calc(var(--unit) * 1.5);
+    height: calc(var(--unit) * 1.5);
+    flex: none;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+  }
+  .mark circle { fill: var(--accent); stroke: none; }
+
+  .wordmark {
+    font-size: var(--unit);
+    font-weight: 700;
+    letter-spacing: -0.028em;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .tagline {
+    margin-top: calc(var(--unit) * 0.42);
+    font-size: calc(var(--unit) * 0.34);
+    font-weight: 500;
+    line-height: 1.32;
+    color: var(--text);
+    letter-spacing: -0.012em;
+    max-width: 24ch;
+    text-wrap: balance;
+  }
+  .tagline em { font-style: normal; color: var(--accent); white-space: nowrap; }
+
+  .sub {
+    margin-top: calc(var(--unit) * 0.3);
+    font-size: calc(var(--unit) * 0.215);
+    color: var(--text-dim);
+    line-height: 1.5;
+    max-width: 44ch;
+  }
+
+  .chips {
+    margin-top: calc(var(--unit) * 0.42);
+    display: flex;
+    gap: calc(var(--unit) * 0.16);
+    flex-wrap: wrap;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: calc(var(--unit) * 0.175);
+    color: var(--text-dim);
+    border: 1px solid var(--line);
+    background: #12171fcc;
+    border-radius: 999px;
+    padding: calc(var(--unit) * 0.09) calc(var(--unit) * 0.24);
+    white-space: nowrap;
+  }
+
+  /* --- the diagram: three devices, one instant -------------------------- */
+
+  .figure {
+    flex: none;
+    width: var(--figw);
+    /* Shared by the lanes and by the instant line drawn across them. */
+    --name-w: calc(var(--unit) * 2.5);
+    --lane-gap: calc(var(--unit) * 0.3);
+    /* Where in the track the music starts, matching START in the script. */
+    --start: 38%;
+    --start-x: calc(var(--name-w) + var(--lane-gap) + (100% - var(--name-w) - var(--lane-gap)) * 0.38);
+  }
+
+  .lane {
+    display: grid;
+    grid-template-columns: var(--name-w) 1fr;
+    align-items: center;
+    gap: var(--lane-gap);
+    margin-bottom: calc(var(--unit) * 0.26);
+  }
+  .lane:last-child { margin-bottom: 0; }
+
+  .lane-name {
+    font-size: calc(var(--unit) * 0.19);
+    color: var(--text-dim);
+    white-space: nowrap;
+    width: var(--name-w);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: calc(var(--unit) * 0.14);
+  }
+
+  .glyph {
+    width: calc(var(--unit) * 0.34);
+    height: calc(var(--unit) * 0.34);
+    flex: none;
+    fill: none;
+    stroke: var(--text-dim);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .track {
+    position: relative;
+    height: calc(var(--unit) * 0.62);
+    border-radius: calc(var(--unit) * 0.14);
+    background: #12171fd9;
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+
+  .wave { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .wave rect { fill: var(--text-faint); }
+  .wave rect.hot { fill: var(--accent); }
+
+  /* The single instant every device starts on. This is the whole idea. */
+  .now {
+    position: absolute;
+    top: calc(var(--unit) * -0.16);
+    bottom: calc(var(--unit) * -0.16);
+    width: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 calc(var(--unit) * 0.34) var(--accent);
+  }
+
+  .figure-wrap { position: relative; }
+
+  /* A social card is nearly square, so the horizontal composition leaves a
+     band of content floating in empty space. Stacked and centred instead. */
+  .stacked .inner {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+    gap: calc(var(--unit) * 0.52);
+  }
+  .stacked .brand { justify-content: center; }
+  .stacked .tagline,
+  .stacked .sub { margin-left: auto; margin-right: auto; }
+  .stacked .tagline { max-width: 26ch; }
+  .stacked .sub { max-width: 46ch; }
+  .stacked .chips { justify-content: center; }
+  /* The instant label hangs above the first lane, so the figure needs its own
+     clearance or the label lands on the chips above it. */
+  .stacked .figure { width: var(--figw); margin-top: calc(var(--unit) * 0.6); }
+  .stacked .veil {
+    background: radial-gradient(ellipse 90% 70% at 50% 46%, #0b0e13f2 38%, #0b0e13cc 66%, #0b0e1355 100%);
+  }
+
+  .now-label {
+    position: absolute;
+    font-family: var(--mono);
+    font-size: calc(var(--unit) * 0.165);
+    color: var(--accent);
+    white-space: nowrap;
+    transform: translateX(-50%);
+  }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <div class="aurora"><span class="a"></span><span class="b"></span><span class="c"></span></div>
+    <div class="veil"></div>
+
+    <div class="inner">
+      <div class="words">
+        <div class="brand">
+          <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M6.5 7.5a7 7 0 0 0 0 9M17.5 7.5a7 7 0 0 1 0 9" />
+            <path d="M3.5 4.5a11 11 0 0 0 0 15M20.5 4.5a11 11 0 0 1 0 15" />
+          </svg>
+          <span class="wordmark">HomeSync</span>
+        </div>
+
+        <p class="tagline">Play the same music, <em>in time</em>, on every device in your house.</p>
+        <p class="sub">One Rust binary. No accounts, no cloud, no app to install — every device joins from its browser.</p>
+
+        <div class="chips">
+          <span class="chip">self-hosted</span>
+          <span class="chip">LAN-only</span>
+          <span class="chip">MIT</span>
+        </div>
+      </div>
+
+      <div class="figure">
+        <div class="figure-wrap">
+          <div class="now-label" style="left: var(--start-x); top: calc(var(--unit) * -0.72)">one instant</div>
+          <div class="lane">
+            <span class="lane-name">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="3"/><circle cx="12" cy="15" r="3.2"/><circle cx="12" cy="7.5" r="1"/></svg>
+              Living room
+            </span>
+            <div class="track"><svg class="wave" preserveAspectRatio="none" viewBox="0 0 200 40"></svg></div>
+          </div>
+          <div class="lane">
+            <span class="lane-name">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="5"/><path d="M12 6v5"/><circle cx="12" cy="15.5" r="2.4"/></svg>
+              Kitchen
+            </span>
+            <div class="track"><svg class="wave" preserveAspectRatio="none" viewBox="0 0 200 40"></svg></div>
+          </div>
+          <div class="lane">
+            <span class="lane-name">
+              <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="12" rx="2.5"/><path d="M8.5 20.5h7"/><path d="M12 17v3.5"/></svg>
+              Television
+            </span>
+            <div class="track"><svg class="wave" preserveAspectRatio="none" viewBox="0 0 200 40"></svg></div>
+          </div>
+          <div class="now" style="left: var(--start-x)"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // One waveform, drawn identically in every lane. Identical on purpose: three
+  // devices rendering the same sound from the same timeline is the product.
+  const START = 0.38;
+  const bars = [];
+  let seed = 20260921;
+  const rand = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+
+  for (let x = 2; x < 200; x += 5) {
+    const before = x / 200 < START;
+    // Silence before the start instant, sound after it.
+    const height = before ? 1.5 : 4 + rand() * 30;
+    bars.push({ x, height, hot: !before && Math.abs(x / 200 - START) < 0.1 });
+  }
+
+  for (const wave of document.querySelectorAll('.wave')) {
+    for (const bar of bars) {
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', String(bar.x));
+      rect.setAttribute('width', '2.6');
+      rect.setAttribute('y', String((40 - bar.height) / 2));
+      rect.setAttribute('height', String(bar.height));
+      rect.setAttribute('rx', '1.3');
+      if (bar.hot) rect.classList.add('hot');
+      wave.append(rect);
+    }
+  }
+</script>
+</body>
+</html>
