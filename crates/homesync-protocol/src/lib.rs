@@ -825,7 +825,21 @@ pub struct RoomSnapshot {
     /// Current playback timeline.
     pub transport: Transport,
     /// Media catalogue.
-    pub media: MediaManifest,
+    ///
+    /// Absent when every client in the room already holds this version of it.
+    /// The catalogue is by far the largest thing in a snapshot — three hundred
+    /// tracks is fifty-odd kilobytes — and it changes only on a rescan, while
+    /// snapshots go out about once a second because telemetry arrives about
+    /// once a second. Sending it every time was nearly all of the
+    /// coordinator's outbound traffic.
+    ///
+    /// A client keeps the last catalogue it was given and reads
+    /// `media_version` to know whether the one it holds is still current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<MediaManifest>,
+    /// Which version of the catalogue this snapshot describes.
+    #[serde(default)]
+    pub media_version: u64,
     /// How far ahead of "now" the coordinator schedules playback starts, in
     /// milliseconds (spec section 10, step 4).
     pub start_lead_ms: f64,

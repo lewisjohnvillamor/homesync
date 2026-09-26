@@ -451,13 +451,12 @@ impl Reporter<'_> {
 
 fn finish(app: &App, room_code: &str, result: CalibrationResult) {
     let now = app.now_ns();
-    let manifest = app.media_manifest();
     let mut rooms = app.rooms();
     let Some(room) = rooms.get_mut(room_code) else { return };
     room.calibration = None;
     room.last_calibration = Some(result.clone());
     room.broadcast(Payload::CalibrationResult(result), now);
-    let snapshot = room.snapshot(manifest, app.profiles.playlist_names(), app.now_ns());
+    let snapshot = crate::ws::snapshot_now(app, room);
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
     room.dirty = false;
 }

@@ -256,7 +256,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             tracing::info!(client = %session.client_id, room = %code, role = ?join.role, "client joined");
 
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
         }
@@ -310,7 +310,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             if compensation_changed && renders_audio {
                 send_youtube_rendezvous(app, room, now, Some(&session.client_id));
             }
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -341,7 +341,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             room.note_duration(&ready.media_id, ready.duration_ns);
             room.set_ready(&session.client_id, &ready.media_id);
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -432,7 +432,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.volume = volume.volume.clamp(0.0, 1.0);
             }
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -444,7 +444,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                 client.info.muted = mute.muted;
             }
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -453,7 +453,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
         Payload::RoomVolume(command) => with_room(app, session, request_id, |app, _session, room| {
             room.volume = command.volume.clamp(0.0, 1.0);
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), now);
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -462,7 +462,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
         Payload::PlaybackModes(modes) => with_room(app, session, request_id, |app, _session, room| {
             room.set_playback_modes(modes.shuffle, modes.repeat);
             let now = app.now_ns();
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), now);
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -503,7 +503,7 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
                     }
                 }
             }
-            let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), now);
+            let snapshot = snapshot_now(app, room);
             room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
             room.dirty = false;
             None
@@ -722,9 +722,31 @@ where
 /// The dedicated `transport` frame is what receivers schedule against, and it
 /// is sent first so a large snapshot cannot delay it. The snapshot follows so
 /// the diagnostics view stays consistent with the timeline.
+/// Builds a snapshot, carrying the catalogue only when the room needs it.
+///
+/// Every snapshot used to carry the whole catalogue. Telemetry arrives about
+/// once a second and marks the room dirty, so with a three-hundred track
+/// library that was fifty-odd kilobytes per client per second, none of which
+/// had changed. It goes out when it changes, and when somebody joins who does
+/// not have it.
+///
+/// One function rather than ten call sites, because a snapshot that says a
+/// version was sent without carrying it would leave clients holding a
+/// catalogue they cannot tell is stale.
+pub(crate) fn snapshot_now(app: &App, room: &mut crate::room::Room) -> homesync_protocol::RoomSnapshot {
+    let version = app.media_version();
+    let media = room.needs_manifest(version).then(|| app.media_manifest());
+    let carried = media.is_some();
+    let snapshot = room.snapshot(media, version, app.profiles.playlist_names(), app.now_ns());
+    if carried {
+        room.manifest_sent(version);
+    }
+    snapshot
+}
+
 fn broadcast_transport_and_snapshot(app: &App, room: &mut crate::room::Room, now_ns: u64) {
     room.broadcast(Payload::Transport(room.transport.clone()), now_ns);
-    let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+    let snapshot = snapshot_now(app, room);
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now_ns);
     room.dirty = false;
 }
@@ -736,7 +758,7 @@ fn leave_room(app: &App, session: &mut Session) {
     room.remove(&session.client_id);
     tracing::info!(client = %session.client_id, room = %code, "client left");
     let now = app.now_ns();
-    let snapshot = room.snapshot(app.media_manifest(), app.profiles.playlist_names(), app.now_ns());
+    let snapshot = snapshot_now(app, room);
     room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
     room.dirty = false;
 }
@@ -758,7 +780,6 @@ fn sanitise_name(name: &str, device_id: &str) -> String {
 /// broadcast per room rather than one per report.
 pub fn flush_dirty_rooms(app: &App) {
     let now = app.now_ns();
-    let manifest = app.media_manifest();
     let mut rooms = app.rooms();
     for room in rooms.values_mut() {
         // Occupancy is stamped here rather than on join and leave: this tick
@@ -792,7 +813,7 @@ pub fn flush_dirty_rooms(app: &App) {
         if !room.dirty || room.clients.is_empty() {
             continue;
         }
-        let snapshot: RoomSnapshot = room.snapshot(manifest.clone(), app.profiles.playlist_names(), now);
+        let snapshot: RoomSnapshot = snapshot_now(app, room);
         room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
         room.dirty = false;
     }

@@ -10,6 +10,24 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ## [Unreleased]
 
+### Changed
+
+- **A snapshot no longer carries the whole catalogue every time.** Telemetry
+  arrives about once a second and marks the room dirty, and every dirty tick
+  broadcasts a snapshot — so with a 300-track library every client was being
+  sent 56.5 kB per second of catalogue that had not changed since the last one.
+  It now goes out when it changes and when somebody joins who does not have it;
+  a snapshot otherwise carries a `media_version` and nothing else, and the
+  client keeps the catalogue it was given.
+
+  Measured against 300 tracks, one client, thirty seconds: the first snapshot is
+  56.3 kB and every one after it is 1.10 kB. **56.5 kB/s to 1.10 kB/s, a factor
+  of 51**, and it multiplies by the number of devices in the room.
+
+  The tick that builds those snapshots was also cloning the entire manifest once
+  per room per tick before serialising it, whether or not anything had changed.
+  That clone is gone too.
+
 ### Added
 
 - **A project banner**, built from the interface's own colour tokens and brand
