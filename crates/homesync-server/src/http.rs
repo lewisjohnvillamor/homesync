@@ -432,7 +432,9 @@ async fn diagnostics(State(app): State<Arc<App>>, Query(query): Query<Diagnostic
         .values()
         .filter(|room| room.secret == query.secret)
         .map(|room| DiagnosticsRoom {
-            snapshot: room.snapshot(manifest.clone(), app.profiles.playlist_names(), now),
+            // The export always carries the catalogue: it is read by somebody
+            // debugging, who has no earlier snapshot to have cached it from.
+            snapshot: room.snapshot(Some(manifest.clone()), app.media_version(), app.profiles.playlist_names(), now),
             last_calibration: room.last_calibration.clone(),
         })
         .collect();

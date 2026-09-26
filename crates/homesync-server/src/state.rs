@@ -10,6 +10,7 @@ use crate::stream::StreamHandle;
 use homesync_media::MediaLibrary;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use tokio::sync::Semaphore;
 
@@ -30,6 +31,12 @@ pub struct App {
     media: RwLock<MediaLibrary>,
     /// Roots the catalogue is built from, in scan order.
     media_roots: Mutex<Vec<PathBuf>>,
+    /// Bumped whenever the catalogue is rebuilt.
+    ///
+    /// Lets a room tell whether the clients in it already hold the current
+    /// catalogue, so it can leave the largest part of a snapshot out of the
+    /// snapshots that do not need it.
+    media_version: AtomicU64,
     /// Rooms keyed by their display code.
     rooms: Mutex<HashMap<String, Room>>,
     /// Effective configuration.
@@ -212,7 +219,13 @@ impl App {
         let library = MediaLibrary::load(&roots);
         let count = library.manifest().items.len();
         *self.media.write().expect("media lock") = library;
+        self.media_version.fetch_add(1, Ordering::Relaxed);
         count
+    }
+
+    /// Which version of the catalogue is current.
+    pub fn media_version(&self) -> u64 {
+        self.media_version.load(Ordering::Relaxed)
     }
 
     /// Builds the shared state and creates the default room.
@@ -231,6 +244,7 @@ impl App {
             clock: ServerClock::new(),
             media: RwLock::new(media),
             media_roots: Mutex::new(media_roots),
+            media_version: AtomicU64::new(1),
             rooms: Mutex::new(rooms),
             config,
             version: env!("CARGO_PKG_VERSION"),

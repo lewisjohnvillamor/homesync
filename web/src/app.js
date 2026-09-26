@@ -53,6 +53,15 @@ const state = {
   offsetReconciled: false,
   /** Queue sent to the coordinator and not yet reflected in a snapshot. */
   /** @type {string[]|null} */ pendingQueue: null,
+  /**
+   * The catalogue, kept between snapshots.
+   *
+   * Snapshots carry it only when it has changed, because it is much the
+   * largest thing in one and it changes only on a rescan. `media_version` says
+   * whether what is held here is still current.
+   */
+  /** @type {object|null} */ media: null,
+  mediaVersion: 0,
   role: 'speaker',
   seeking: false,
   loadToken: 0,
@@ -260,6 +269,13 @@ function onJoinRejected(error) {
 }
 
 function onSnapshot(snapshot) {
+  // A snapshot without a catalogue means "the one you have is still right".
+  if (snapshot.media) {
+    state.media = snapshot.media;
+    state.mediaVersion = snapshot.media_version ?? 0;
+  }
+  snapshot.media = state.media ?? { items: [] };
+
   state.snapshot = snapshot;
   // The coordinator has spoken, so its queue is the queue again.
   state.pendingQueue = null;

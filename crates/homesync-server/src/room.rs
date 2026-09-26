@@ -173,6 +173,17 @@ pub struct Room {
     pub shuffle: bool,
     /// What happens at the end of the queue.
     pub repeat: RepeatMode,
+    /// Catalogue version carried by the last snapshot this room broadcast.
+    ///
+    /// Zero until one has been sent, which is why a fresh room always sends the
+    /// catalogue once before it starts leaving it out.
+    media_version_sent: u64,
+    /// Set when somebody has joined since the last snapshot went out.
+    ///
+    /// A joiner holds no catalogue at all, and the snapshot it is about to
+    /// receive is a broadcast shared with everyone, so the whole room gets the
+    /// catalogue again. That is once per join rather than once per second.
+    manifest_wanted: bool,
     /// The order shuffle plays the queue in: a permutation of its indices.
     ///
     /// Held rather than rolled at each advance so the order is a property of
@@ -220,6 +231,8 @@ impl Room {
             shuffle: false,
             repeat: RepeatMode::Off,
             shuffle_order: Vec::new(),
+            media_version_sent: 0,
+            manifest_wanted: false,
             durations_ns: BTreeMap::new(),
             rendezvous_epoch: 0,
             youtube_anchored_epoch: None,
@@ -237,6 +250,9 @@ impl Room {
         role: Role,
         tx: ClientSender,
     ) -> Result<Vec<(String, ClientSender)>, ErrorMessage> {
+        // Whoever this is holds no catalogue, so the next snapshot has to carry
+        // one even if nothing about the catalogue has changed.
+        self.manifest_wanted = true;
         // One device, one seat. A second tab on the same machine carries the
         // same device id — `homesync.deviceId` is per-origin localStorage — and
         // without this it takes a second seat in the room. That is not a
@@ -1025,7 +1041,27 @@ impl Room {
     }
 
     /// Full room state for publication.
-    pub fn snapshot(&self, media: MediaManifest, playlists: Vec<String>, now_ns: u64) -> RoomSnapshot {
+    /// Whether the next snapshot has to carry the catalogue.
+    ///
+    /// True when the catalogue has changed since the last one went out, or when
+    /// somebody has joined and so holds none.
+    pub fn needs_manifest(&self, media_version: u64) -> bool {
+        self.manifest_wanted || self.media_version_sent != media_version
+    }
+
+    /// Records that a snapshot carrying `media_version` has gone out.
+    pub fn manifest_sent(&mut self, media_version: u64) {
+        self.media_version_sent = media_version;
+        self.manifest_wanted = false;
+    }
+
+    pub fn snapshot(
+        &self,
+        media: Option<MediaManifest>,
+        media_version: u64,
+        playlists: Vec<String>,
+        now_ns: u64,
+    ) -> RoomSnapshot {
         RoomSnapshot {
             room_code: self.code.clone(),
             owner_client_id: self.owner.clone(),
@@ -1035,6 +1071,7 @@ impl Room {
             start_lead_ms: self.start_lead_ns as f64 / 1e6,
             queue: self.queue.clone(),
             queue_index: self.queue_index,
+            media_version,
             room_volume: self.volume,
             shuffle: self.shuffle,
             repeat: self.repeat,
@@ -1151,7 +1188,7 @@ mod tests {
         room.set_clock_report("a", stable_clock());
         assert!(room.play(0, false).is_ok());
         assert_ne!(room.transport.state, TransportState::Playing, "b is not ready");
-        let waiting = room.snapshot(MediaManifest::default(), Vec::new(), 0).starting_when_ready;
+        let waiting = room.snapshot(Some(MediaManifest::default()), 1, Vec::new(), 0).starting_when_ready;
         assert!(waiting.iter().any(|r| r.contains('b')), "the blocking device should be named: {waiting:?}");
 
         room.set_ready("b", "m1");
@@ -1327,6 +1364,42 @@ mod tests {
     }
 
     #[test]
+    fn the_catalogue_goes_out_once_rather_than_every_second() {
+        // Telemetry marks the room dirty about once a second, and every dirty
+        // tick broadcasts a snapshot. Carrying the catalogue in all of them was
+        // measured at 56.5 kB per client per second against a 300-track
+        // library, none of which had changed.
+        let mut room = room();
+        let _a = add(&mut room, "a", Role::Speaker);
+
+        assert!(room.needs_manifest(1), "a room nobody has been sent a catalogue yet");
+        room.manifest_sent(1);
+        assert!(!room.needs_manifest(1), "the same catalogue is not worth sending again");
+
+        // A rescan changes the version, and everyone needs the new one.
+        assert!(room.needs_manifest(2));
+        room.manifest_sent(2);
+        assert!(!room.needs_manifest(2));
+
+        // A joiner holds no catalogue at all, whatever the version says.
+        let _b = add(&mut room, "b", Role::Speaker);
+        assert!(room.needs_manifest(2), "somebody who just joined has nothing to keep");
+        room.manifest_sent(2);
+        assert!(!room.needs_manifest(2));
+    }
+
+    #[test]
+    fn a_snapshot_reports_the_catalogue_version_it_describes() {
+        // The version is what lets a client tell whether the catalogue it kept
+        // is still the right one, so it travels even when the catalogue does
+        // not.
+        let room = room();
+        let snapshot = room.snapshot(None, 7, Vec::new(), 0);
+        assert!(snapshot.media.is_none());
+        assert_eq!(snapshot.media_version, 7);
+    }
+
+    #[test]
     fn broadcast_reaches_every_member() {
         let mut room = room();
         let mut a = add(&mut room, "a", Role::Speaker);
@@ -1456,7 +1529,7 @@ mod tests {
     #[test]
     fn snapshot_reports_the_configured_lead_in_milliseconds() {
         let room = room();
-        let snapshot = room.snapshot(MediaManifest::default(), Vec::new(), 0);
+        let snapshot = room.snapshot(Some(MediaManifest::default()), 1, Vec::new(), 0);
         assert_eq!(snapshot.start_lead_ms, 2000.0);
         assert_eq!(snapshot.room_code, "ABC123");
     }
@@ -1739,7 +1812,7 @@ mod tests {
     fn a_room_starts_at_full_volume_and_reports_it() {
         let room = room();
         assert_eq!(room.volume, 1.0);
-        assert_eq!(room.snapshot(MediaManifest::default(), Vec::new(), 0).room_volume, 1.0);
+        assert_eq!(room.snapshot(Some(MediaManifest::default()), 1, Vec::new(), 0).room_volume, 1.0);
     }
 
     #[test]
@@ -2186,7 +2259,7 @@ mod tests {
         assert!(room.pending_play);
         assert_eq!(room.transport.state, TransportState::Ready);
 
-        let snapshot = room.snapshot(MediaManifest::default(), Vec::new(), 0);
+        let snapshot = room.snapshot(Some(MediaManifest::default()), 1, Vec::new(), 0);
         assert!(!snapshot.starting_when_ready.is_empty(), "the room must say what it waits for");
         assert!(snapshot.starting_when_ready[0].contains('a'), "{:?}", snapshot.starting_when_ready);
     }
@@ -2208,7 +2281,7 @@ mod tests {
         assert!(!room.pending_play);
         // The same lead a manual start gets: receivers need the warning either way.
         assert_eq!(room.transport.anchor_server_ns, LEAD + LEAD);
-        assert!(room.snapshot(MediaManifest::default(), Vec::new(), 0).starting_when_ready.is_empty());
+        assert!(room.snapshot(Some(MediaManifest::default()), 1, Vec::new(), 0).starting_when_ready.is_empty());
     }
 
     #[test]
