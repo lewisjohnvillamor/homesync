@@ -254,7 +254,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     ground.style.opacity = t >= ICON_LANDS && t < LIFT_SPAN[0] - 0.02 ? '1' : '0';
     // Only drawn for the lift (it is large; the flat ground covers the frame before).
     card.style.display = t >= LIFT_SPAN[0] - 0.05 && t < LIFT_SPAN[1] + 0.02 ? 'block' : 'none';
-    perspEl.style.visibility = t < LIFT_SPAN[1] + 0.02 ? 'visible' : 'hidden';
+    // '' (inherit), never 'visible': an explicit 'visible' would show through the layer while the film hides it.
+    perspEl.style.visibility = t < LIFT_SPAN[1] + 0.02 ? '' : 'hidden';
     // While composition 5's phone shrinks into its icon, the lanes draw in
     // behind it: nothing of the diagram is drawn left of the phone's edge.
     if (t < ICON_LANDS - 0.04) {

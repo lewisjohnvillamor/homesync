@@ -271,7 +271,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   hostDot(HOST[0], HOST[1], dotAt);
   // The laptop's screen opens from where the dot lands, after composition 4 has cleared.
   const irisC = dotAt(HOST[0]);
-  const irisR = Math.hypot(W, H) * 1.15 + 260 * u;
+  // Just far enough to clear the farthest corner, so the opening is seen growing for its whole 0.32 s.
+  const irisR = Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - irisC.x, y - irisC.y))) + 260 * u;
 
   onFrame((t) => {
     el.style.opacity = t < REVEAL ? '0' : '1';
@@ -287,7 +288,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     world.style.opacity = String(1 - out);
     // A soft-edged reveal over 0.32 s; the phone is inside it, so nothing appears outside the opening.
     const ik = span(t, REVEAL, 8.3);
-    const ir = easeInOut(ik) * irisR;
+    const ir = lerp(80 * u, irisR, 1 - (1 - ik) ** 2);
     const soft = 260 * u;
     const mask = ik < 1 ? `radial-gradient(circle at ${irisC.x}px ${irisC.y}px, #000 ${Math.max(0, ir - soft)}px, transparent ${ir + 1}px)` : 'none';
     el.style.maskImage = mask;

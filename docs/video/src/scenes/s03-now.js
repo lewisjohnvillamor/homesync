@@ -90,7 +90,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
   const PUSH = 1.06;
-  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, MERGED, EXIT + 0.1)));
+  // The push (about the stop, so the dot never moves with it) starts as the
+  // dot lands; the lines only start drifting once it has.
+  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, MERGED - 0.3, EXIT + 0.1)));
   const driftAt = (t) => sineInOut(span(t, MERGED, EXIT + 0.1)) * 28 * u;
 
   /** Where the full stop is at time t, with the push and the drift. */

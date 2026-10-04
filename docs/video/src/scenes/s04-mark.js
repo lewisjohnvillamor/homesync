@@ -166,8 +166,9 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     if (t <= DROP[0]) return held(t);
     const k = span(t, ...DROP);
     const fall = easeInOut(k);
+    // Straight down out of the mark first, then across: it never crosses an arc.
     return {
-      x: lerp(h.x, PICKUP.x, fall),
+      x: lerp(h.x, PICKUP.x, fall * fall),
       y: lerp(h.y, PICKUP.y, fall),
       // Ease-in: it lets go of the mark slowly, then shrinks to its new size.
       d: lerp(h.d, PICKUP.d, k * k),
