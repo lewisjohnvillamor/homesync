@@ -515,7 +515,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
-    const lift = span(t, 21.5, t1 - 0.01) ** 2.2;
+    const lift = span(t, 21.45, 21.74) ** 2;
     el.style.transformOrigin = '50% 50%';
     el.style.transform = lift > 0 ? `translateY(${H * 1.25 * lift}px) scale(${1 - 0.25 * lift})` : '';
     el.style.opacity = '1';

@@ -23,7 +23,7 @@ export const pad = [0.18, 0];
 
 const T0 = 24.375;
 const ENTER = 25.0;
-const PRINT = 25.625;
+const PRINT = 25.3125;
 const COLLAPSE = 26.64;
 const GONE = 26.74; // the window starts to fall away
 const HOST_END = 26.865;
@@ -40,13 +40,13 @@ const cubicIn = (k) => k * k * k;
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
   const winW = portrait ? 900 * u : 1680 * u;
-  const winH = portrait ? 700 * u : 560 * u;
+  const winH = portrait ? 920 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
   // In 9:16 the address wraps on to its own line, as it would in a narrow
   // terminal, so the type can be large enough to fill the frame.
-  const f = portrait ? 46 * u : 48 * u;
+  const f = portrait ? 54 * u : 48 * u;
   const padX = portrait ? 48 * u : 72 * u;
   const lineH = f * (portrait ? 2.0 : 1.7);
   const textX = winX + padX;
@@ -87,7 +87,7 @@ export function cursorAt(t, g) {
   // The key press: a dip on Enter, a smaller one as the line prints.
   const dip = 1 - 0.22 * Math.sin(Math.PI * span(tt, ENTER - 0.03, ENTER + 0.14)) - 0.1 * Math.sin(Math.PI * span(tt, PRINT - 0.12, PRINT));
   // Waiting for output, the cursor pulses on the beat, as a cursor blinks.
-  const blink = 1 + 0.14 * Math.sin(Math.PI * 2 * ((tt - T0) / 0.625)) ** 2 * span(tt, T0 + 0.1, T0 + 0.2) * (1 - span(tt, ENTER - 0.1, ENTER - 0.03))
+  const blink = 1 + 0.32 * Math.sin(Math.PI * 2 * ((tt - T0) / 0.625)) ** 2 * span(tt, T0 + 0.1, T0 + 0.2) * (1 - span(tt, ENTER - 0.1, ENTER - 0.03))
     + 0.12 * Math.sin(Math.PI * 2 * ((tt - ENTER) / 0.625)) ** 2 * span(tt, ENTER + 0.3, ENTER + 0.4) * (1 - span(tt, PRINT - 0.2, PRINT - 0.12))
     + 0.12 * Math.sin(Math.PI * 2 * ((tt - PRINT) / 0.625)) ** 2 * span(tt, PRINT + 0.15, PRINT + 0.25);
   // Swallowing the printed line, it swells a little and glows.
@@ -116,7 +116,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
         ${
           portrait
             ? `<span><span style="color:var(--text-dim)">${LABEL.replace(/ +:/, ' :').trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
-               <span class="example-tag" style="--tag-size:${tagSize}px;position:absolute;left:${(URL.length + 0.8) * g.cw}px;top:${g.lineH * 1.5}px;transform:translateY(-50%)">example</span>`
+               <span class="example-tag" style="--tag-size:${tagSize}px;position:absolute;left:${(LABEL.replace(/ +:/, ' :').trimEnd().length + 1) * g.cw}px;top:${g.lineH * 0.5}px;transform:translateY(-50%)">example</span>`
             : `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
         }
@@ -132,7 +132,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
 
   onFrame((t) => {
     const s = windowScale(t);
-    const fade = 1 - clamp01((t - 26.8) / 0.075);
+    const fade = 1 - clamp01((t - 26.77) / 0.1);
     const appear = clamp01((t - 24.24) / 0.12);
     // The window waits under the leaving words; its text comes up once
     // they have cleared, so no word passes over another.
@@ -142,7 +142,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     win.style.transformOrigin = `${W / 2 - g.winX}px ${H / 2 - g.winY}px`;
     win.style.transform = `scale(${s})`;
     const grow = expoOut(span(t, PRINT - 0.12, PRINT + 0.3));
-    win.style.height = `${g.winH * lerp(0.8, 1, grow)}px`;
+    win.style.height = `${g.winH * lerp(portrait ? 0.62 : 0.8, 1, grow)}px`;
     txt.style.transform = `scale(${s})`;
 
     // The printed line: appears whole, as terminal output does, with the
@@ -158,13 +158,13 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     // The caption: in the film's type, on its own band, between the two.
     const C0 = ENTER - 0.06;
     const ci = expoOut(span(t, C0, C0 + 0.4));
-    const co = cubicIn(span(t, COLLAPSE, COLLAPSE + 0.12));
+    const co = cubicIn(span(t, PRINT + 0.7, PRINT + 0.9));
     cap.style.visibility = t > C0 && co < 1 ? 'visible' : 'hidden';
     cap.style.opacity = String(clamp01((t - C0) / 0.14) * (1 - co) * fade);
     const capDrift = lerp(0, -8 * u, span(t, C0 + 0.4, COLLAPSE));
     cap.style.transformOrigin = `50% 50%`;
     // Sits inside the window's lower edge as the window grows, scaled with it.
-    const capTop = g.winY + g.winH * lerp(0.8, 1, grow) - cap.offsetHeight - 30 * u;
+    const capTop = g.winY + g.winH * lerp(portrait ? 0.62 : 0.8, 1, grow) - cap.offsetHeight - 30 * u;
     cap.style.top = `${H / 2 + (capTop - H / 2) * s}px`;
     cap.style.transform = `translate(-50%, ${22 * u * (1 - ci) + capDrift}px)`;
   });

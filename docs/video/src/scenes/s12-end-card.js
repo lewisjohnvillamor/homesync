@@ -121,7 +121,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       const k = span(t, IN[i], IN[i] + DUR[i]);
       const e = expoOut(k);
       node.style.opacity = String(clamp01((t - IN[i]) / (DUR[i] * 0.45)));
-      node.style.transform = `translateX(${(i % 2 ? 1 : -1) * (portrait ? 90 : 120) * u * (1 - e)}px)`;
+      node.style.transform = `translateX(${(i % 2 ? 1 : -1) * (portrait ? 200 : 280) * u * (1 - e)}px)`;
     });
     ground.style.opacity = '1';
   });

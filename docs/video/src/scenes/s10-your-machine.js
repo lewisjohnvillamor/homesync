@@ -19,7 +19,7 @@ import { span, lerp, clamp01 } from '../shared/beats.js';
 import { handoff } from '../shared/handoff.js';
 
 /** "Your LAN" starts sliding in while the house is still dropping away. */
-export const pad = [0.1, 0.06];
+export const pad = [0.18, 0.06];
 
 const LINES = ['Your LAN', 'Your files', 'Your machine'];
 
@@ -47,7 +47,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // Times. Each line starts moving on a beat (21.875, 22.5, 23.125) and has
   // landed ~0.35 s later. "Your files" starts a little before its beat
   // because it has a longer road: along the lower lane, then up.
-  const IN = [t0 - 0.08, t0 + 0.38, t0 + 1.25];
+  const IN = [t0 - 0.16, t0 + 0.38, t0 + 1.25];
   const OUT = [t0 + 0.54, t0 + 1.155, t1 - 0.17];
   const LEAVE = t1 - 0.25; // 24.125: gone before the terminal frame shows
   const PUSH = [t0, LEAVE];
@@ -88,7 +88,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     } else {
       x = -travel * (1 - expoOut(kIn));
       // The first line waits for the ground to cover composition 9.
-      o = clamp01((t - IN[i] - (i === 0 ? 0.08 : 0.03)) / 0.12);
+      o = clamp01((t - IN[i] - 0.02) / 0.12);
     }
     if (i < 2) {
       // Eased up and out by the next line.
