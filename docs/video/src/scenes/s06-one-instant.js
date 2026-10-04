@@ -30,7 +30,7 @@
 import { span, lerp } from '../shared/beats.js';
 import { laptopSvg, tvSvg } from '../shared/devices.js';
 import { DELAY_MS } from '../shared/diagram.js';
-import { HOUSE_VIEW } from '../shared/house-view.js';
+import { HOUSE_VIEW, HOUSE_VIEW_PORTRAIT } from '../shared/house-view.js';
 import { phoneHtml, roomHtml, laneLayout, joinTrack, ICON_LANDS } from './s05-join.js';
 
 /** Up through composition 8 and the lift that reveals the house. */
@@ -59,7 +59,7 @@ const LIFT_SPAN = [17.8, 18.05];
  * the diagram moves away from it, nothing crosses it), then is let go and the
  * film flies it into the house's host (17.95).
  */
-const DOT_RELEASE = 17.84;
+const DOT_RELEASE = 17.9;
 
 /** Composition 6: the T line falls from the dot through the lanes. */
 const FALL = [11.0, 11.8];
@@ -73,7 +73,8 @@ const RUN8 = (kind) => (DELAY_MS[kind] / 1000) * 2.5;
 /** The pull back from the close-up starts just after the phone's pulse lands on T. */
 const BACK0 = 15.3;
 /** In composition 6's hold each device acknowledges T in turn. */
-const ACK = { laptop: 11.95, phone: 12.2, tv: 12.45 };
+/** In composition 6's hold all three devices acknowledge T together — one instant, never one after another. */
+const ACK = 12.1;
 
 export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const L = laneLayout(W, H, u, portrait);
@@ -146,7 +147,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
       <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
         <div class="card" style="position:absolute;left:${-2600 * u}px;top:${L.tTop - CARD_TOP}px;width:${5200 * u + W}px;height:${CARD_TOP + 2600 * u}px;display:none;
-             background:var(--bg);border-top:${4 * u}px solid var(--line-strong);box-sizing:border-box"></div>
+             background:linear-gradient(to bottom, transparent, var(--bg) ${70 * u}px)"></div>
         ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
              background:var(--accent);transform-origin:50% 0;border-radius:${3 * u}px"></div>
@@ -196,7 +197,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   // --- the camera --------------------------------------------------------------
   // World point f appears at screen point p, scaled by s, tilted by tilt and
   // turned by rot about the plane's normal.
-  const elevation = portrait ? 54 : HOUSE_VIEW.elevation; // composition 9 frames 9:16 at 54°
+  // The house camera this plane must match: 9:16 turns the model so its long side runs up the frame.
+  const VIEW = portrait ? HOUSE_VIEW_PORTRAIT : HOUSE_VIEW;
+  const elevation = VIEW.elevation;
   const barPhone = lanes.phone.w;
   const camA = (t) => {
     const k = sine(span(t, ICON_LANDS, C7));
@@ -220,7 +223,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       px: W / 2 + (portrait ? 0 : 10 * u) + (portrait ? 10 : 30) * u * k,
       py: (portrait ? H * 0.47 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
-      rot: HOUSE_VIEW.azimuth,
+      rot: VIEW.azimuth,
     };
   };
   const mix = (a, b, k) => {
@@ -229,7 +232,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return out;
   };
   // The camera starts leaning in on the phone lane from 11.9 s, then rushes in on the cut.
-  const rushK = (t) => Math.max(0.18 * (span(t, 11.9, C7) ** 1.6), expoOut(span(t, C7 - 0.05, C7 + 0.6)));
+  const RUSH = [12.98, 13.42];
+  const rushK = (t) => {
+    const k = span(t, ...RUSH);
+    // Accelerates in, then settles slowly (quintic ease-out tail).
+    const e = k < 0.35 ? 0.5 * (k / 0.35) ** 2 * 0.35 / 0.35 * 0.35 : 0.175 + 0.825 * (1 - (1 - (k - 0.35) / 0.65) ** 4);
+    return Math.max((portrait ? 0.07 : 0.14) * (span(t, 11.9, RUSH[0]) ** 1.6), k > 0 ? e : 0);
+  };
   // The pull back leaves fast and lands slowly.
   const backK = (t) => {
     const k = span(t, BACK0, C8 + 1.1);
@@ -303,10 +312,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const reach = REACH[kind];
       // The device lights the moment T crosses its lane, and stays lit, dimming a little.
       // In the hold each device answers in turn: it pops, its screen floods, a ring opens round it.
-      const ackK = span(t, ACK[kind], ACK[kind] + 0.5);
-      const ack = Math.sin(Math.PI * Math.min(1, ackK * 1.6));
-      l.ackring.style.opacity = String(ackK > 0 && ackK < 1 ? 0.9 * (1 - ackK) : 0);
-      l.ackring.style.transform = `scale(${0.5 + 0.9 * easeOut(ackK)})`;
+      // No rings here: in this film an expanding ring means a sound starting.
+      const ackK = span(t, ACK, ACK + 0.55);
+      const ack = Math.sin(Math.PI * Math.min(1, ackK * 1.5));
+      l.ackring.style.opacity = '0';
       const lit = Math.min(1, easeOut(span(t, reach, reach + 0.18)) * (1 - 0.45 * sine(span(t, reach + 0.3, C7))) + 0.8 * ack);
       // The device lights as its pulse arrives: a glow and a small lift.
       const glowPx = (6 + 22 * lit) * u;
@@ -319,7 +328,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       }
       if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit + 0.16 * ack})`;
       // The other lanes' names step aside during the close-up, so no word is ever cut by the frame edge.
-      const aside = kind === 'phone' ? 0 : span(rush, 0.22, 0.4) * (1 - span(back, 0.3, 0.7));
+      const aside = kind === 'phone' ? 0 : span(rush, 0.1, 0.55) * (1 - span(back, 0.3, 0.7));
       l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside) * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
       l.rule.style.opacity = String(0.7 * (1 - aside));
       // 9:16, tilted: the lanes stop just past T, so nothing runs to the frame's edge.
@@ -330,7 +339,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       // A tick and a ring flash where T crosses the lane — on the line, never travelling along it.
       const tk = span(t, reach, reach + 0.18);
       l.tick.style.opacity = String((tk > 0 ? 1 : 0) * (1 - span(t, C7 + 0.3, C7 + 0.5)));
-      l.tick.style.transform = `scaleY(${easeOut(tk) * (1 + 0.5 * Math.sin(Math.PI * tk))})`;
+      l.tick.style.transform = `scaleY(${easeOut(tk) * (1 + 0.5 * Math.sin(Math.PI * tk) + 0.35 * ack)})`;
+      const tickGlow = Math.max(Math.sin(Math.PI * tk), ack);
+      l.tick.style.boxShadow = tickGlow > 0 ? `0 0 ${18 * u * tickGlow}px ${4 * u * tickGlow}px #5aa9ffaa` : 'none';
       // Rings on T: as T reaches the lane (6), and — for the phone — as its pulse lands on T (7), bigger.
       const fl = span(t, reach, reach + 0.45);
       const fl7 = kind === 'phone' ? span(t, FIRE7 + RUN7, FIRE7 + RUN7 + 0.5) : 0;
@@ -339,8 +350,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         // Sized for the close-up: ≤ ~170 px across on screen, clear of the label above.
         l.flash.style.transform = `scale(${0.25 + 0.55 * easeOut(fl7)})`;
       } else {
-        l.flash.style.opacity = String(fl > 0 && fl < 1 ? 0.9 * (1 - fl) : 0);
-        l.flash.style.transform = `scale(${0.4 + 1.4 * easeOut(fl)})`;
+        l.flash.style.opacity = '0';
+        void fl;
       }
 
       // --- compositions 7 and 8: the bar grows back from T; its start marker

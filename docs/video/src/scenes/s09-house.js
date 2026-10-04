@@ -434,8 +434,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     'beforeend',
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
-     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1]}px;
-        overflow:hidden;background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);mask-composite:intersect">
+     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 80 * u}px ${pad2[0] + 40 * u}px ${pad2[1]}px;
+        background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -461,7 +461,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 18.15);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 220 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.36, ease: 'expo.out' }, 18.22);
+    tl.fromTo(ln, { x: from * 36 * u }, { x: 0, duration: 0.42, ease: 'power3.out' }, 18.2);
+    tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, 18.2);
   });
   // Held, never still: a slow push on the whole band.
   tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.45, ease: 'none', immediateRender: false }, 18.45);

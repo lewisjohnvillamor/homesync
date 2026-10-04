@@ -26,9 +26,9 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
 
 /** Times, on beats where an action happens. */
-const REVEAL = 7.935; // the reveal opens as composition 4's arcs and wordmark finish leaving (gone by 7.98)
+const REVEAL = 8.125; // beat 13: composition 4 has left; the code's screen opens on the beat
 /** The phone comes in once the reveal has opened most of the frame. */
-const ENTER = 8.12;
+const ENTER = 8.2;
 const SCAN = [8.4, 8.75]; // the scan completes on beat 14
 const PRESS = 15 * BEAT; // 9.375
 const JOINED = 16 * BEAT; // 10.0
@@ -89,11 +89,11 @@ export function roomHtml(pw, text = true, textScale = 1) {
     <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
     ${[0, 1]
       .map(
-        (i) => `<div style="position:absolute;left:8%;right:8%;top:${24 + i * 14}%;height:11%;border-radius:${fs * 0.4}px;background:var(--surface);border:${pw * 0.003}px solid var(--line)">
+        (i) => `<div style="position:absolute;left:8%;right:8%;top:${14 + i * 12}%;height:10%;border-radius:${fs * 0.4}px;background:var(--surface);border:${pw * 0.003}px solid var(--line)">
           <div style="position:absolute;left:9%;top:38%;width:44%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line-strong)"></div></div>`,
       )
       .join('')}
-    <div class="me" style="position:absolute;left:8%;right:8%;top:52%;height:13%;border-radius:${fs * 0.4}px;background:var(--surface-2);border:${pw * 0.005}px solid var(--accent)">
+    <div class="me" style="position:absolute;left:8%;right:8%;top:37%;height:12%;border-radius:${fs * 0.4}px;background:var(--surface-2);border:${pw * 0.005}px solid var(--accent)">
       ${text ? `<div class="me-text" style="position:absolute;left:9%;top:50%;transform:translateY(-50%);font:600 ${fs * textScale}px/1 var(--sans);color:var(--text);white-space:nowrap">this device</div>` : `<div style="position:absolute;left:9%;top:40%;width:52%;height:${fs * 0.4}px;border-radius:${fs}px;background:var(--text-faint)"></div>`}
     </div>
   </div>`;
@@ -133,17 +133,17 @@ export function joinTrack(W, H, u, portrait) {
   const enter = portrait ? { x: over.x, y: H + 60 * u } : { x: W + 60 * u, y: rest.y };
 
   // Screen coordinates within the phone (fractions of the glass).
-  const button = { x: 0.03, y: 0.65, w: 0.94, h: 0.11 };
+  const button = { x: 0.03, y: 0.5, w: 0.94, h: 0.11 };
   const face = { fx: 0.895, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
   const wait = { fx: 0.895, fy: portrait ? 0.72 : 0.84 }; // where it rides in, below where the button will be
-  const indicator = { fx: 0.83, fy: 0.585 };
+  const indicator = { fx: 0.83, fy: 0.43 };
   const fs = phoneW * 0.088;
 
   // --- the phone's path, before the camera ----------------------------------
   const phonePose = (t) => {
     if (t < SCAN[0]) {
       // 9:16 brings the phone up at once, under the dot, so the lower frame is never left with only the dot.
-      const k = easeOut(span(t, portrait ? 7.99 : ENTER, SCAN[0]));
+      const k = easeOut(span(t, portrait ? 8.14 : ENTER, SCAN[0]));
       return { x: lerp(enter.x, over.x, k), y: lerp(enter.y, over.y, k) };
     }
     // Held over the code, lifting a little in the hand; then to rest.
@@ -161,7 +161,7 @@ export function joinTrack(W, H, u, portrait) {
   const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
   // 16:9: pushed in, the phone is centred near x 1000 with its rounded
   // bottom end in frame (so it reads as a phone), the code half off the left.
-  const target = { x: 1150 * u, y: 1040 * u - (phoneH * PUSH) / 2 };
+  const target = { x: 1250 * u, y: 30 * u + (phoneH * PUSH) / 2 };
   const O = portrait
     ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
     : {
@@ -244,7 +244,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
           <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
           <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
-               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.035}px;
+               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-right:${glassW * button.w * (1 - (face.fx - 0.06 - button.x) / button.w)}px;justify-content:center;
                display:flex;align-items:center;font:600 ${fs * 0.92 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
           <div class="pressed" style="position:absolute;inset:0;background:var(--accent-ink);opacity:0"></div>
           <div class="socket" style="display:none;position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
@@ -268,6 +268,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const btn = el.querySelector('.btn');
   const ripple = el.querySelector('.ripple');
   const pressed = el.querySelector('.pressed');
+  const meRow = el.querySelector('.room .me');
   const room = el.querySelector('.room');
   const meText = el.querySelector('.me-text');
 
@@ -317,7 +318,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // Once the phone has the code, the laptop steps back (dimmed) so the phone leads.
     world.style.opacity = String((1 - out) * lerp(1, 0.38, easeInOut(span(t, 8.95, 9.5))));
     // A soft-edged reveal over 0.32 s; the phone is inside it, so nothing appears outside the opening.
-    const ik = span(t, REVEAL, 8.25);
+    const ik = span(t, REVEAL, 8.42);
     const ir = irisR * (1 - (1 - ik) ** 2.2) + 1;
     const mask = ik < 1 ? `radial-gradient(circle at ${irisC.x}px ${irisC.y}px, #000 ${ir * FEATHER}px, transparent ${ir}px)` : 'none';
     el.style.maskImage = mask;
@@ -340,9 +341,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     vfFrame.style.transform = `scale(${1 - 0.06 * easeOut(found)})`;
 
     // Screens, on their beats.
-    viewfinder.style.opacity = String(1 - span(t, 8.92, 9.05));
-    join.style.opacity = String(span(t, 8.92, 9.05) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
-    room.style.opacity = String(span(t, JOINED - 0.08, JOINED + 0.06));
+    // The code leaves the viewfinder before the button arrives, so the label is never over it.
+    viewfinder.style.opacity = String(1 - span(t, 8.83, 8.95));
+    join.style.opacity = String(span(t, 8.97, 9.08) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
+    // The room's card comes in as the pressed button leaves (no dead beat);
+    // on the 10.0 beat the dot lands in it and it turns accent — joined.
+    room.style.opacity = String(span(t, 9.72, 9.9));
+    meRow.style.borderColor = t >= JOINED - 0.03 ? 'var(--accent)' : 'var(--line-strong)';
     // The press: the dot (solid throughout) shrinks a little, the button sinks
     // 3 px and darkens to its pressed state — its label turning light so it
     // stays readable — then the button goes, before the room's card comes in.
