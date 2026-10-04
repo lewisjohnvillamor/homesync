@@ -692,8 +692,18 @@ pub struct MediaManifest {
 pub struct MediaItem {
     /// Opaque identifier used in URLs and transport messages.
     pub id: String,
-    /// Human-readable title.
+    /// Human-readable title: what the file's tags call it, or its filename
+    /// when it carries no tags.
     pub title: String,
+    /// Performer, from the file's tags. Absent when it carries none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    /// Album, from the file's tags. Absent when it carries none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    /// Track number within its album, from the file's tags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<u32>,
     /// Byte length of the encoded file.
     pub bytes: u64,
     /// Lowercase hex SHA-256 of the encoded file. Receivers verify this before

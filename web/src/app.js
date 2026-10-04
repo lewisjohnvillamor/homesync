@@ -1414,14 +1414,24 @@ function renderCalibrationResult(result) {
 /**
  * The library entries the search box currently leaves showing.
  *
- * Matched on the title with a plain substring test rather than by word. A
- * library is mostly song titles, and somebody typing "mornin" has not finished
- * the word yet.
+ * Matched with a plain substring test rather than by word, because somebody
+ * typing "mornin" has not finished the word yet. Across the title, the artist
+ * and the album, because those are the three things anybody searches a music
+ * library by — searching the title alone makes "every Bowie track" impossible
+ * to ask for.
  */
 function filteredMedia(items) {
   const needle = state.mediaFilter;
   if (!needle) return items;
-  return items.filter((item) => (item.title ?? item.id).toLowerCase().includes(needle));
+  return items.filter((item) =>
+    [item.title ?? item.id, item.artist, item.album].some((field) => field?.toLowerCase().includes(needle)),
+  );
+}
+
+/** "Title — Artist", or just the title for a file that carries no tags. */
+function describeItem(item) {
+  const title = item.title ?? item.id;
+  return item.artist ? `${title} — ${item.artist}` : title;
 }
 
 function renderMediaOptions(items) {
@@ -1455,7 +1465,8 @@ function renderMediaOptions(items) {
       // after the whole file has been fetched and rejected, by which point the
       // room is already waiting for it.
       const refused = browserRefusesType(item.content_type);
-      option.textContent = refused ? `${item.title} — this device has no decoder` : item.title;
+      const label = describeItem(item);
+      option.textContent = refused ? `${label} — this device has no decoder` : label;
       option.dataset.undecodable = refused ? 'yes' : '';
       select.append(option);
     }
@@ -1523,9 +1534,11 @@ function renderMediaSession() {
     session.metadata = item
       ? new MediaMetadata({
           title: item.title ?? item.id,
-          // The room, not an artist: HomeSync does not read artist tags, and
-          // inventing one would be worse than naming where the sound is going.
-          artist: code ? `HomeSync · room ${code}` : 'HomeSync',
+          // The file's own artist where it has one. Where it has none, the
+          // room — naming where the sound is going beats an empty line, and
+          // beats inventing a performer.
+          artist: item.artist ?? (code ? `HomeSync · room ${code}` : 'HomeSync'),
+          album: item.album ?? undefined,
           artwork: item.has_artwork
             ? [{ src: `/api/v1/media/${encodeURIComponent(item.id)}/art`, sizes: '512x512' }]
             : [],
@@ -1756,13 +1769,25 @@ function renderQueue() {
     title.className = 'queue-title';
     title.textContent = item?.title ?? id;
 
+    // The artist sits beside the title rather than under it: a queue of a
+    // dozen rows each two lines tall stops being a list you can take in.
+    // Absent entirely for a file that carries no tags, rather than a dash
+    // standing in for information nobody has.
+    let by = null;
+    if (item?.artist) {
+      by = document.createElement('span');
+      by.className = 'queue-by';
+      by.textContent = item.artist;
+    }
+
     // The title is the control. A queue you can only enter at the top is a
     // list of things you are going to hear eventually rather than a list of
     // things you can play.
     const play = document.createElement('button');
     play.className = 'queue-play';
-    play.title = `Play ${item?.title ?? id}`;
+    play.title = `Play ${item ? describeItem(item) : id}`;
     play.append(title);
+    if (by) play.append(by);
     play.addEventListener('click', () => sendQueue(queue, position));
 
     const up = document.createElement('button');

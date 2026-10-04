@@ -66,6 +66,73 @@ pub struct ArtworkRef {
 /// malformed than to hold a cover worth showing.
 const MAX_ARTWORK_BYTES: u32 = 8 * 1024 * 1024;
 
+/// Longest tag value kept, in characters.
+///
+/// Tags are attacker-controlled: a file can declare a title a megabyte long,
+/// and every one of those bytes would then ride in every catalogue sent to
+/// every device. No real title is close to this.
+const MAX_TAG_CHARS: usize = 200;
+
+/// What a file's tags say about it.
+///
+/// Every field is optional because every field is routinely missing, and a
+/// guess would be worse than a blank: an album column filled with filenames
+/// cannot be sorted, grouped or trusted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Tags {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    /// Track number within the album, where the file says so.
+    pub track: Option<u32>,
+}
+
+impl Tags {
+    /// Whether nothing at all was found.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Stores `value` under `key` unless that field is already filled.
+    ///
+    /// First writer wins, so a file carrying both an ID3 tag and a Vorbis
+    /// comment — or simply a duplicate frame — keeps the earlier one rather
+    /// than whichever happens to be parsed last.
+    fn set(&mut self, field: TagField, value: &str) {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let slot = match field {
+            TagField::Title => &mut self.title,
+            TagField::Artist => &mut self.artist,
+            TagField::Album => &mut self.album,
+            TagField::Track => {
+                if self.track.is_none() {
+                    // "4/12" is how a track number is usually written, and the
+                    // total is not what this field is.
+                    let head = trimmed.split(['/', '-']).next().unwrap_or(trimmed);
+                    self.track = head.trim().parse::<u32>().ok().filter(|n| *n > 0);
+                }
+                return;
+            }
+        };
+        if slot.is_none() {
+            *slot = Some(trimmed.chars().take(MAX_TAG_CHARS).collect());
+        }
+    }
+}
+
+/// The four tag fields read, named so the three container parsers can share
+/// one setter rather than each reimplementing the limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TagField {
+    Title,
+    Artist,
+    Album,
+    Track,
+}
+
 /// One catalogue entry.
 #[derive(Debug, Clone)]
 struct Entry {
@@ -95,6 +162,9 @@ impl MediaLibrary {
             item: MediaItem {
                 id: BUILTIN_CLICK_ID.to_string(),
                 title: "Click track (built-in, 60 s)".to_string(),
+                artist: None,
+                album: None,
+                track: None,
                 bytes: click.len() as u64,
                 sha256: sha256_hex(&click),
                 content_type: "audio/wav".to_string(),
@@ -128,16 +198,23 @@ impl MediaLibrary {
         for path in paths {
             match scan_file(&path, SCAN_WINDOW) {
                 Ok(scanned) => {
-                    let title = path
+                    let filename = path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_else(|| "unnamed".to_string());
+                    // The tag wins where there is one, and the filename is the
+                    // fallback rather than the other way round: a library of
+                    // "04 - track.mp3" is not a library you can read.
+                    let title = scanned.tags.title.clone().unwrap_or(filename);
                     library.insert(Entry {
                         item: MediaItem {
                             // The content hash is the identifier, so the same
                             // file keeps its id across restarts and renames.
                             id: scanned.digest[..16].to_string(),
                             title,
+                            artist: scanned.tags.artist.clone(),
+                            album: scanned.tags.album.clone(),
+                            track: scanned.tags.track,
                             bytes: scanned.len,
                             sha256: scanned.digest,
                             content_type: content_type_for(&path),
@@ -239,6 +316,7 @@ struct ScannedFile {
     digest: String,
     artwork: Option<ArtworkRef>,
     duration_ns: Option<u64>,
+    tags: Tags,
 }
 
 /// Reads a media file once, in chunks, and returns everything the catalogue
@@ -298,7 +376,12 @@ fn scan_file(path: &Path, window: usize) -> std::io::Result<ScannedFile> {
     }
 
     let duration_ns = wav_duration_ns(&head, len);
-    Ok(ScannedFile { len, digest, artwork, duration_ns })
+    // Read from the same window the artwork is, and for the same reason: tags
+    // live near the front of every container here. A tag the window could not
+    // see the end of simply is not found, which is a missing field rather than
+    // a wrong one.
+    let tags = embedded_tags(&head);
+    Ok(ScannedFile { len, digest, artwork, duration_ns, tags })
 }
 
 /// Whether these opening bytes are an MP4 family container: a size, then the
@@ -417,6 +500,34 @@ pub fn probe_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
     embedded_artwork(bytes)
 }
 
+/// Reads a file's title, artist, album and track number, where it carries them.
+///
+/// Exposed for the fuzz targets, which drive it against mutated files: this
+/// reads lengths and counts out of a stranger's file, which is the only kind of
+/// arithmetic in this crate worth being nervous about.
+pub fn probe_tags(bytes: &[u8]) -> Tags {
+    embedded_tags(bytes)
+}
+
+/// Finds a file's tags, choosing a parser from its first bytes.
+///
+/// The same three containers as the artwork, carrying the same information in
+/// three unrelated ways: a FLAC `VORBIS_COMMENT` block, ID3v2 text frames, and
+/// MP4 `ilst` atoms. A WAV has nowhere to put any of this, so it gets nothing
+/// and falls back to its filename.
+fn embedded_tags(bytes: &[u8]) -> Tags {
+    if bytes.starts_with(b"fLaC") {
+        return flac_tags(bytes);
+    }
+    if bytes.starts_with(b"ID3") {
+        return id3_tags(bytes);
+    }
+    if looks_like_mp4(bytes) {
+        return mp4_tags(bytes);
+    }
+    Tags::default()
+}
+
 /// Finds an embedded cover picture and returns where it sits in the file.
 ///
 /// Three containers, three completely unrelated ways of carrying the same
@@ -444,6 +555,22 @@ fn embedded_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
 
 /// Walks FLAC metadata blocks for a PICTURE.
 fn flac_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
+    let mut found = None;
+    flac_blocks(bytes, |block_type, body, block_len| {
+        // 6 is PICTURE.
+        if block_type != 6 {
+            return true;
+        }
+        found = flac_picture(bytes, body, block_len);
+        found.is_none()
+    });
+    found
+}
+
+/// Walks FLAC metadata blocks, handing each one's type and body range to
+/// `visit`. Stops when `visit` returns `false`, at the block marked last, or at
+/// the first length that runs past the end of what we hold.
+fn flac_blocks(bytes: &[u8], mut visit: impl FnMut(u8, usize, usize) -> bool) -> Option<()> {
     let mut pos = 4usize;
 
     loop {
@@ -457,17 +584,89 @@ fn flac_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
             return None;
         }
 
-        // 6 is PICTURE.
-        if block_type == 6 {
-            if let Some(found) = flac_picture(bytes, body, block_len) {
-                return Some(found);
-            }
+        if !visit(block_type, body, block_len) {
+            return Some(());
         }
         if last {
-            return None;
+            return Some(());
         }
         pos = body + block_len;
     }
+}
+
+/// Comment fields read from a Vorbis comment block before giving up.
+///
+/// The block declares its own count, so a file can claim four billion
+/// comments. A real one has a dozen, and the four fields wanted are always
+/// near the front.
+const MAX_VORBIS_COMMENTS: u32 = 512;
+
+/// Reads a FLAC file's VORBIS_COMMENT block.
+fn flac_tags(bytes: &[u8]) -> Tags {
+    let mut tags = Tags::default();
+    flac_blocks(bytes, |block_type, body, block_len| {
+        // 4 is VORBIS_COMMENT.
+        if block_type != 4 {
+            return true;
+        }
+        if let Some(found) = vorbis_comments(bytes, body, block_len) {
+            tags = found;
+        }
+        false
+    });
+    tags
+}
+
+/// Parses a Vorbis comment block body: a vendor string, a count, then that
+/// many `KEY=value` strings. Every length is little-endian, which is the one
+/// thing in a FLAC file that is.
+fn vorbis_comments(bytes: &[u8], body: usize, block_len: usize) -> Option<Tags> {
+    let end = body.checked_add(block_len)?;
+    let mut at = body;
+
+    let vendor_len = read_u32_le(bytes, at)? as usize;
+    at = at.checked_add(4)?.checked_add(vendor_len)?;
+    if at > end {
+        return None;
+    }
+
+    let count = read_u32_le(bytes, at)?.min(MAX_VORBIS_COMMENTS);
+    at = at.checked_add(4)?;
+
+    let mut tags = Tags::default();
+    for _ in 0..count {
+        // Every way of running out returns what was read rather than
+        // discarding it. The count comes out of the file, so a tagger that
+        // wrote one too many — or a truncated block — would otherwise throw
+        // away the title it had already parsed correctly.
+        let Some(len) = read_u32_le(bytes, at).map(|len| len as usize) else { return Some(tags) };
+        let Some(start) = at.checked_add(4) else { return Some(tags) };
+        let Some(stop) = start.checked_add(len) else { return Some(tags) };
+        if stop > end {
+            return Some(tags);
+        }
+        let Some(raw) = bytes.get(start..stop) else { return Some(tags) };
+        let comment = String::from_utf8_lossy(raw);
+        if let Some((key, value)) = comment.split_once('=') {
+            let field = match key.to_ascii_uppercase().as_str() {
+                "TITLE" => Some(TagField::Title),
+                "ARTIST" => Some(TagField::Artist),
+                "ALBUM" => Some(TagField::Album),
+                "TRACKNUMBER" => Some(TagField::Track),
+                _ => None,
+            };
+            if let Some(field) = field {
+                tags.set(field, value);
+            }
+        }
+        at = stop;
+    }
+    Some(tags)
+}
+
+/// Little-endian `u32` at `at`, or `None` if four bytes are not there.
+fn read_u32_le(bytes: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(at..at.checked_add(4)?)?.try_into().ok()?))
 }
 
 /// Finds an `APIC` frame in an ID3v2 tag, as MP3 files carry cover art.
@@ -476,6 +675,28 @@ fn flac_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
 /// sizes, and files old enough to have one are rare enough that guessing at
 /// them would add a second parser for almost nobody.
 fn id3_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
+    let mut found = None;
+    id3_frames(bytes, |id, body, size| {
+        if id != b"APIC" {
+            return true;
+        }
+        found = apic_picture(bytes, body, size);
+        // Keep walking only while nothing usable has been found: a file can
+        // carry several APIC frames and the first may be one this refuses.
+        found.is_none()
+    });
+    found
+}
+
+/// Walks the frames of an ID3v2 tag, handing each frame's id and body range to
+/// `visit`. Walking stops when `visit` returns `false`, or at the first thing
+/// that does not look like a frame.
+///
+/// One walk shared by the picture parser and the text-tag parser. The delicate
+/// parts — the synchsafe sizes, the version difference in how they are
+/// written, the extended header, the padding that ends a tag — are the kind
+/// that would drift apart if there were two copies.
+fn id3_frames(bytes: &[u8], mut visit: impl FnMut(&[u8], usize, usize) -> bool) -> Option<()> {
     let header = bytes.get(0..10)?;
     let major = header[3];
     if !(3..=4).contains(&major) {
@@ -512,14 +733,81 @@ fn id3_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
         if body.checked_add(size)? > tag_end {
             return None;
         }
-        if &frame[0..4] == b"APIC" {
-            if let Some(found) = apic_picture(bytes, body, size) {
-                return Some(found);
-            }
+        if !visit(&frame[0..4], body, size) {
+            return Some(());
         }
         at = body + size;
     }
-    None
+    Some(())
+}
+
+/// Reads the text frames of an ID3v2 tag: title, artist, album, track number.
+fn id3_tags(bytes: &[u8]) -> Tags {
+    let mut tags = Tags::default();
+    id3_frames(bytes, |id, body, size| {
+        let field = match id {
+            b"TIT2" => TagField::Title,
+            b"TPE1" => TagField::Artist,
+            b"TALB" => TagField::Album,
+            b"TRCK" => TagField::Track,
+            _ => return true,
+        };
+        if let Some(text) = id3_text(bytes, body, size) {
+            tags.set(field, &text);
+        }
+        true
+    });
+    tags
+}
+
+/// Decodes an ID3v2 text frame body: one encoding byte, then the string.
+///
+/// Four encodings, and reading one as another is not a cosmetic error — a
+/// UTF-16 title read as Latin-1 comes out as every other character separated by
+/// nulls. The read is capped well above any real title, so a frame declaring a
+/// megabyte of text costs a bounded amount of work rather than a megabyte of
+/// allocation per track in the library.
+fn id3_text(bytes: &[u8], body: usize, size: usize) -> Option<String> {
+    let encoding = *bytes.get(body)?;
+    let end = body.checked_add(size)?;
+    let text_start = body + 1;
+    // Four bytes per character is the worst case of any encoding here.
+    let capped = end.min(text_start.saturating_add(MAX_TAG_CHARS.saturating_mul(4)));
+    let raw = bytes.get(text_start..capped)?;
+
+    let decoded = match encoding {
+        // UTF-16 with a byte-order mark, then UTF-16 big-endian without one.
+        1 | 2 => {
+            let (raw, big_endian) = match (encoding, raw.get(0..2)) {
+                (1, Some([0xff, 0xfe])) => (&raw[2..], false),
+                (1, Some([0xfe, 0xff])) => (&raw[2..], true),
+                // A declared BOM that is not there. Big-endian is what the
+                // specification says to assume.
+                (1, _) => (raw, true),
+                _ => (raw, true),
+            };
+            let units: Vec<u16> = raw
+                .chunks_exact(2)
+                .map(|pair| {
+                    if big_endian {
+                        u16::from_be_bytes([pair[0], pair[1]])
+                    } else {
+                        u16::from_le_bytes([pair[0], pair[1]])
+                    }
+                })
+                .collect();
+            String::from_utf16_lossy(&units)
+        }
+        3 => String::from_utf8_lossy(raw).into_owned(),
+        // Latin-1. Every byte is its own code point, which is the one encoding
+        // where that is true and the reason it cannot fail.
+        _ => raw.iter().map(|b| *b as char).collect(),
+    };
+
+    // A frame is null-terminated, and v2.4 separates multiple values with
+    // nulls. The first value is the one that belongs in a single field.
+    let first = decoded.split('\0').next().unwrap_or("").trim().to_string();
+    (!first.is_empty()).then_some(first)
 }
 
 /// Reads an `APIC` frame body: text encoding, MIME, picture type, description,
@@ -573,6 +861,61 @@ fn mp4_artwork(bytes: &[u8]) -> Option<ArtworkRef> {
     let start = data.0 + 8;
     let len = data.1.checked_sub(start)?;
     artwork_ref(content_type, start, len)
+}
+
+/// Reads the `ilst` metadata an MP4, M4A or M4B keeps its tags in.
+fn mp4_tags(bytes: &[u8]) -> Tags {
+    let mut tags = Tags::default();
+    let Some(ilst) = find_atom(bytes, 0, bytes.len(), &[b"moov", b"udta", b"meta", b"ilst"]) else {
+        return tags;
+    };
+
+    // The atom names are the iTunes convention: a copyright sign, which is
+    // 0xa9 in the single byte MP4 uses for it, then three letters.
+    for (name, field) in [(b"\xa9nam", TagField::Title), (b"\xa9ART", TagField::Artist), (b"\xa9alb", TagField::Album)]
+    {
+        if let Some(text) = mp4_text(bytes, ilst, name) {
+            tags.set(field, &text);
+        }
+    }
+    if let Some(track) = mp4_track_number(bytes, ilst) {
+        tags.set(TagField::Track, &track.to_string());
+    }
+    tags
+}
+
+/// Reads one text atom out of an `ilst`.
+///
+/// Inside the named atom is a `data` atom: four flag bytes whose low byte says
+/// what the payload is, four reserved bytes, then the payload. Only the UTF-8
+/// and Latin-1 types are read; anything else is a type this does not
+/// understand, and guessing would put mojibake in the library.
+fn mp4_text(bytes: &[u8], ilst: (usize, usize), name: &[u8; 4]) -> Option<String> {
+    let atom = find_atom(bytes, ilst.0, ilst.1, &[name])?;
+    let data = find_atom(bytes, atom.0, atom.1, &[b"data"])?;
+    let kind = *bytes.get(data.0 + 3)?;
+    let start = data.0.checked_add(8)?;
+    let capped = data.1.min(start.saturating_add(MAX_TAG_CHARS.saturating_mul(4)));
+    let raw = bytes.get(start..capped)?;
+    match kind {
+        1 => Some(String::from_utf8_lossy(raw).into_owned()),
+        // 0 is "binary", which some taggers use for plain Latin-1 text.
+        0 => Some(raw.iter().map(|b| *b as char).collect()),
+        _ => None,
+    }
+}
+
+/// Reads the track number out of an `ilst`'s `trkn` atom.
+///
+/// `trkn` is binary rather than text: eight bytes, of which the track number
+/// is the big-endian pair at offset two. The pair after it is the album's
+/// total, which is not what this field is.
+fn mp4_track_number(bytes: &[u8], ilst: (usize, usize)) -> Option<u32> {
+    let atom = find_atom(bytes, ilst.0, ilst.1, &[b"trkn"])?;
+    let data = find_atom(bytes, atom.0, atom.1, &[b"data"])?;
+    let payload = bytes.get(data.0 + 8..data.1)?;
+    let number = u16::from_be_bytes(payload.get(2..4)?.try_into().ok()?);
+    (number > 0).then_some(u32::from(number))
 }
 
 /// Walks a path of MP4 atoms and returns the body range of the last one.
@@ -1099,6 +1442,234 @@ mod tests {
         out
     }
 
+    /// An ID3v2 tag holding the given text frames, in either major version.
+    pub(super) fn mp3_with_text(major: u8, frames: &[(&[u8; 4], u8, &[u8])]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for (id, encoding, text) in frames {
+            let mut frame_body = vec![*encoding];
+            frame_body.extend_from_slice(text);
+            let size = frame_body.len() as u32;
+            body.extend_from_slice(*id);
+            if major == 4 {
+                body.extend_from_slice(&[
+                    (size >> 21) as u8 & 0x7f,
+                    (size >> 14) as u8 & 0x7f,
+                    (size >> 7) as u8 & 0x7f,
+                    size as u8 & 0x7f,
+                ]);
+            } else {
+                body.extend_from_slice(&size.to_be_bytes());
+            }
+            body.extend_from_slice(&[0, 0]);
+            body.extend_from_slice(&frame_body);
+        }
+
+        let mut out = Vec::from(*b"ID3");
+        out.extend_from_slice(&[major, 0, 0]);
+        let tag = body.len() as u32;
+        out.extend_from_slice(&[
+            (tag >> 21) as u8 & 0x7f,
+            (tag >> 14) as u8 & 0x7f,
+            (tag >> 7) as u8 & 0x7f,
+            tag as u8 & 0x7f,
+        ]);
+        out.extend_from_slice(&body);
+        out
+    }
+
+    /// A FLAC file whose VORBIS_COMMENT block holds `comments`.
+    pub(super) fn flac_with_comments(comments: &[&str]) -> Vec<u8> {
+        let mut block = Vec::new();
+        let vendor = "homesync-test";
+        block.extend_from_slice(&(vendor.len() as u32).to_le_bytes());
+        block.extend_from_slice(vendor.as_bytes());
+        block.extend_from_slice(&(comments.len() as u32).to_le_bytes());
+        for comment in comments {
+            block.extend_from_slice(&(comment.len() as u32).to_le_bytes());
+            block.extend_from_slice(comment.as_bytes());
+        }
+
+        let mut out = Vec::from(*b"fLaC");
+        // A stand-in STREAMINFO, then the comment block marked last.
+        out.push(0);
+        out.extend_from_slice(&[0, 0, 4]);
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        out.push(0x80 | 4);
+        let len = block.len() as u32;
+        out.extend_from_slice(&[(len >> 16) as u8, (len >> 8) as u8, len as u8]);
+        out.extend_from_slice(&block);
+        out
+    }
+
+    /// An M4A whose `ilst` holds the given text atoms, plus a `trkn`.
+    pub(super) fn m4a_with_tags(text: &[(&[u8; 4], u8, &[u8])], track: Option<u16>) -> Vec<u8> {
+        let mut ilst_body = Vec::new();
+        for (name, kind, value) in text {
+            let mut data_body = vec![0, 0, 0, *kind, 0, 0, 0, 0];
+            data_body.extend_from_slice(value);
+            ilst_body.extend_from_slice(&atom(name, &atom(b"data", &data_body)));
+        }
+        if let Some(track) = track {
+            let mut data_body = vec![0, 0, 0, 0, 0, 0, 0, 0];
+            // Eight bytes of payload: a leading pair, the track, then the total.
+            data_body.extend_from_slice(&[0, 0]);
+            data_body.extend_from_slice(&track.to_be_bytes());
+            data_body.extend_from_slice(&[0, 12, 0, 0]);
+            ilst_body.extend_from_slice(&atom(b"trkn", &atom(b"data", &data_body)));
+        }
+
+        let ilst = atom(b"ilst", &ilst_body);
+        let mut meta_body = vec![0, 0, 0, 0];
+        meta_body.extend_from_slice(&ilst);
+        let moov = atom(b"moov", &atom(b"udta", &atom(b"meta", &meta_body)));
+
+        let mut out = atom(b"ftyp", b"M4A ");
+        out.extend_from_slice(&moov);
+        out
+    }
+
+    #[test]
+    fn id3_text_frames_are_read_in_both_versions() {
+        for major in [3u8, 4] {
+            let file = mp3_with_text(
+                major,
+                &[
+                    (b"TIT2", 3, "Clair de Lune".as_bytes()),
+                    (b"TPE1", 3, "Debussy".as_bytes()),
+                    (b"TALB", 3, "Suite bergamasque".as_bytes()),
+                    (b"TRCK", 3, "3/4".as_bytes()),
+                ],
+            );
+            let tags = embedded_tags(&file);
+            assert_eq!(tags.title.as_deref(), Some("Clair de Lune"), "major {major}");
+            assert_eq!(tags.artist.as_deref(), Some("Debussy"));
+            assert_eq!(tags.album.as_deref(), Some("Suite bergamasque"));
+            // "3/4" is a track number and a total, not a fraction.
+            assert_eq!(tags.track, Some(3));
+        }
+    }
+
+    #[test]
+    fn id3_utf16_text_is_not_read_as_latin1() {
+        // The failure this prevents is visible rather than subtle: a UTF-16
+        // title read a byte at a time comes out with a null between every
+        // character.
+        let mut utf16 = vec![0xff, 0xfe];
+        for unit in "Grüße".encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        let file = mp3_with_text(4, &[(b"TIT2", 1, &utf16)]);
+        assert_eq!(embedded_tags(&file).title.as_deref(), Some("Grüße"));
+
+        // Big-endian, no byte-order mark: encoding 2.
+        let mut be = Vec::new();
+        for unit in "Grüße".encode_utf16() {
+            be.extend_from_slice(&unit.to_be_bytes());
+        }
+        let file = mp3_with_text(4, &[(b"TIT2", 2, &be)]);
+        assert_eq!(embedded_tags(&file).title.as_deref(), Some("Grüße"));
+    }
+
+    #[test]
+    fn id3_latin1_text_is_decoded_as_latin1_not_utf8() {
+        // 0xe9 is "é" in Latin-1 and an incomplete sequence in UTF-8. Reading
+        // it as UTF-8 would replace it with a question mark.
+        let file = mp3_with_text(4, &[(b"TIT2", 0, &[b'C', b'a', b'f', 0xe9])]);
+        assert_eq!(embedded_tags(&file).title.as_deref(), Some("Café"));
+    }
+
+    #[test]
+    fn a_v24_frame_with_several_values_keeps_the_first() {
+        // v2.4 separates multiple values with nulls. A single field can hold
+        // one of them, and the first is the one that belongs there.
+        let file = mp3_with_text(4, &[(b"TPE1", 3, b"Lennon\0McCartney")]);
+        assert_eq!(embedded_tags(&file).artist.as_deref(), Some("Lennon"));
+    }
+
+    #[test]
+    fn vorbis_comments_are_read_whatever_case_the_keys_are_in() {
+        let file = flac_with_comments(&["TITLE=Spiegel im Spiegel", "artist=Pärt", "Album=Alina", "TRACKNUMBER=2"]);
+        let tags = embedded_tags(&file);
+        assert_eq!(tags.title.as_deref(), Some("Spiegel im Spiegel"));
+        assert_eq!(tags.artist.as_deref(), Some("Pärt"));
+        assert_eq!(tags.album.as_deref(), Some("Alina"));
+        assert_eq!(tags.track, Some(2));
+    }
+
+    #[test]
+    fn a_comment_without_an_equals_sign_is_skipped_rather_than_fatal() {
+        let file = flac_with_comments(&["this is not a key-value pair", "TITLE=Found anyway"]);
+        assert_eq!(embedded_tags(&file).title.as_deref(), Some("Found anyway"));
+    }
+
+    #[test]
+    fn a_vorbis_block_claiming_more_comments_than_it_holds_is_bounded() {
+        // The count comes out of the file. A lying one must stop at the end of
+        // the block rather than reading whatever follows it.
+        let mut file = flac_with_comments(&["TITLE=Real"]);
+        // Overwrite the comment count with a claim of four billion.
+        let count_at = file.len() - 4 - "TITLE=Real".len() - 4;
+        file[count_at..count_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        // The point is that this returns at all, with what it did manage to read.
+        assert_eq!(embedded_tags(&file).title.as_deref(), Some("Real"));
+    }
+
+    #[test]
+    fn mp4_tags_are_read_from_ilst() {
+        let file = m4a_with_tags(
+            &[
+                (b"\xa9nam", 1, "Teardrop".as_bytes()),
+                (b"\xa9ART", 1, "Massive Attack".as_bytes()),
+                (b"\xa9alb", 1, "Mezzanine".as_bytes()),
+            ],
+            Some(4),
+        );
+        let tags = embedded_tags(&file);
+        assert_eq!(tags.title.as_deref(), Some("Teardrop"));
+        assert_eq!(tags.artist.as_deref(), Some("Massive Attack"));
+        assert_eq!(tags.album.as_deref(), Some("Mezzanine"));
+        // Not 12, which is the album total sitting right beside it.
+        assert_eq!(tags.track, Some(4));
+    }
+
+    #[test]
+    fn a_file_with_no_tags_reports_none_rather_than_guessing() {
+        // A WAV has nowhere to carry any of this, and a guess would be worse
+        // than a blank: an album column full of filenames cannot be grouped.
+        let wav = write_wav_s16(&[0i16; 32], 48_000, 2);
+        assert!(embedded_tags(&wav).is_empty());
+        assert!(embedded_tags(b"").is_empty());
+        assert!(embedded_tags(b"ID3").is_empty());
+    }
+
+    #[test]
+    fn an_absurdly_long_tag_is_truncated_rather_than_carried() {
+        // Every byte of a title rides in every catalogue sent to every device.
+        let long = "x".repeat(10_000);
+        let file = flac_with_comments(&[&format!("TITLE={long}")]);
+        let title = embedded_tags(&file).title.expect("a title");
+        assert_eq!(title.chars().count(), MAX_TAG_CHARS);
+    }
+
+    #[test]
+    fn a_track_number_of_zero_is_treated_as_absent() {
+        // Taggers write 0 for "no track number". Showing it as track zero
+        // would sort an album's first song after its last.
+        let file = flac_with_comments(&["TRACKNUMBER=0"]);
+        assert_eq!(embedded_tags(&file).track, None);
+        let file = m4a_with_tags(&[], Some(0));
+        assert_eq!(embedded_tags(&file).track, None);
+    }
+
+    #[test]
+    fn finding_tags_does_not_stop_the_cover_being_found() {
+        // Both parsers walk the same blocks. Sharing the walk is how they stay
+        // in agreement, and this is the test that they do.
+        let file = flac_with_picture("image/png", PNG, None);
+        assert!(embedded_artwork(&file).is_some(), "the picture must still be found");
+        assert!(embedded_tags(&file).is_empty(), "and a file with no comment block has no tags");
+    }
+
     #[test]
     fn an_mp3_cover_is_found_in_both_id3_versions() {
         // v2.3 sizes are plain big-endian and v2.4 sizes are synchsafe.
@@ -1395,6 +1966,15 @@ mod fuzz {
             super::tests::mp3_with_cover(3, 0, b"image/jpeg", b"cover", png),
             super::tests::mp3_with_cover(4, 1, b"image/png", &[0x41, 0x00], png),
             super::tests::m4a_with_cover(13, png),
+            // Tag-bearing seeds, so mutation reaches the text walkers rather
+            // than only the picture ones.
+            super::tests::flac_with_comments(&["TITLE=Seed", "ARTIST=Nobody", "ALBUM=None", "TRACKNUMBER=7/9"]),
+            super::tests::mp3_with_text(
+                4,
+                &[(b"TIT2", 3, b"Seed"), (b"TPE1", 1, &[0xff, 0xfe, b'N', 0]), (b"TRCK", 0, b"7/9")],
+            ),
+            super::tests::mp3_with_text(3, &[(b"TALB", 0, b"Latin-1 \xe9"), (b"TIT2", 2, &[0, b'A', 0, b'B'])]),
+            super::tests::m4a_with_tags(&[(b"\xa9nam", 1, b"Seed"), (b"\xa9ART", 0, b"Nobody")], Some(7)),
             b"fLaC".to_vec(),
             b"ID3\x04\x00\x00\x00\x00\x00\x00".to_vec(),
         ]
@@ -1408,6 +1988,7 @@ mod fuzz {
     /// artwork" — but it means the parse was wrong, and a wrong parse is how a
     /// parser ends up returning somebody else's bytes.
     fn check(bytes: &[u8], seed: u64, what: &str) {
+        check_tags(bytes, seed, what);
         let Some(art) = embedded_artwork(bytes) else { return };
         let offset = art.offset as usize;
         let end = offset
@@ -1424,6 +2005,30 @@ mod fuzz {
             "{what} seed {seed}: accepted content type {:?}",
             art.content_type
         );
+    }
+
+    /// What the tag parsers promise.
+    ///
+    /// Not a byte range, so there is no offset to check. What there is instead
+    /// is a bound: every string that comes back rides in every catalogue sent
+    /// to every device, so a file must not be able to make one unbounded, and
+    /// a track number read out of a stranger's bytes must not be zero — which
+    /// would sort an album's first song after its last.
+    fn check_tags(bytes: &[u8], seed: u64, what: &str) {
+        let tags = embedded_tags(bytes);
+        for (field, value) in [("title", &tags.title), ("artist", &tags.artist), ("album", &tags.album)] {
+            let Some(value) = value else { continue };
+            assert!(
+                value.chars().count() <= MAX_TAG_CHARS,
+                "{what} seed {seed}: {field} came back {} characters long",
+                value.chars().count()
+            );
+            assert!(!value.is_empty(), "{what} seed {seed}: an empty {field} was accepted");
+            assert_eq!(value.trim(), value, "{what} seed {seed}: {field} was not trimmed");
+        }
+        if let Some(track) = tags.track {
+            assert!(track > 0, "{what} seed {seed}: a track number of zero was accepted");
+        }
     }
 
     #[test]

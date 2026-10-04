@@ -42,6 +42,7 @@ link.
 - 🎵 **Music** — every device downloads the same file, verifies it, and plays it off one shared timeline
 - 📺 **YouTube together** — every device runs its own player; HomeSync keeps them lined up
 - 🔊 **One volume for the house** — turn everything down at once, or set a single device's level; the room's gain scales each device rather than overriding it
+- 🏷️ **A library you can actually read** — title, artist and album come from the file's own tags, and the search box matches all three
 - 🔀 **Shuffle, repeat and saved playlists** — shuffle plays every track once before any of them twice, repeat does off/all/one, and a named queue survives a restart
 - ⏭️ **Skip, search and queue in bulk** — next and previous move the whole room at once, and a search box with **Add all** queues an album in two clicks rather than twelve
 - 🌙 **A sleep timer** — the room stops after 15, 30, 45, 60 or 90 minutes, and the timer belongs to the house rather than to the phone that set it
@@ -227,7 +228,12 @@ networks**, or no device will be able to reach it.
 ### Which file formats work
 
 `wav`, `mp3`, `m4a`, `m4b`, `mp4`, `aac`, `ogg`, `oga`, `opus`, `flac`, `webm`,
-`aif` and `aiff`, with embedded cover art from FLAC, MP3 and MP4 files.
+`aif` and `aiff`, with embedded cover art and tags — title, artist, album and
+track number — from FLAC, MP3 and MP4 files.
+
+A file with no tags is listed by its filename, and shows no artist rather than
+a guess. A file with tags is listed by what they say, which is what makes the
+library searchable by artist and album rather than only by title.
 
 MP3, WAV, FLAC, Ogg Vorbis and Opus are **confirmed playing** — real encoded
 files, selected in the interface and played, not fixtures. AAC in an `.m4a` is
@@ -320,10 +326,12 @@ happens on its own.
 
 ### Finding something to play
 
-The library picker has a search box over it. Type part of a title, and the
+The library picker has a search box over it. Type part of a title, an artist or
+an album, and the
 count above the list says how far it has been narrowed — `2 of 312`. **Add all**
 then queues everything the search left showing, which is how an album gets into
-the queue in two clicks rather than a dozen trips through a dropdown.
+the queue in two clicks rather than a dozen trips through a dropdown: search
+for the album, press Add all.
 
 **Next** and **Previous** move the whole room, not the device you pressed them
 on. Under shuffle they follow the same order the queue would have taken on its
@@ -573,11 +581,11 @@ belong — including the failures.
 Formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **291 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+- **310 Rust unit tests.** Clock estimation against synthetic latency, jitter,
   drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and skew; the room state machine;
-  cover-art parsers for three container formats; the address rules that stop
+  cover-art and tag parsers for three container formats; the address rules that stop
   fetch-by-URL being aimed at the local network; the room table and its reaping;
   and the join limiter's accounting against a fake clock.
 
@@ -615,7 +623,9 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
 The metadata parsers walk ID3 frames, MP4 atoms and FLAC blocks using lengths
 read out of the file itself — the only code here that trusts a stranger's
-arithmetic. Two harnesses cover it:
+arithmetic. That now covers the text tags as well as the cover art, which is
+more of the same arithmetic: a string length, a comment count, a text encoding
+byte. Two harnesses cover it:
 
 - A **deterministic mutation harness** in the normal suite, so it runs on stable
   Rust with no extra toolchain on every `cargo test`. It truncates valid files at
@@ -628,9 +638,9 @@ arithmetic. Two harnesses cover it:
   cargo +nightly fuzz run artwork
   ```
 
-  Three targets: `artwork`, `range_header` and `download_name`. Kept out of the
-  workspace so nightly and libFuzzer never become a requirement for an ordinary
-  build.
+  Four targets: `artwork`, `tags`, `range_header` and `download_name`. Kept out
+  of the workspace so nightly and libFuzzer never become a requirement for an
+  ordinary build.
 
 Both assert the invariant that matters, which is not merely "does not crash": a
 returned picture range must lie inside the file, be non-empty, and describe an

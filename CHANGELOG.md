@@ -12,6 +12,37 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Added
 
+- **The library reads the file's tags.** Every track was listed by its
+  filename, so a tidy folder of `04 - track.mp3` produced a library nobody
+  could read and nothing but the title to search. Title, artist, album and
+  track number are now read from ID3v2 text frames, MP4 `ilst` atoms and FLAC
+  Vorbis comments — the same three containers the cover-art walk already
+  handled, now sharing its walkers rather than getting a second copy of the
+  delicate parts.
+
+  The tag wins where there is one and the filename is the fallback, not the
+  other way round. A file with no tags shows no artist at all rather than a
+  dash or a guess: an album column filled with filenames cannot be sorted,
+  grouped or trusted.
+
+  Searching now matches artist and album as well as title, because "everything
+  by this band" is a question a title search cannot answer. The picker lists
+  `Title — Artist`, the queue names the artist beside each title, and a phone's
+  lock screen shows the real performer instead of the room's name.
+
+  Tags are a stranger's lengths and counts, so: values are capped at 200
+  characters — every one of them rides in every catalogue sent to every device
+  — a Vorbis block is held to 512 comments however many it claims, a track
+  number of zero is treated as absent, and the four text encodings ID3 allows
+  are each decoded as themselves, because a UTF-16 title read as Latin-1 comes
+  back with a null between every character. The deterministic mutation harness
+  now covers the tag parsers alongside the picture parser, and there is a
+  fourth coverage-guided target (`cargo +nightly fuzz run tags`).
+
+  Writing those tests found a real bug: a comment block claiming more comments
+  than it held threw away the tags it had already read correctly, instead of
+  returning them.
+
 - **A room's queue survives a restart.** A room remembered only its code,
   secret and name, so restarting the coordinator left every device looking at
   an empty queue — the one thing that makes a restart feel like data loss. The

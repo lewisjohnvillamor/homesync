@@ -61,6 +61,56 @@ if (!playwright) {
 const NAMES = ['alpha-morning.wav', 'beta-evening.wav', 'gamma-morning.wav'];
 const mediaDir = mkdtempSync(join(tmpdir(), 'homesync-controls-'));
 
+/**
+ * A file carrying real tags, so the library has something to read a title,
+ * artist and album out of.
+ *
+ * A FLAC header and one VORBIS_COMMENT block, with no audio after it. That is
+ * enough for the coordinator's scanner, which reads tags out of the file's
+ * metadata blocks and never decodes a sample — and it is the only way to get a
+ * genuinely tagged file into this test without shipping a binary fixture or an
+ * encoder. It is deliberately never queued: a browser asked to play it would
+ * rightly fail, which is a different thing from what is under test here.
+ */
+const TAGGED = { title: 'Nightswimming', artist: 'Tagged Artist', album: 'Automatic', track: 11 };
+
+function flacWithComments(comments) {
+  const encoded = comments.map((text) => Buffer.from(text, 'utf8'));
+  const vendor = Buffer.from('homesync-test', 'utf8');
+
+  const parts = [];
+  const vendorLen = Buffer.alloc(4);
+  vendorLen.writeUInt32LE(vendor.length);
+  parts.push(vendorLen, vendor);
+  const count = Buffer.alloc(4);
+  count.writeUInt32LE(encoded.length);
+  parts.push(count);
+  for (const comment of encoded) {
+    const len = Buffer.alloc(4);
+    len.writeUInt32LE(comment.length);
+    parts.push(len, comment);
+  }
+  const block = Buffer.concat(parts);
+
+  // "fLaC", a stand-in STREAMINFO, then the comment block marked last.
+  const header = Buffer.from([
+    0x66, 0x4c, 0x61, 0x43,
+    0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00,
+    0x80 | 4, (block.length >> 16) & 0xff, (block.length >> 8) & 0xff, block.length & 0xff,
+  ]);
+  return Buffer.concat([header, block]);
+}
+
+writeFileSync(
+  join(mediaDir, 'tagged.flac'),
+  flacWithComments([
+    `TITLE=${TAGGED.title}`,
+    `ARTIST=${TAGGED.artist}`,
+    `ALBUM=${TAGGED.album}`,
+    `TRACKNUMBER=${TAGGED.track}/12`,
+  ]),
+);
+
 NAMES.forEach((name, index) => {
   const samples = 48_000 * 4;
   const header = Buffer.alloc(44);
@@ -152,12 +202,45 @@ try {
   await waitFor(() => document.querySelectorAll('#media-select option').length > 1, 'the library to arrive');
 
   // --- searching the library ----------------------------------------------
-  // Four entries: three files and the built-in click track.
+  // Five entries: three WAVs, the tagged FLAC, and the built-in click track.
   const all = await shownTitles();
-  if (all.length !== 4) throw new Error(`expected four library entries, saw ${JSON.stringify(all)}`);
-  if (await page.textContent('#media-count') !== '4 tracks') {
-    throw new Error(`count should read "4 tracks", read "${await page.textContent('#media-count')}"`);
+  if (all.length !== 5) throw new Error(`expected five library entries, saw ${JSON.stringify(all)}`);
+  if (await page.textContent('#media-count') !== '5 tracks') {
+    throw new Error(`count should read "5 tracks", read "${await page.textContent('#media-count')}"`);
   }
+
+  // --- what the tags say ---------------------------------------------------
+  // The tagged file is listed by its title and artist, not by its filename.
+  // A library of "04 - track.mp3" is not a library anybody can read.
+  if (!all.includes(`${TAGGED.title} — ${TAGGED.artist}`)) {
+    throw new Error(`the tagged file should be listed by title and artist, saw ${JSON.stringify(all)}`);
+  }
+  if (all.some((title) => title.includes('tagged.flac'))) {
+    throw new Error('a tagged file should not be listed by its filename');
+  }
+  // And the untagged WAVs still fall back to their filenames rather than
+  // showing a blank or an invented artist.
+  if (!all.includes('beta-evening.wav')) {
+    throw new Error(`an untagged file should fall back to its filename, saw ${JSON.stringify(all)}`);
+  }
+  ok('the library lists tagged files by title and artist, and untagged ones by filename');
+
+  // Searching by artist and by album, which is how anybody actually looks for
+  // music. A search of titles alone cannot answer "everything by this band".
+  for (const [what, needle] of [['artist', TAGGED.artist], ['album', TAGGED.album]]) {
+    await page.fill('#media-search', needle.toLowerCase());
+    await waitFor(
+      () => document.querySelectorAll('#media-select option').length === 2,
+      `a search by ${what} to find exactly the tagged track`,
+    );
+    const found = await shownTitles();
+    if (!found[0]?.startsWith(TAGGED.title)) {
+      throw new Error(`searching by ${what} found ${JSON.stringify(found)}`);
+    }
+  }
+  ok('the library can be searched by artist and by album, not just by title');
+  await page.fill('#media-search', '');
+  await waitFor(() => document.querySelectorAll('#media-select option').length === 6, 'the full library again');
 
   await page.fill('#media-search', 'morning');
   await waitFor(() => document.querySelectorAll('#media-select option').length === 3, 'the picker to narrow');
@@ -165,8 +248,8 @@ try {
   if (!narrowed.every((title) => title.includes('morning'))) {
     throw new Error(`search let through something that does not match: ${JSON.stringify(narrowed)}`);
   }
-  if (await page.textContent('#media-count') !== '2 of 4') {
-    throw new Error(`count should read "2 of 4", read "${await page.textContent('#media-count')}"`);
+  if (await page.textContent('#media-count') !== '2 of 5') {
+    throw new Error(`count should read "2 of 5", read "${await page.textContent('#media-count')}"`);
   }
   ok(`searching narrowed the library to ${JSON.stringify(narrowed)}`);
 

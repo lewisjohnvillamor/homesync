@@ -897,6 +897,19 @@ input[type="range"]:disabled {
   white-space: nowrap;
 }
 
+/* The artist, beside the title rather than under it. Given a share of the row
+ * and allowed to be the first thing to go: on a phone the title is what has to
+ * survive. */
+.queue-by {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .queue-drop {
   flex: none;
   padding: 2px 9px;
