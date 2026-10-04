@@ -1,24 +1,28 @@
 /**
  * Compositions 6–8: the timing diagram, under one continuous camera.
  *
- *  6  Plan view. Three device lanes draw in behind the phone as it shrinks
- *     into its lane icon; the dot lands above them as the instant T and a
- *     line falls from it through every lane. As T reaches each lane a marker
- *     pops there and a pulse runs back along the lane to its device, which
- *     lights: every device is told the one instant.
+ *  6  Plan view, centred, lanes ending just past T. Three device lanes draw
+ *     in behind the phone as it shrinks into its lane icon; the dot lands
+ *     above them as the instant T and a line falls from it through every
+ *     lane. Where it crosses each lane a tick and a ring flash, and that
+ *     device lights: every device is told the one instant. Nothing travels
+ *     along a lane here — the lanes are time, not distance. From 12.35 s the
+ *     camera leans in on the phone's lane.
  *  7  The camera rushes in on the phone's lane until its bar fills the width;
  *     the phone itself stays pinned, enlarged, at the lane's left edge. Its
- *     delay bar (the bar composition 2 drew on the floor) grows back from T,
- *     counting up to 90 ms, and its start marker slides left by exactly the
- *     bar's length. Then the start marker fires and a pulse runs the bar's
- *     length, 8× slowed, arriving exactly on T.
- *  8  The camera pulls back and tilts the plane to exactly the house camera's
- *     angle (HOUSE_VIEW: elevation, and the same turn about the vertical). The
- *     laptop's bar lands, then the TV's; then every start marker fires, the
- *     longest first, and the three pulses arrive on T together, which
- *     brightens. Three lanes stay three lanes. The labels go; the plane lifts
- *     towards the camera and away, and the ground opens on the house that is
- *     waiting underneath at the same angle.
+ *     delay bar (the bar composition 2 drew on the floor) grows back from T
+ *     and its start marker slides left by exactly the bar's length; "90 ms"
+ *     fades in as it lands (only the facts.md values are ever shown). Then
+ *     the start marker fires and a pulse runs the bar's length, 8× slowed,
+ *     arriving exactly on T.
+ *  8  The camera pulls back fast and lands slowly, tilting the plane to
+ *     exactly the house camera's angle (HOUSE_VIEW: elevation, and the same
+ *     turn about the vertical). The laptop's bar lands, then the TV's; then
+ *     every start marker fires, the longest first, and the three pulses
+ *     arrive on T together. Three lanes stay three lanes. The labels go; the
+ *     plane — lanes and its own opaque ground, one card — lifts towards the
+ *     camera and away, uncovering the house waiting underneath at the same
+ *     angle, while the dot is let go and flies down to its place over it.
  *
  * s07 and s08 add only their lines. This module owns the picture and the dot.
  */
@@ -309,7 +313,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       // Tilted, the labels foreshorten; they grow so they read at ≥ 24 px.
       l.ms.style.transform = `scale(${lerp(1, 1.5, back)})`;
       // Gone before the plane lifts, so no label is ever seen over the house.
-      l.ms.style.opacity = String(msOn * (1 - span(t, LIFT - 0.32, LIFT - 0.14)));
+      l.ms.style.opacity = String(msOn * (1 - span(t, LIFT_SPAN[0] - 0.22, LIFT_SPAN[0] - 0.04)));
 
       // The start fires, and a pulse runs the bar's length to T.
       const fireAt = kind === 'phone' && t < C8 ? FIRE7 : ARRIVE8 - RUN8(kind);

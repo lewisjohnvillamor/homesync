@@ -30,11 +30,15 @@ const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor }) {
   // The outer arcs reach 0.51 S either side of the centre and ±0.34 S above
   // and below it (radius 11 over a chord of 15, plus the stroke).
-  const S = portrait ? 920 * u : 900 * u;
-  const wordSize = portrait ? 176 * u : 140 * u;
-  /** Clear space between the outer arc (at its largest, with the push) and the word. */
-  const GAP = portrait ? 0 : 0.11 * S;
+  // 16:9: the lockup spans 87 % of the width (margins ≥ 96 px), the word
+  // ~1.3× its round-1 size. "HomeSync" at this weight is ~5.43 em wide; the
+  // exact width is measured below for centring.
   const PUSH = 1.04;
+  const GAPK = 0.11;
+  const wordSize = portrait ? 176 * u : 172 * u;
+  const S = portrait ? 920 * u : (0.87 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
+  /** Clear space between the outer arc (at its largest, with the push) and the word. */
+  const GAP = portrait ? 0 : GAPK * S;
 
   el.innerHTML = `
     <div class="mark" style="position:absolute;left:0;top:0;width:${S}px;height:${S}px;will-change:transform">${arcsSvg()}</div>
@@ -82,6 +86,12 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   const LEAVE = t1 - 0.275; // 7.85
   const GONE = LEAVE + 0.12; // 7.97: nothing of this composition is left
 
+  // The drop: from 7.76 s the dot leaves the mark's centre, shrinking (ease-in,
+  // 13 frames) and falling to where composition 5 picks it up at 7.98 s —
+  // s05's dot at its first frame: (700u, 830u) in 16:9, (W/2, 980u) in 9:16,
+  // 36u across. If s05 moves it, the film's flight bridges the last frame.
+  const DROP = [LEAVE - 0.09, 7.98];
+  const PICKUP = portrait ? { x: W / 2, y: 980 * u, d: 36 * u, glow: 0.25 } : { x: 700 * u, y: 830 * u, d: 36 * u, glow: 0.25 };
   const from = () => handoff.stopAt?.(START) ?? { x: W * 0.7, y: H * 0.6, d: 30 * u };
   const dotFull = S * MARK_DOT_RATIO;
 
@@ -140,7 +150,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
 
   // The dot: from the full stop to the mark's centre, its size always the
   // mark's centre at the mark's current scale; pulses softly while it holds.
-  hostDot(START, LEAVE, (t) => {
+  const held = (t) => {
     const c = centre(t);
     const b = breathe(t);
     const pulse = Math.sin((t - HOME) * ((2 * Math.PI) / 1.25) + 0.6);
@@ -149,6 +159,19 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       y: c.y + Math.sin((t - START) * 2.3) * 1.5 * u * b,
       d: dotFull * markScale(t) * (1 + 0.05 * b * pulse),
       glow: lerp(from().glow ?? 0.4, 0.14, span(t, START, HOME)) + 0.12 * b * (0.5 + 0.5 * pulse),
+    };
+  };
+  hostDot(START, DROP[1], (t) => {
+    const h = held(Math.min(t, DROP[0]));
+    if (t <= DROP[0]) return held(t);
+    const k = span(t, ...DROP);
+    const fall = easeInOut(k);
+    return {
+      x: lerp(h.x, PICKUP.x, fall),
+      y: lerp(h.y, PICKUP.y, fall),
+      // Ease-in: it lets go of the mark slowly, then shrinks to its new size.
+      d: lerp(h.d, PICKUP.d, k * k),
+      glow: lerp(h.glow, PICKUP.glow, k),
     };
   });
 }

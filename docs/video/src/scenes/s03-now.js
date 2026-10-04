@@ -59,6 +59,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     const baseline = top + lineH + size * 0.77;
     geo.stop = { x: left + block - geo.d / 2, y: baseline - geo.d / 2 };
     geo.bottom = top + lineH + size;
+    // The sentence pushes in, and later rushes away, about its own full stop:
+    // the dot never moves relative to the letters' growth, and the "s" only
+    // ever moves away from it.
+    words.style.transformOrigin = `${geo.stop.x}px ${geo.stop.y}px`;
   };
   layout();
   waitFor(document.fonts.ready.then(layout));
@@ -66,32 +70,35 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   // Times.
   const LIFT = t0 - 0.35; // 3.40: the markers lift off the floor
   const SWEEP = t0; // 3.75: they sweep under the sentence…
-  const MERGED = t0 + 0.62; // 4.37: …and merge into the full stop
-  const SET = 4.4;
+  const MERGED = t0 + 0.65; // 4.40: …and merge into the full stop, once both lines have stopped
   const EXIT = 5.9;
 
   // Plain ground arrives under the sinking floor; it is fully there before
   // the first word is.
-  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: 'power1.inOut' }, LIFT + 0.08);
+  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.inOut' }, LIFT);
   // The lines from opposite sides, slowing as they land; set by 4.40 s.
   const enter = portrait ? { y: -260 * u } : { x: -520 * u };
   const enter2 = portrait ? { y: 230 * u } : { x: 520 * u };
-  tl.fromTo(l1, { ...enter, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: 'expo.out' }, t0 - 0.07);
-  tl.fromTo(l2, { ...enter2, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: 'expo.out' }, t0 + 0.03);
+  tl.fromTo(l1, { ...enter, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: 'expo.out' }, t0 - 0.17);
+  tl.fromTo(l2, { ...enter2, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.55, ease: 'expo.out' }, t0 - 0.07);
   // Then the words rush past the camera; the full stop stays.
-  tl.to(words, { scale: 2.6, opacity: 0, filter: 'blur(14px)', duration: 0.32, ease: 'power3.in', transformOrigin: '50% 50%' }, EXIT);
+  const EXIT_DUR = 0.32;
+  tl.to(words, { scale: 2.6, opacity: 0, filter: 'blur(14px)', duration: EXIT_DUR, ease: 'power3.in' }, EXIT);
+  /** The exit's scale at t (power3.in, as the tween above). */
+  const exitScale = (t) => 1 + 1.6 * span(t, EXIT, EXIT + EXIT_DUR) ** 3;
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
   const PUSH = 1.06;
-  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, SET - 0.2, EXIT + 0.1)));
-  const driftAt = (t) => sineInOut(span(t, SET - 0.2, EXIT + 0.1)) * 28 * u;
+  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, MERGED, EXIT + 0.1)));
+  const driftAt = (t) => sineInOut(span(t, MERGED, EXIT + 0.1)) * 28 * u;
 
   /** Where the full stop is at time t, with the push and the drift. */
   const stopAt = (t) => {
     const p = pushAt(Math.min(t, EXIT));
-    const sx = geo.stop.x + driftAt(Math.min(t, EXIT));
-    return { x: W / 2 + (sx - W / 2) * p, y: H / 2 + (geo.stop.y - H / 2) * p, d: geo.d * p };
+    // The words scale about the stop itself, so only the drift is scaled.
+    const sx = geo.stop.x + driftAt(Math.min(t, EXIT)) * p * exitScale(t);
+    return { x: sx, y: geo.stop.y, d: geo.d * p };
   };
   /** The dot as composition 4 receives it: the full stop, still drifting, starting to glow. */
   const dotAt = (t) => {
@@ -126,11 +133,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     if (t < SWEEP) {
       return { x: lerp(m.x, lifted.x, lift), y: lerp(m.y, lifted.y, lift), d: lerp(m.d, lifted.d, lift) };
     }
-    // Sweep along under the sentence and rise straight up into the stop, so
-    // the last stretch never crosses a letter.
+    // Sweep along under the sentence, past the end of it, and curl up into
+    // the stop from below-right, so the last stretch never crosses a letter.
     const k = easeInOut(span(t, SWEEP, MERGED));
     const s = stopAt(t);
-    const c = { x: s.x, y: lifted.y };
+    const c = { x: Math.min(s.x + 150 * u, W - 40 * u), y: lifted.y };
     const a = (1 - k) * (1 - k);
     const b = 2 * (1 - k) * k;
     const cc = k * k;

@@ -163,8 +163,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       }
     : {
         fov: 30,
-        c1: { el: 35, tg: [0.0, 0.27, 0.0], d0: 3.2, d1: 2.75, orb0: 0.66, orb1: 0.42 },
-        c2: { el: 46, tg: [0.15, 0.0, -0.03], d: 3.4, orbDrift: -0.04 },
+        c1: { el: 35, tg: [0.42, 0.3, -0.15], d0: 3.7, d1: 3.25, orb0: 0.52, orb1: 0.35 },
+        c2: { el: 44, tg: [0.18, 0.0, -0.2], d: 4.4, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -191,7 +191,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
     ? { x0: -0.52, speed: 0.27, gap: 0.06, rows: { laptop: [0, 1.6], phone: [1.0, 2.4], tv: [-1.0, 1.3] }, turn: 0 }
-    : { x0: -0.9, speed: 0.72, gap: 0.06, rows: { laptop: [0, 1.6], phone: [0.56, 2.4], tv: [-0.64, 1.4] }, turn: 0.2 };
+    : { x0: -0.9, speed: 0.72, gap: 0.06, rows: { laptop: [0, 1.8], phone: [0.76, 2.6], tv: [-0.98, 1.7] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
