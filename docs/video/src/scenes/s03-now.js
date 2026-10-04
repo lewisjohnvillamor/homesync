@@ -24,18 +24,20 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
-  const size = portrait ? 112 * u : 184 * u;
+  const size = portrait ? 100 * u : 184 * u;
   el.innerHTML = `
     <div class="ground" style="position:absolute;inset:0;background:var(--bg)"></div>
-    <div class="words" style="position:absolute;inset:0">
+    <div class="words" style="position:absolute;inset:0"><div class="push" style="position:absolute;inset:0">
       <div class="l1" style="position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)">Nothing tells them</div>
-      <div class="l2" style="position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)">when “now” is</div>
-    </div>
+      <div class="l2" style="position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)">when “now” is<span class="bl" style="display:inline-block;width:0;height:0"></span></div>
+    </div></div>
     <i class="m m1" style="position:absolute;left:0;top:0;border-radius:50%;background:var(--accent)"></i>
     <i class="m m2" style="position:absolute;left:0;top:0;border-radius:50%;background:var(--accent)"></i>`;
 
   const ground = el.querySelector('.ground');
   const words = el.querySelector('.words');
+  const pushEl = el.querySelector('.push');
+  const bl = el.querySelector('.bl');
   const l1 = el.querySelector('.l1');
   const l2 = el.querySelector('.l2');
   const extras = [el.querySelector('.m1'), el.querySelector('.m2')];
@@ -55,14 +57,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     l1.style.top = `${top}px`;
     l2.style.left = `${left + block - (w2 + gap + geo.d)}px`;
     l2.style.top = `${top + lineH}px`;
-    // Baseline sits ~0.77 em below the top of a line box at line-height 1.
-    const baseline = top + lineH + size * 0.77;
+    // The baseline, measured: a zero-height inline box sits on it.
+    const baseline = top + lineH + bl.offsetTop;
     geo.stop = { x: left + block - geo.d / 2, y: baseline - geo.d / 2 };
     geo.bottom = top + lineH + size;
-    // The sentence pushes in, and later rushes away, about its own full stop:
-    // the dot never moves relative to the letters' growth, and the "s" only
-    // ever moves away from it.
-    words.style.transformOrigin = `${geo.stop.x}px ${geo.stop.y}px`;
   };
   layout();
   waitFor(document.fonts.ready.then(layout));
@@ -84,23 +82,31 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   // Then the words rush past the camera; the full stop stays.
   const EXIT_DUR = 0.32;
   tl.to(words, { scale: 2.6, opacity: 0, filter: 'blur(14px)', duration: EXIT_DUR, ease: 'power3.in' }, EXIT);
-  /** The exit's scale at t (power3.in, as the tween above). */
-  const exitScale = (t) => 1 + 1.6 * span(t, EXIT, EXIT + EXIT_DUR) ** 3;
+
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = 1.06;
-  // The push (about the stop, so the dot never moves with it) starts as the
-  // dot lands; the lines only start drifting once it has.
-  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, MERGED - 0.3, EXIT + 0.1)));
-  const driftAt = (t) => sineInOut(span(t, MERGED, EXIT + 0.1)) * 28 * u;
+  const PUSH = portrait ? 1.025 : 1.05;
+  const DRIFT = (portrait ? 10 : 24) * u;
+  // The push starts just before the dot lands (the dot follows it exactly);
+  // the lines only start drifting once it has landed.
+  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, MERGED - 0.3, EXIT)));
+  const driftAt = (t) => sineInOut(span(t, MERGED, EXIT)) * DRIFT;
 
-  /** Where the full stop is at time t, with the push and the drift. */
+  /**
+   * Where the full stop is at time t. The hold's push is about the
+   * sentence's centre (so neither line runs off an edge); the exit is about
+   * the stop as it was when the exit began, so the dot stays exactly where it
+   * is while the words rush away from it, and the "s" only moves away.
+   */
   const stopAt = (t) => {
-    const p = pushAt(Math.min(t, EXIT));
-    // The words scale about the stop itself, so only the drift is scaled.
-    const sx = geo.stop.x + driftAt(Math.min(t, EXIT)) * p * exitScale(t);
-    return { x: sx, y: geo.stop.y, d: geo.d * p };
+    const tt = Math.min(t, EXIT);
+    const p = pushAt(tt);
+    return {
+      x: W / 2 + (geo.stop.x + driftAt(tt) - W / 2) * p,
+      y: H / 2 + (geo.stop.y - H / 2) * p,
+      d: geo.d * p,
+    };
   };
   /** The dot as composition 4 receives it: the full stop, still drifting, starting to glow. */
   const dotAt = (t) => {
@@ -154,7 +160,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     if (t < LIFT || t >= t1) return;
     l1.style.translate = `${-driftAt(t)}px 0`;
     l2.style.translate = `${driftAt(t)}px 0`;
-    words.style.scale = t < EXIT ? String(pushAt(t)) : String(PUSH);
+    pushEl.style.scale = String(pushAt(Math.min(t, EXIT)));
+    const o = stopAt(EXIT);
+    words.style.transformOrigin = `${o.x}px ${o.y}px`;
     const ms = markers();
     extras.forEach((e, i) => {
       const m = ms[i];
