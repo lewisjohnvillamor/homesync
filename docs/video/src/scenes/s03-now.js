@@ -25,8 +25,8 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   // 16:9: two lines across the frame. 9:16: four lines at about twice the
   // size, so the type fills the frame; the full stop always ends the last.
-  const size = portrait ? 150 * u : 184 * u;
-  const texts = portrait ? ['Nothing', 'tells them', 'when “now”', 'is'] : ['Nothing tells them', 'when “now” is'];
+  const size = portrait ? 172 * u : 184 * u;
+  const texts = portrait ? ['Nothing', 'tells them', 'when', '“now” is'] : ['Nothing tells them', 'when “now” is'];
   const lineStyle = `position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)`;
   el.innerHTML = `
     <div class="ground" style="position:absolute;inset:0;background:var(--bg)"></div>
@@ -85,7 +85,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Plain ground arrives under the sinking floor; it is fully there before
   // the first word is.
-  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.inOut' }, LIFT);
+  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: 'power1.inOut' }, t0 - 0.24);
   // The lines from opposite sides, slowing as they land; set by 4.40 s.
   // (in 9:16 too they come from the sides, so nothing crosses the markers'
   // row below the sentence)
@@ -94,8 +94,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     tl.fromTo(
       l,
       { x: side(i) * (portrait ? 420 : 520) * u, opacity: 0 },
-      { x: 0, opacity: 1, duration: late ? 0.55 : 0.6, ease: 'expo.out' },
-      t0 - 0.17 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
+      { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' },
+      // On the beat (3.75 s); every line set by 4.40.
+      t0 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
     );
   });
   // Then the words rush past the camera; the full stop stays.
@@ -105,7 +106,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = portrait ? 1.035 : 1.05;
+  const PUSH = portrait ? 1.06 : 1.05;
   // In 9:16 the four lines nearly fill the width: no sideways drift there,
   // only the push.
   const DRIFT = (portrait ? 0 : 24) * u;

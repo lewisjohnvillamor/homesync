@@ -53,7 +53,7 @@ const C9 = 18.125;
  * diagram is ever seen through or over the house; it only moves off it.
  */
 const LIFT = 17.85;
-const LIFT_SPAN = [17.8, 18.1];
+const LIFT_SPAN = [17.8, 18.05];
 /**
  * The dot stays where T was as the plane drops away beneath it (everything of
  * the diagram moves away from it, nothing crosses it), then is let go and the
@@ -83,7 +83,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const barH = 18 * u;
   const ruleH = 14 * u;
   /** How far the lift card reaches above T: just past the top of the frame in composition 8. */
-  const CARD_TOP = (portrait ? 900 : 760) * u;
+  // Just above T: the house is never above the diagram, so the edge sits on plain ground at the start.
+  const CARD_TOP = 140 * u;
   const ic = L.phoneIcon;
   const devW = 180 * u * L.iconScale;
   const devH = 116 * u * L.iconScale;
@@ -95,7 +96,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
    */
   const NAME_X = L.laneStart + (portrait ? 10 : 120) * u;
   const nameY = (kind) => L.lanes[kind] + 40 * u;
-  const ackD = devW * 0.9;
+  const ackD = devW * 0.72;
   const lane = (kind) => {
     const y = L.lanes[kind];
     const icon =
@@ -213,11 +214,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const camC = (t) => {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
-      s: (portrait ? 0.85 : 1.2) * lerp(1, 1.04, k),
+      s: (portrait ? 0.8 : 1.2) * lerp(1, 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
       px: W / 2 + (portrait ? 0 : 10 * u) + (portrait ? 10 : 30) * u * k,
-      py: (portrait ? H * 0.43 : H * 0.44) + 10 * u * k,
+      py: (portrait ? H * 0.47 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
       rot: HOUSE_VIEW.azimuth,
     };
@@ -411,7 +412,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     restDot = { x: ar.left + ar.width / 2, y: ar.top + ar.height / 2, d: Math.min(46 * u, Math.max(24 * u, (ar.width + ar.height) / 2)) };
     const lift = span(t, ...LIFT_SPAN);
     if (lift > 0) {
-      const e = lift ** 1.25;
+      const e = lift ** 1.1;
       const g = 1 + 1.1 * e;
       const fall = 1.25 * H * e;
       perspEl.style.transformOrigin = '0 0';

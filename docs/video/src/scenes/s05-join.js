@@ -42,12 +42,12 @@ export const ICON_LANDS = SHRINK[1];
  */
 export function laneLayout(W, H, u, portrait) {
   const L = diagramLayout(W, H, u, portrait);
-  const iconScale = portrait ? 1.6 : 1.5;
+  const iconScale = portrait ? 1.45 : 1.5;
   // The lanes end just past T, and the whole diagram — icons to T's label —
   // is centred in the frame, so nothing past T is left empty.
   // 9:16: T sits further right and the lanes run to ~60 px from the frame's edge.
   const tX0 = portrait ? W - 120 * u : L.tX;
-  const iconX0 = portrait ? 150 * u : L.iconX - 40 * u;
+  const iconX0 = portrait ? 175 * u : L.iconX - 40 * u;
   const laneEnd0 = tX0 + (portrait ? 60 * u : 150 * u);
   const left = iconX0 - 90 * u * iconScale;
   const right = laneEnd0 + 30 * u;

@@ -42,7 +42,8 @@ export const pad = [0, 4 * BEAT];
 const VISIBLE_UNTIL = 6 * BEAT + 0.5;
 /** Composition 3 takes the markers from here on; the floor sinks away. */
 const LIFT = 6 * BEAT - 0.35;
-const SUNK = LIFT + 0.22;
+/** The floor stays visible under the incoming words until the beat. */
+const SUNK = 6 * BEAT - 0.01;
 
 const smooth = (k) => k * k * (3 - 2 * k);
 const easeOut = (k) => 1 - (1 - k) ** 3;
@@ -162,7 +163,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 40, tg: [0.12, 0.15, 0.0], d0: 4.1, d1: 3.8, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.08, 0.15, 0.05], d0: 4.4, d1: 4.1, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
