@@ -2,7 +2,7 @@
 
   python3 tools/critic_kit.py sheet    VIDEO OUT.png [--every 0.2] [--from S] [--to S] [--cols 10]
   python3 tools/critic_kit.py dense    VIDEO OUT.png --at T [--fps 20] [--span 1.0]
-  python3 tools/critic_kit.py frozen   VIDEO [--threshold 0.6]
+  python3 tools/critic_kit.py frozen   VIDEO [--threshold 0.6] [--window 0.25]
   python3 tools/critic_kit.py loudness VIDEO_OR_WAV
   python3 tools/critic_kit.py frame    VIDEO OUT.png --at T
   python3 tools/critic_kit.py contrast IMAGE.png X1 Y1 X2 Y2
@@ -96,16 +96,21 @@ def cmd_dense(a):
 
 def cmd_frozen(a):
     _, _, rate, duration = probe(a.video)
-    prev = None
+    # With --window W each frame is compared with the one W seconds earlier
+    # rather than the one just before: slow drift that moves a fraction of a
+    # pixel per frame is invisible to the adjacent-frame test but plainly
+    # visible to a viewer over a quarter of a second. Report both.
+    lag = max(1, round(a.window * rate)) if a.window else 1
+    history = []
     still = []
     diffs = []
     for t, img in frames(a.video, 320):
         g = img.astype(np.float32).mean(axis=2)
-        if prev is not None:
-            d = float(np.abs(g - prev).mean())
+        history.append(g)
+        if len(history) > lag:
+            d = float(np.abs(g - history.pop(0)).mean())
             diffs.append((t, d))
             still.append(d < a.threshold)
-        prev = g
     frozen_s = sum(still) / rate
     longest, run, run_start, worst = 0, 0, 0, (0, 0)
     for i, s in enumerate(still):
@@ -137,6 +142,7 @@ def cmd_frozen(a):
         "longest_still_from_to": [round(worst[0], 3), round(worst[1], 3)],
         "still_stretches_over_0.3s": stretches,
         "threshold_levels": a.threshold,
+        "compared_with_frame_s_earlier": round(lag / rate, 3),
     }, indent=2))
 
 
@@ -180,7 +186,8 @@ def main():
     d = sub.add_parser("dense"); d.add_argument("video"); d.add_argument("out"); d.add_argument("--at", type=float, required=True)
     d.add_argument("--fps", type=float, default=20); d.add_argument("--span", type=float, default=1.0)
     d.add_argument("--cols", type=int, default=10); d.add_argument("--width", type=int, default=320); d.set_defaults(fn=cmd_dense)
-    f = sub.add_parser("frozen"); f.add_argument("video"); f.add_argument("--threshold", type=float, default=0.6); f.set_defaults(fn=cmd_frozen)
+    f = sub.add_parser("frozen"); f.add_argument("video"); f.add_argument("--threshold", type=float, default=0.6)
+    f.add_argument("--window", type=float, default=0.0, help="compare with the frame this many seconds earlier"); f.set_defaults(fn=cmd_frozen)
     l = sub.add_parser("loudness"); l.add_argument("path"); l.set_defaults(fn=cmd_loudness)
     fr = sub.add_parser("frame"); fr.add_argument("video"); fr.add_argument("out"); fr.add_argument("--at", type=float, required=True); fr.set_defaults(fn=cmd_frame)
     c = sub.add_parser("contrast"); c.add_argument("image")
