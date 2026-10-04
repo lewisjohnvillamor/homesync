@@ -88,8 +88,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const devW = 180 * u * L.iconScale;
   const devH = 116 * u * L.iconScale;
 
-  /** Each device's name sits under its icon, well away from the bars' start markers. */
-  const nameY = (kind) => L.lanes[kind] + (kind === 'phone' ? ic.h / 2 : devH / 2) + 4 * u;
+  /**
+   * Each device's name sits under its lane, set in from the lane's start so
+   * it is well clear of the TV's start marker (the longest bar starts near
+   * the lane's start) and of the icon.
+   */
+  const NAME_X = L.laneStart + (portrait ? 110 : 120) * u;
+  const nameY = (kind) => L.lanes[kind] + 40 * u;
   const lane = (kind) => {
     const y = L.lanes[kind];
     const icon =
@@ -108,8 +113,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         <div class="rule" style="position:absolute;left:${L.laneStart}px;top:${y - ruleH / 2}px;width:${L.laneEnd - L.laneStart}px;height:${ruleH}px;
              background:var(--text-faint);opacity:0.7;border-radius:${ruleH / 2}px"></div>
         ${icon}
-        <div class="name" style="position:absolute;left:${L.iconX - 100 * u}px;width:${200 * u}px;text-align:center;top:${nameY(kind)}px;transform-origin:0 0;
-             font:600 ${28 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}</div>
+        <div class="name" style="position:absolute;left:${NAME_X}px;top:${nameY(kind)}px;transform-origin:0 0;
+             font:600 ${30 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}</div>
         <div class="tick" style="position:absolute;left:${L.tX - 5 * u}px;top:${y - 34 * u}px;width:${10 * u}px;height:${68 * u}px;border-radius:${5 * u}px;background:var(--accent)"></div>
         <div class="flash" style="position:absolute;left:${L.tX - 30 * u}px;top:${y - 30 * u}px;width:${60 * u}px;height:${60 * u}px;border-radius:50%;
              border:${4 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
@@ -205,7 +210,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const camC = (t) => {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
-      s: (portrait ? 0.92 : 1.2) * lerp(1, 1.04, k),
+      s: (portrait ? 0.85 : 1.2) * lerp(1, 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
       px: W / 2 + (portrait ? 0 : 10 * u) + (portrait ? 10 : 30) * u * k,
@@ -366,7 +371,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin);
         // Its name sits under it.
         const ns = portrait ? 1.6 : 1.45;
-        pin(l.name, c, c6, L.iconX - 100 * u, nameY('phone'), sx - 100 * u * ns, iy + iconScreenH / 2 + 8 * u, ns, wPin);
+        pin(l.name, c, c6, NAME_X, nameY('phone'), sx - 50 * u * ns, iy + iconScreenH / 2 + 8 * u, ns, wPin);
       }
       void i;
     });

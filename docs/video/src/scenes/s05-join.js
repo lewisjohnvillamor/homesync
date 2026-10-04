@@ -345,7 +345,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     btn.style.transform = `translateY(${sink * 3 * u}px) scale(${1 - 0.012 * sink})`;
     // Pressed, the button darkens (so the solid dot reads on it), until the dot has lifted off it.
     const down = span(t, PRESS - 0.12, PRESS - 0.02) * (1 - span(t, PRESS + 0.42, PRESS + 0.6));
-    pressed.style.opacity = String(0.5 * down);
+    // 0.22 keeps the label at ≥ 4.5:1 on the darkened button.
+    pressed.style.opacity = String(0.22 * down);
     const rip = span(t, PRESS, PRESS + 0.45);
     ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.7 * (1 - rip) : 0);
     // The ring stays inside a circle around the dot, at the button's free end, never over the words.
