@@ -95,7 +95,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
    * it is well clear of the TV's start marker (the longest bar starts near
    * the lane's start) and of the icon.
    */
-  const NAME_X = L.laneStart + (portrait ? 10 : 120) * u;
+  const NAME_X = L.laneStart + (portrait ? 40 : 120) * u;
   const nameY = (kind) => L.lanes[kind] + 40 * u;
   const ackD = devW * 0.72;
   const lane = (kind) => {
@@ -326,7 +326,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         l.screen.style.fill = lit > 0 ? 'var(--accent)' : '';
         l.screen.style.fillOpacity = lit > 0 ? String(0.12 + 0.3 * lit + 0.35 * ack) : '';
       }
-      if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit + 0.16 * ack})`;
+      if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit + (portrait ? 0.08 : 0.16) * ack})`;
       // The other lanes' names step aside during the close-up, so no word is ever cut by the frame edge.
       const aside = kind === 'phone' ? 0 : span(rush, 0.1, 0.55) * (1 - span(back, 0.3, 0.7));
       l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside) * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
