@@ -101,7 +101,7 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
   // drops, loses its raised edge and darkens — and sends out one ring.
   if (glyph > 0) {
     const r = m * 0.17;
-    const sink = m * 0.045 * press;
+    const sink = m * 0.07 * press;
     ctx.save();
     ctx.globalAlpha = glyph;
     ctx.translate(w / 2, h / 2);
@@ -126,7 +126,7 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
   texture.needsUpdate = true;
 }
 
-export function build({ el, tl, u, W, H, portrait, onFrame }) {
+export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const renderer = makeRenderer(W, H);
   el.appendChild(renderer.domElement);
   const canvasEl = renderer.domElement;
@@ -163,8 +163,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.14, 0.15, -0.12], d0: 4.2, d1: 3.85, orb0: 0.06, orb1: 0.0 },
-        c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
+        c1: { el: 46, tg: [-0.12, 0.15, -0.1], d0: 4.55, d1: 4.2, orb0: 0.06, orb1: 0.0 },
+        c2: { el: 52, tg: [-0.12, 0.0, -0.05], d: 4.75, orbDrift: 0.035 },
       }
     : {
         fov: 30,
@@ -199,13 +199,24 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // --- the devices and the strip ------------------------------------------------
   const LAYOUT = portrait
-    ? { x0: -0.38, speed: 0.17, clear: 0.3, icon: 0.06, dx: { laptop: 0.08, phone: -0.06, tv: 0.04 }, rows: { laptop: [0, 1.32], phone: [0.95, 2.25], tv: [-1.0, 1.08] }, turn: 0 }
+    ? {
+        // 9:16: the devices in a centred column, TV at the back; each lane
+        // lies on the floor directly in front of its own device, running
+        // across from one shared press line at the left. No bar points at
+        // or ends at any device.
+        x0: -0.5,
+        speed: 0.42,
+        icon: 0.05,
+        place: { tv: [0.12, -1.3, 1.15], laptop: [0.12, -0.05, 1.4], phone: [0.12, 1.0, 2.35] },
+        rows: { tv: [-0.98, 1.15], laptop: [0.27, 1.4], phone: [1.22, 2.35] },
+        turn: 0,
+      }
     : {
         // 16:9: the three devices stand side by side at the back; the strip
         // lies on the same floor directly in front of them, its three lanes
         // running across the picture from one shared press line. One subject,
         // one floor; no bar points at or ends at any device.
-        x0: -1.2,
+        x0: -1.05,
         speed: 0.6,
         icon: 0.07,
         place: { tv: [-0.62, -0.62, 1.9], laptop: [0.55, -0.5, 2.0], phone: [1.25, -0.3, 2.9] },
@@ -329,11 +340,6 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     d.marker.rotation.x = -Math.PI / 2;
     d.marker.renderOrder = 4;
     scene.add(d.marker);
-    // The moment this device's sound starts: a burst at its marker.
-    d.burst = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.06, 64), accent(0));
-    d.burst.rotation.x = -Math.PI / 2;
-    d.burst.renderOrder = 4;
-    scene.add(d.burst);
     d.rings = Array.from({ length: 3 }, () => {
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.11, 96), accent(0));
       ring.rotation.x = -Math.PI / 2;
@@ -344,18 +350,46 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     });
   }
 
+  // Each lane's device icon, printed on the floor at the lane's start (the
+  // film's own device drawings, strokes lifted to the dim text colour), so the
+  // lane reads as that device's own start time, in the same perspective.
+  const ICON_DEPTH = portrait ? 0.13 : 0.14;
+  for (const d of devices) {
+    const svg = DEVICE_SVG[d.kind]().replaceAll('#2f3b4a', '#94a3b4').replaceAll('#3a4757', '#94a3b4');
+    const ch = 256;
+    const cw = Math.round(ch * ASPECT[d.kind]);
+    const cnv = document.createElement('canvas');
+    cnv.width = cw;
+    cnv.height = ch;
+    const tex = new THREE.CanvasTexture(cnv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    const img = new Image();
+    waitFor(
+      new Promise((resolve) => {
+        img.onload = () => {
+          cnv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+          tex.needsUpdate = true;
+          resolve();
+        };
+        img.onerror = resolve;
+        img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.replace('<svg ', `<svg width="${cw}" height="${ch}" xmlns="http://www.w3.org/2000/svg" `))}`;
+      }),
+    );
+    const w = ICON_DEPTH * ASPECT[d.kind];
+    const icon = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, ICON_DEPTH),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false, fog: false, opacity: 0.85 }),
+    );
+    icon.rotation.x = -Math.PI / 2;
+    icon.position.set(LAYOUT.x0 - LAYOUT.icon - w / 2, 0.0022, d.lane);
+    icon.renderOrder = 3;
+    scene.add(icon);
+  }
+
   el.insertAdjacentHTML(
     'beforeend',
-    `<div class="icons" style="position:absolute;inset:0">${devices
-      .map((d) => {
-        const h = (portrait ? 62 : 70) * u;
-        // The film's device drawings, their strokes lifted to the dim text
-        // colour so they read on the floor.
-        const svg = DEVICE_SVG[d.kind]().replaceAll('#2f3b4a', '#94a3b4').replaceAll('#3a4757', '#94a3b4');
-        return `<div class="icon" style="position:absolute;left:0;top:0;width:${h * ASPECT[d.kind]}px;height:${h}px">${svg}</div>`;
-      })
-      .join('')}</div>
-     <div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
+    `<div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
      ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap;padding:${5 * u}px ${8 * u}px;border-radius:${6 * u}px;background:rgba(11,14,19,0.88)">starts</div>`).join('')}
      <div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
      <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;top:${portrait ? 150 * u : 104 * u}px;
@@ -363,11 +397,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   );
   const headline = el.querySelector('.headline');
   const dim = el.querySelector('.dim');
-  const iconsEl = el.querySelector('.icons');
-  const icons = [...el.querySelectorAll('.icon')];
   const lblPress = el.querySelector('.lbl-press');
   const lblStart = [...el.querySelectorAll('.lbl-start')];
-  for (const ic of icons) ic.firstElementChild.style.cssText = 'width:100%;height:100%;display:block';
   // Never still while it is read: the line drifts with the camera's ease-in.
   tl.fromTo(headline, { x: 0 }, { x: 18 * u, duration: 1.5, ease: 'sine.out' }, 0);
   tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.2, ease: 'power2.in', immediateRender: false }, 1.5);
@@ -396,26 +427,19 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     // The floor sinks and darkens away as composition 3 lifts the markers off
     // it; the picture itself holds its last state while it goes.
     const sink = smooth(span(t, LIFT, SUNK));
+    // Every label is gone before any marker lifts (by 3.36 s).
+    const labelsOut = 1 - smooth(span(t, LIFT - 0.22, LIFT - 0.04));
     t = Math.min(t, LIFT);
     poseCamera(camera, t);
     canvasEl.style.transform = sink > 0 ? `translateY(${90 * u * sink}px) scale(${1 - 0.05 * sink})` : '';
-    iconsEl.style.transformOrigin = '50% 50%';
-    iconsEl.style.transform = canvasEl.style.transform;
-    // Each row's device icon, just before its start tick: the row is that
-    // device's own start time.
     devices.forEach((d, i) => {
-      const p = toScreen(new THREE.Vector3(LAYOUT.x0 - LAYOUT.icon, 0, d.lane), camera, W, H);
-      const ic = icons[i];
-      const w = ic.offsetWidth;
-      const h = ic.offsetHeight;
-      ic.style.transform = `translate(${p.x - w}px, ${p.y - h / 2}px)`;
       // Interface-style labels, not claims: where each row's sound starts.
       const m = toScreen(markerWorld(d, t), camera, W, H);
       const ls = lblStart[i];
       // Up and to the right of the marker, on its own small band, so neither
       // the dot nor a passing ring ever touches the word.
       ls.style.transform = `translate(${m.x + 30 * u}px, ${m.y - 58 * u}px)`;
-      ls.style.opacity = String(smooth(span(t, PRESS + d.late + 0.3, PRESS + d.late + 0.5)) * (1 - sink));
+      ls.style.opacity = String(smooth(span(t, PRESS + d.late + 0.3, PRESS + d.late + 0.5)) * labelsOut);
     });
     // "pressed" at one end of the shared start line.
     // (16:9: at the line's near end, clear of the caption at the top left.)
@@ -423,13 +447,14 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     lblPress.style.transform = portrait
       ? `translate(${head.x - 50 * u}px, ${head.y - 40 * u}px)`
       : `translate(${head.x + 16 * u}px, ${head.y + 6 * u}px)`;
-    lblPress.style.opacity = String(smooth(span(t, PRESS, PRESS + 0.2)) * (1 - sink));
+    lblPress.style.opacity = String(smooth(span(t, PRESS, PRESS + 0.2)) * labelsOut);
     // The floor stays at ~40 % until the beat; the incoming words sweep it away.
     dim.style.opacity = String(0.6 * sink);
 
     // The press: down fast, held a moment, up again as the screens come up.
-    const down = easeOut(span(t, PRESS, PRESS + 0.06));
-    const up = smooth(span(t, PRESS + 0.16, PRESS + 0.36));
+    // The press: eased down over 4 frames, held, eased back up.
+    const down = smooth(span(t, PRESS - 0.02, PRESS + 0.05));
+    const up = smooth(span(t, PRESS + 0.13, PRESS + 0.3));
     const press = down * (1 - up);
     const ring = span(t, PRESS, PRESS + 0.45);
     // The shared start line draws in across the press (7 frames, from the
@@ -463,10 +488,6 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       const arrived = t >= PRESS + d.late && t < LIFT;
       d.marker.scale.setScalar(arrived ? 1 + 0.6 * Math.exp(-(t - PRESS - d.late) * 9) : 0.0001);
       d.marker.material.opacity = arrived ? 1 : 0;
-      const b = span(t, PRESS + d.late, PRESS + d.late + 0.4);
-      d.burst.position.copy(markerWorld(d, t));
-      d.burst.scale.setScalar(1 + 3.5 * easeOut(b));
-      d.burst.material.opacity = t >= PRESS + d.late && b < 1 ? 0.9 * (1 - b) ** 1.5 : 0;
 
       // Rings: only from this device's own moment.
       d.rings.forEach((r, n) => {

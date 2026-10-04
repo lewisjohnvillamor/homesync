@@ -79,13 +79,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Times.
   const LIFT = t0 - 0.35; // 3.40: the markers lift off the floor
-  const SWEEP = t0; // 3.75: they sweep under the sentence…
+  const SWEEP = t0 - 0.12; // 3.63: they sweep under the sentence…
   const MERGED = t0 + 0.65; // 4.40: …and merge into the full stop, once every line has stopped
   const EXIT = 5.9;
 
   // Plain ground arrives under the sinking floor; it is fully there before
   // the first word is.
-  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: 'power2.out' }, t0);
+  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.15, ease: 'power2.out' }, t0 - 0.05);
   // The lines from opposite sides, slowing as they land; set by 4.40 s.
   // (in 9:16 too they come from the sides, so nothing crosses the markers'
   // row below the sentence)
@@ -93,8 +93,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     const late = i >= lines.length / 2;
     tl.fromTo(
       l,
-      { x: side(i) * (portrait ? 420 : 520) * u, opacity: 0 },
-      { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' },
+      // 16:9 from the sides; 9:16 from the top and the bottom (storyboard).
+      portrait ? { y: side(i) * 260 * u, opacity: 0 } : { x: side(i) * 520 * u, opacity: 0 },
+      { x: 0, y: 0, opacity: 1, duration: 0.5, ease: 'expo.out' },
       // On the beat (3.75 s); every line set by 4.40.
       t0 + 0.05 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
     );
@@ -159,7 +160,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     const spacing = (portrait ? 150 : 190) * u;
     const lifted = {
       // Drifting all the way to the merge, so the markers never stop dead.
-      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (i - 1) * spacing)) + 75 * u * (Math.min(t, MERGED) - LIFT),
+      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (i - 1) * spacing)) + 110 * u * (Math.min(t, MERGED) - LIFT),
       y: rowY() + (i - 1) * 14 * u,
       d: m.d * 1.7,
     };

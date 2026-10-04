@@ -139,7 +139,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
   onFrame((t) => {
     const s = windowScale(t);
     const fade = 1 - clamp01((t - 26.77) / 0.1);
-    const appear = clamp01((t - 24.24) / 0.12);
+    const appear = clamp01((t - 24.3) / 0.1);
     // The window waits under the leaving words; its text comes up once
     // they have cleared, so no word passes over another.
     win.style.opacity = String(appear * fade);

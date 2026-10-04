@@ -155,7 +155,7 @@ function planeTexture() {
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   /** Where the dot hovers on T, in plan: over open floor (16:9: the kitchen's
    * front corner; 9:16: the doorway), never over furniture. */
-  const DOT_XZ = portrait ? [-0.05, 0.85] : [-1.95, 1.0];
+  const DOT_XZ = [0.55, -0.85];
   // Underneath composition 6's diagram, which lifts away to reveal the house.
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
@@ -165,6 +165,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // top edges off the dark ground like a lit architectural model.
   rim.intensity = 5.2;
   rim.position.set(-2.5, 6, -7);
+  // A warm, low grazing light from behind-right catches the wall tops and
+  // bevels, so the model reads as a lit object rather than flat card.
+  const graze = new THREE.DirectionalLight('#ffd9a8', 2.4);
+  graze.position.set(5, 2.2, -4);
+  scene.add(graze);
   // No fog: the model sits in a seamless brand-coloured room. The floor only
   // takes the plinth's shadow, so everything around the model is exactly the
   // background colour.
@@ -213,7 +218,6 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const pt = 0.07;
   house.add(box(pt, wh, pd[0] - zIn0, wall, PART_X, PLINTH_TOP, (pd[0] + zIn0) / 2));
   house.add(box(pt, wh, zIn1 - pd[1], wall, PART_X, PLINTH_TOP, (pd[1] + zIn1) / 2));
-  house.add(box(pt, WALL_H - 0.6, pd[1] - pd[0], wall, PART_X, Y0 + 0.6, (pd[0] + pd[1]) / 2));
 
   // --- furniture: simple model-maker's blocks -----------------------------------
   const oak = new THREE.MeshStandardMaterial({ color: '#9c7a55', roughness: 0.6 });
@@ -340,7 +344,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
     ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
-    : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 0.86, -0.05) };
+    : { distance: 10.0, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.08, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -366,7 +370,6 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   plumbGeo.translate(0, (T_Y - Y0) / 2, 0);
   const plumb = new THREE.Mesh(plumbGeo, accent(0));
   plumb.position.set(DOT_XZ[0], Y0, DOT_XZ[1]);
-  scene.add(plumb);
   const spot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
   spot.rotation.x = -Math.PI / 2;
   spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
@@ -422,11 +425,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const to = handoff.lanDotAt?.(HOST[1]);
     if (k > 0 && to) {
       const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
-      const up = 100 * u * Math.sin(Math.PI * Math.min(1, k * 1.25));
+      const up = 160 * u * Math.sin(Math.PI * Math.min(1, k * 1.25));
       return {
         x: lerp(s.x, to.x, e),
         y: lerp(s.y, to.y, e) - up,
-        d: lerp(d, Math.max(to.d, d * 1.3), Math.min(1, k * 1.6)),
+        d: lerp(d, to.d, e) * (1 + 0.5 * Math.sin(Math.PI * Math.min(1, k * 1.2))),
         glow: lerp(0.35, 0.45, k),
       };
     }
@@ -470,7 +473,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 18.15);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 36 * u }, { x: 0, duration: 0.42, ease: 'power3.out' }, 18.2);
+    tl.fromTo(ln, { x: from * 70 * u }, { x: 0, duration: 0.42, ease: 'power3.out' }, 18.2);
     tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, 18.2);
   });
   // Held, never still: a slow push on the whole band.
@@ -489,7 +492,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The plane fades in under the settling dot; brightens briefly at the touch.
     const touch = Math.exp(-Math.max(0, t - HOUSE_TOUCH) * 5) * (t >= HOUSE_TOUCH ? 1 : 0);
-    planeMat.opacity = 0.65 * smooth(span(t, 18.35, 18.75)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
+    planeMat.opacity = 0.38 * smooth(span(t, 18.35, 18.75)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
     const hover = smooth(span(t, SETTLE, SETTLE + 0.3)) * (1 - smooth(span(t, 21.3, 21.5)));
     plumb.material.opacity = 0.35 * hover;
     spot.material.opacity = 0.55 * hover;
@@ -503,11 +506,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const on = t >= d.start;
       d.bar.visible = on && grown > 0.002;
       d.bar.scale.set(1, Math.max(0.0001, grown * d.late * RISE), 1);
-      d.disc.visible = t >= d.start;
+      d.disc.visible = false;
       d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
-      d.contact.scale.setScalar(met ? 1 + 0.4 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
+      d.contact.scale.setScalar(met ? Math.max(0.0001, easeOut(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.25))) * (1 + 0.3 * Math.exp(-(t - HOUSE_TOUCH) * 5)) : 0.0001);
       d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
       
       const pop = smooth(span(t, d.start, d.start + 0.15));
@@ -547,7 +550,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
       const lh = d.label.offsetHeight;
       let lx = d.kind === 'tv' ? top.x - lw - 56 * u : top.x + 56 * u;
-      let ly = top.y - lh / 2;
+      let ly = top.y - lh - 22 * u;
       // No room on the left (9:16): above the bar's top, clear of its ring.
       if (lx < 40 * u) { lx = Math.max(40 * u, top.x - lw / 2); ly = top.y - lh - 56 * u; }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
