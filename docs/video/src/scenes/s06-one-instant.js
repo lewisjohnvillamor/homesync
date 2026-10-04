@@ -96,7 +96,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
    * the lane's start) and of the icon.
    */
   const NAME_X = L.laneStart + (portrait ? 40 : 120) * u;
-  const nameY = (kind) => L.lanes[kind] + 40 * u;
+  const nameY = (kind) => L.lanes[kind] + (portrait ? 56 : 40) * u;
   const ackD = devW * 0.72;
   const lane = (kind) => {
     const y = L.lanes[kind];
@@ -147,7 +147,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
       <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
         <div class="card" style="position:absolute;left:${-2600 * u}px;top:${L.tTop - CARD_TOP}px;width:${5200 * u + W}px;height:${CARD_TOP + 2600 * u}px;display:none;
-             background:linear-gradient(to bottom, transparent, var(--bg) ${70 * u}px)"></div>
+             background:linear-gradient(to bottom, transparent, var(--bg) ${240 * u}px)"></div>
         ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
              background:var(--accent);transform-origin:50% 0;border-radius:${3 * u}px"></div>
@@ -219,11 +219,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
       // 9:16 pushes harder through the hold (5 %), so it never reads as paused.
-      s: (portrait ? 0.74 : 1.2) * lerp(1, portrait ? 1.05 : 1.04, k),
+      s: (portrait ? 0.84 : 1.2) * lerp(1, portrait ? 1.05 : 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
       px: W / 2 + (portrait ? 40 * u : 10 * u) + (portrait ? 0 : 30) * u * k,
-      py: (portrait ? H * 0.47 : H * 0.44) + 10 * u * k,
+      py: (portrait ? H * 0.41 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
       rot: VIEW.azimuth,
     };
@@ -234,13 +234,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return out;
   };
   // The camera starts leaning in on the phone lane from 11.9 s, then rushes in on the cut.
-  const RUSH = [12.98, 13.42];
+  const RUSH = [12.88, 13.42];
   const rushK = (t) => {
     const k = span(t, ...RUSH);
     // Accelerates in, then settles slowly: an ease-in-out with its arrival stretched.
-    const e = easeInOut(k ** 0.7);
+    const e = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) ** 2;
     // 9:16 has no lean (it would push the icons off the left edge); the hold has its acknowledge instead.
-    return Math.max((portrait ? 0 : 0.14) * (span(t, 11.9, RUSH[0]) ** 1.6), k > 0 ? e : 0);
+    return Math.max((portrait ? 0 : 0.2) * (span(t, 11.45, RUSH[0]) ** 1.4), k > 0 ? e : 0);
   };
   // The pull back leaves fast and lands slowly.
   const backK = (t) => {
@@ -415,7 +415,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // tag, always beside the phone's 90 ms, in 7 and 8.
     const flat = 1 - back;
     const topY = c.py + (L.tTop - c.fy) * c.s;
-    const keepY = Math.max(topY, (portrait ? 110 : 90) * u);
+    const keepY = Math.max(topY, (portrait ? 130 : 90) * u);
     const dy = ((keepY - topY) / c.s) * flat;
     anchor.style.transform = `translateY(${dy}px)`;
     const tk7 = lerp(1, 1.25 / c.s, rush * flat);
@@ -446,6 +446,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   hostDot(11.0, DOT_RELEASE, (t) => {
     const r = restDot;
     const pulse = Math.max(t >= FIRE7 + RUN7 ? Math.exp(-(t - FIRE7 - RUN7) * 5) : 0, t >= ARRIVE8 ? Math.exp(-(t - ARRIVE8) * 5) : 0);
-    return { x: r.x, y: r.y, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
+    // As the plane lifts away the dot starts to sink, so the house's drop continues one motion.
+    const sinkY = 60 * u * easeIn(span(t, LIFT_SPAN[0], DOT_RELEASE));
+    return { x: r.x, y: r.y + sinkY, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
   });
 }

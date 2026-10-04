@@ -163,7 +163,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.16, 0.15, 0.2], d0: 3.95, d1: 3.5, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.13, 0.15, 0.2], d0: 4.2, d1: 3.8, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
