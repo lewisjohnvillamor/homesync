@@ -65,6 +65,10 @@ const state = {
   role: 'speaker',
   seeking: false,
   loadToken: 0,
+  /** What the library search box narrows the picker to. Lower case. */
+  mediaFilter: '',
+  /** Last metadata handed to the OS, so it is not rewritten every tick. */
+  mediaSessionKey: '',
 };
 
 // ---------------------------------------------------------------------------
@@ -282,6 +286,7 @@ function onSnapshot(snapshot) {
   $('room-code-label').textContent = snapshot.room_code;
   renderMediaOptions(snapshot.media.items);
   renderQueue();
+  renderSkipButtons();
   renderPlaybackModes();
   renderPlaylists();
   renderMicrophoneOptions();
@@ -479,7 +484,30 @@ function wireControls() {
     sendQueue([...pendingQueue(), id]);
   });
 
+  $('media-search').addEventListener('input', (event) => {
+    state.mediaFilter = event.target.value.trim().toLowerCase();
+    renderMediaOptions(state.media?.items ?? []);
+  });
+
+  // Queueing an album was twelve trips through a three-hundred-entry dropdown.
+  // Searching for it and pressing this is two.
+  $('media-add-all').addEventListener('click', () => {
+    const shown = filteredMedia(state.media?.items ?? []);
+    if (!shown.length) return;
+    sendQueue([...pendingQueue(), ...shown.map((item) => item.id)]);
+  });
+
   $('queue-clear').addEventListener('click', () => sendQueue([]));
+
+  // Skipping is a coordinator command, not something this device works out:
+  // under shuffle the next track is a fact about the room, and two devices
+  // deciding it separately is the one thing this project exists to prevent.
+  $('previous').addEventListener('click', () => state.connection?.send('skip', { delta: -1 }));
+  $('next').addEventListener('click', () => state.connection?.send('skip', { delta: 1 }));
+
+  $('sleep').addEventListener('click', cycleSleepTimer);
+
+  wireMediaSession();
 
   $('youtube-load').addEventListener('click', () => {
     const videoId = parseVideoId($('youtube-input').value);
@@ -668,7 +696,11 @@ function wireControls() {
     setVolumeOpen(false);
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') setVolumeOpen(false);
+    if (event.key === 'Escape') {
+      setVolumeOpen(false);
+      return;
+    }
+    handleShortcut(event);
   });
 
   $('light-touch').addEventListener('change', (event) => setLightTouch(event.target.checked));
@@ -1249,6 +1281,26 @@ function showModeControls(mode, { fromRoom = false } = {}) {
   $('pause').disabled = !timeline;
 }
 
+/**
+ * Enables the skip buttons for the queue the room currently holds.
+ *
+ * Driven by the snapshot rather than by the mode tabs: the queue grows and
+ * shrinks far more often than the source mode changes, and deciding this
+ * alongside the other transport buttons left Next greyed out for as long as
+ * nobody switched tabs. The modes need no separate check — selecting YouTube
+ * or live audio clears the queue on the coordinator, so an empty queue is
+ * already the answer for both.
+ *
+ * Back stays available on a queue of one, because there it means "play this
+ * again". Next on a queue of one has nowhere to go, so it is disabled rather
+ * than left looking pressable and doing nothing.
+ */
+function renderSkipButtons() {
+  const queued = state.snapshot?.queue?.length ?? 0;
+  $('previous').disabled = queued < 1;
+  $('next').disabled = queued < 2;
+}
+
 /** The source-mode radio group. */
 function modeRadios() {
   return document.querySelectorAll('input[name="mode"]');
@@ -1359,16 +1411,43 @@ function renderCalibrationResult(result) {
   }
 }
 
+/**
+ * The library entries the search box currently leaves showing.
+ *
+ * Matched on the title with a plain substring test rather than by word. A
+ * library is mostly song titles, and somebody typing "mornin" has not finished
+ * the word yet.
+ */
+function filteredMedia(items) {
+  const needle = state.mediaFilter;
+  if (!needle) return items;
+  return items.filter((item) => (item.title ?? item.id).toLowerCase().includes(needle));
+}
+
 function renderMediaOptions(items) {
   const select = $('media-select');
-  const signature = items.map((i) => i.id).join(',');
+  const shown = filteredMedia(items);
+
+  // Says how far the library has been narrowed, because a picker showing four
+  // tracks out of three hundred otherwise looks like a library that lost them.
+  $('media-count').textContent =
+    shown.length === items.length
+      ? `${items.length} track${items.length === 1 ? '' : 's'}`
+      : `${shown.length} of ${items.length}`;
+  // Nothing to add in bulk from an empty result, and adding the whole library
+  // is a different intent from adding what you searched for.
+  $('media-add-all').disabled = shown.length === 0;
+
+  // The filter is part of the signature: the same catalogue narrowed two
+  // different ways is two different lists.
+  const signature = `${state.mediaFilter}\u0000${shown.map((i) => i.id).join(',')}`;
   if (select.dataset.signature !== signature) {
     select.innerHTML = '';
     const none = document.createElement('option');
     none.value = '';
-    none.textContent = 'Add a track…';
+    none.textContent = shown.length === 0 ? 'Nothing matches' : 'Add a track…';
     select.append(none);
-    for (const item of items) {
+    for (const item of shown) {
       const option = document.createElement('option');
       option.value = item.id;
       // Marked in the list rather than left to fail on selection. A device
@@ -1381,6 +1460,9 @@ function renderMediaOptions(items) {
       select.append(option);
     }
     select.dataset.signature = signature;
+    // Against the whole catalogue, not the narrowed view: this is a statement
+    // about what the device can decode, and it should not come and go as
+    // somebody types.
     announceUndecodable(items);
   }
   // Always parked on the placeholder: this control adds to the queue, so
@@ -1411,6 +1493,185 @@ function announceUndecodable(items) {
     `in the library (${kinds}). They are marked in the list. Other devices may play them fine — ` +
     `Chrome, Edge and Safari license decoders that an open-source Chromium build does not ship.`;
   notice.classList.remove('hidden');
+}
+
+/**
+ * Publishes what is playing to the operating system, and takes its controls.
+ *
+ * This is what makes a phone a usable remote: the lock screen, the
+ * notification shade, a car head unit and the media keys on a laptop all end
+ * up driving the *room*, not this one device's audio element. Every handler
+ * sends a coordinator command, so pressing pause on a locked phone pauses the
+ * house in step rather than muting the phone and leaving the rest playing.
+ *
+ * Absent on Firefox and older WebKit, so every use is guarded.
+ */
+function renderMediaSession() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+
+  const transport = state.transport;
+  const item = state.media?.items?.find((i) => i.id === transport?.media_id) ?? null;
+  const code = state.snapshot?.room_code ?? '';
+
+  // Rewritten only when it actually changes. Assigning MediaMetadata on every
+  // tick makes some browsers re-fetch the artwork, which is a request a second
+  // for a picture that has not changed.
+  const key = `${item?.id ?? ''}\u0000${code}`;
+  if (key !== state.mediaSessionKey) {
+    state.mediaSessionKey = key;
+    session.metadata = item
+      ? new MediaMetadata({
+          title: item.title ?? item.id,
+          // The room, not an artist: HomeSync does not read artist tags, and
+          // inventing one would be worse than naming where the sound is going.
+          artist: code ? `HomeSync · room ${code}` : 'HomeSync',
+          artwork: item.has_artwork
+            ? [{ src: `/api/v1/media/${encodeURIComponent(item.id)}/art`, sizes: '512x512' }]
+            : [],
+        })
+      : null;
+  }
+
+  session.playbackState = transport?.state === 'playing' ? 'playing' : 'paused';
+}
+
+/** Points the operating system's media controls at the room. Once per load. */
+function wireMediaSession() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  const actions = [
+    ['play', () => state.connection?.send('play', { force: $('force').checked })],
+    ['pause', () => state.connection?.send('pause')],
+    ['stop', () => state.connection?.send('stop')],
+    ['previoustrack', () => state.connection?.send('skip', { delta: -1 })],
+    ['nexttrack', () => state.connection?.send('skip', { delta: 1 })],
+    ['seekto', (details) => seekToSeconds(details.seekTime)],
+  ];
+  for (const [action, handler] of actions) {
+    // Each in its own try: a browser that does not know one action throws on
+    // setting it, and one unknown action must not cost us the rest.
+    try {
+      session.setActionHandler(action, handler);
+    } catch {
+      // Unsupported here. The on-screen control still works.
+    }
+  }
+}
+
+/** Seeks the room to a position in seconds, ignoring a nonsensical one. */
+function seekToSeconds(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return;
+  state.connection?.send('seek', { position_ns: Math.round(seconds * 1e9) });
+}
+
+/** How far the arrow keys move the room, in seconds. */
+const SHORTCUT_SEEK_S = 5;
+
+/**
+ * Transport shortcuts for a laptop being used as the room's remote.
+ *
+ * Ignored while a text field has focus, so typing a device name or searching
+ * the library does not pause the house.
+ */
+function handleShortcut(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const target = event.target;
+  if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) {
+    return;
+  }
+  if (!state.connection) return;
+
+  const transport = state.transport;
+  const position = transport ? positionAtServerNs(transport, state.connection.clock.serverNow()) : 0;
+
+  switch (event.key) {
+    case ' ':
+      // Space is also "press the focused button", so it is only ours when
+      // nothing is focused — otherwise it would fire the button *and* this.
+      if (document.activeElement !== document.body) return;
+      if (transport?.state === 'playing') state.connection.send('pause');
+      else state.connection.send('play', { force: $('force').checked });
+      break;
+    case 'ArrowLeft':
+      seekToSeconds(Math.max(0, position / 1e9 - SHORTCUT_SEEK_S));
+      break;
+    case 'ArrowRight': {
+      // Clamped to the track's length. Seeking past the end of the last track
+      // of a queue that is not repeating leaves the room sitting in silence
+      // past the end, with nothing to advance to.
+      const duration = currentDurationNs();
+      const wanted = position / 1e9 + SHORTCUT_SEEK_S;
+      seekToSeconds(duration > 0 ? Math.min(wanted, duration / 1e9) : wanted);
+      break;
+    }
+    case 'p':
+      state.connection.send('skip', { delta: -1 });
+      break;
+    case 'n':
+      state.connection.send('skip', { delta: 1 });
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+}
+
+/**
+ * Durations the sleep button steps through, in minutes. `null` is off.
+ *
+ * A cycling button rather than a dropdown, which is how Repeat already works
+ * here — and a sleep timer is a handful of round numbers, not a duration
+ * anybody wants to type.
+ */
+const SLEEP_STEPS_MIN = [15, 30, 45, 60, 90, null];
+
+/** Arms the next sleep duration along, wrapping back to off. */
+function cycleSleepTimer() {
+  const armed = state.snapshot?.sleep_at_ns ?? null;
+  // From an armed timer, step past every duration already behind us: the
+  // button shows minutes remaining, so cycling from "22 left" should offer 30,
+  // not 15 — which would be a shorter timer than the one running.
+  let next = SLEEP_STEPS_MIN[0];
+  if (armed !== null) {
+    // Rounded up to the whole minute first. A timer armed for fifteen minutes
+    // has 14 minutes 59 seconds left a moment later, and comparing against
+    // that would find 15 as the next step up — leaving the button apparently
+    // stuck on the duration it was already showing.
+    const remaining = Math.ceil(sleepRemainingMs(armed) / 60_000);
+    next = SLEEP_STEPS_MIN.find((minutes) => minutes !== null && minutes > remaining) ?? null;
+  }
+  state.connection?.send('sleep_timer', next === null ? {} : { minutes: next });
+}
+
+/** Milliseconds until a sleep deadline, against this device's clock estimate. */
+function sleepRemainingMs(sleepAtNs) {
+  const now = state.connection?.clock.serverNow();
+  if (!now) return 0;
+  return Math.max(0, (sleepAtNs - now) / 1e6);
+}
+
+/**
+ * Draws the sleep button, counting down.
+ *
+ * Called from the UI tick rather than from snapshots: snapshots arrive about
+ * once a second and carry a deadline, so the countdown is this device's to
+ * render smoothly against its own clock estimate.
+ */
+function renderSleepTimer() {
+  const button = $('sleep');
+  const armed = state.snapshot?.sleep_at_ns ?? null;
+  if (armed === null) {
+    button.textContent = 'Sleep';
+    button.classList.remove('on');
+    button.setAttribute('aria-pressed', 'false');
+    return;
+  }
+  // Rounded up, so a timer never reads 0:00 while the room is still playing.
+  const remaining = Math.ceil(sleepRemainingMs(armed) / 1000);
+  button.textContent = `Sleep ${formatTime(remaining * 1e9)}`;
+  button.classList.add('on');
+  button.setAttribute('aria-pressed', 'true');
 }
 
 /** Draws the queue, marking the track the room is on. */
@@ -1673,6 +1934,8 @@ function refreshUi() {
     $('seek').value = String(Math.round((shown / duration) * 1000));
   }
 
+  renderSleepTimer();
+  renderMediaSession();
   renderDeviceFacts();
 }
 

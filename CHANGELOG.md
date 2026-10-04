@@ -10,6 +10,56 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ## [Unreleased]
 
+### Added
+
+- **Next and previous track.** The queue was a list you could only enter by
+  clicking a row: there was no way to say "not this one". Both are coordinator
+  commands rather than something the pressing device works out, because under
+  shuffle the next track is a fact about the room — a device computing it
+  locally would be guessing at a permutation it does not hold. Skipping follows
+  the same order an automatic advance does, so the "every track once before any
+  of them twice" property still holds when somebody is pressing Next.
+
+  Back restarts the current track when you are more than three seconds into it,
+  which is what every phone and car stereo does. Forward at the end of a queue
+  that is not repeating does nothing rather than silencing the room. Repeat-one
+  is ignored by Next, because looping one track describes what happens when it
+  *ends*, not a request to be held on it — a Next button that replayed the
+  current track would look broken.
+
+- **A sleep timer.** The transport has a button that steps through 15, 30, 45,
+  60 and 90 minutes and back to off, counting down while it runs. The deadline
+  belongs to the room and is broadcast to every device, so setting one on a
+  phone and then taking the phone to bed does not take the timer with it. It
+  pauses rather than stops — the answer to falling asleep four tracks in is
+  Play, not finding your place again — and it cancels a start the room was
+  holding for a device still warming up, which would otherwise have the house
+  begin playing at bedtime because a phone finished measuring its clock.
+
+  The deadline goes out as an instant rather than a remaining duration, so each
+  device counts down smoothly against its own clock estimate instead of jumping
+  once a second when a snapshot lands.
+
+- **A searchable library.** A 300-track library in a dropdown is a wall, and
+  queueing an album out of one was a dozen trips through it. There is now a
+  search box over the picker, a count that says how far the library has been
+  narrowed, and an **Add all** button that queues everything the search left
+  showing. Two clicks instead of twelve.
+
+- **The operating system's media controls drive the room.** A phone's lock
+  screen, the notification shade, a car head unit and the media keys on a
+  laptop keyboard now work, and every one of them sends a coordinator command —
+  so pressing pause on a locked phone pauses the house in step rather than
+  muting the phone and leaving everything else playing. What is playing and its
+  cover art are published to the OS too. Absent on Firefox and older WebKit,
+  where the on-screen controls are unaffected.
+
+- **Keyboard shortcuts** for a laptop being used as the remote: space for
+  play/pause, the arrow keys to seek five seconds, `p` and `n` to skip. Ignored
+  while a text field has focus, so searching the library for a track with an
+  `n` in it does not skip the room — there is a browser test for exactly that,
+  because it is the mistake this kind of handler always makes.
+
 ### Changed
 
 - **A snapshot no longer carries the whole catalogue every time.** Telemetry

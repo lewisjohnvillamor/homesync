@@ -979,6 +979,14 @@ input[type="range"]:disabled {
   white-space: nowrap;
 }
 
+/* The label grows from "Sleep" to a running countdown. Sized for the wider
+ * state and figures kept the same width, so arming a timer does not shunt the
+ * volume button sideways and then twitch once a second. */
+#sleep {
+  min-width: 8rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .stage {
   position: relative;
   aspect-ratio: 16 / 9;

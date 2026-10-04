@@ -48,6 +48,20 @@ pub const YOUTUBE_RESYNC_IMMEDIATE_MS: f64 = 1_500.0;
 /// and never plays anything.
 pub const YOUTUBE_RESYNC_COOLDOWN_NS: u64 = 10_000_000_000;
 
+/// How far into a track Back restarts it instead of stepping to the previous
+/// one.
+///
+/// Three seconds is the convention every phone and car stereo has settled on.
+/// Shorter and a press meant as "play that again" skips back a track; longer
+/// and the button stops being a way out of a track you did not want.
+const PREVIOUS_RESTARTS_AFTER_NS: u64 = 3_000_000_000;
+
+/// Longest sleep timer that can be armed, in minutes.
+///
+/// Twelve hours. Partly so the deadline arithmetic cannot overflow on a
+/// hostile value, and partly because anything longer is not a sleep timer.
+const MAX_SLEEP_MINUTES: u32 = 12 * 60;
+
 /// Timeline error, in milliseconds, worth telling a listener about.
 ///
 /// Well below what anyone would notice as an echo. The point is to surface a
@@ -205,6 +219,8 @@ pub struct Room {
     /// Transport epoch whose timeline has already been re-anchored onto the
     /// devices. Once per start, never repeatedly.
     youtube_anchored_epoch: Option<u64>,
+    /// When the sleep timer should pause the room, on the coordinator's clock.
+    pub sleep_at_ns: Option<u64>,
     start_lead_ns: u64,
     max_clients: usize,
 }
@@ -236,6 +252,7 @@ impl Room {
             durations_ns: BTreeMap::new(),
             rendezvous_epoch: 0,
             youtube_anchored_epoch: None,
+            sleep_at_ns: None,
             start_lead_ns,
             max_clients,
         }
@@ -388,6 +405,20 @@ impl Room {
         self.next_index().and_then(|index| self.queue.get(index)).map(String::as_str)
     }
 
+    /// The order the queue's indices are played in.
+    ///
+    /// The shuffled permutation when one is current, and plain ascending order
+    /// otherwise — including when a stale permutation no longer matches the
+    /// queue's length, because walking a permutation that disagrees with the
+    /// list it indexes is how a skip lands on a track nobody queued.
+    fn play_order(&self) -> Vec<usize> {
+        if self.shuffle && self.shuffle_order.len() == self.queue.len() {
+            self.shuffle_order.clone()
+        } else {
+            (0..self.queue.len()).collect()
+        }
+    }
+
     /// The queue position that follows the current one under the room's modes.
     ///
     /// `None` means the queue is finished: the last track of a list that is not
@@ -402,11 +433,7 @@ impl Room {
             return Some(self.queue_index);
         }
 
-        let order: Vec<usize> = if self.shuffle && self.shuffle_order.len() == self.queue.len() {
-            self.shuffle_order.clone()
-        } else {
-            (0..self.queue.len()).collect()
-        };
+        let order = self.play_order();
         let at = order.iter().position(|index| *index == self.queue_index)?;
         match order.get(at + 1) {
             Some(next) => Some(*next),
@@ -524,6 +551,92 @@ impl Room {
         }
         self.dirty = true;
         Some(media_id)
+    }
+
+    /// Steps to the next or previous queued track.
+    ///
+    /// Only the sign of `delta` is read. Returns the media id now on the
+    /// transport, or `None` when the press did nothing.
+    ///
+    /// This is a coordinator command rather than something the pressing device
+    /// works out for itself, for the same reason shuffle is room-owned: the
+    /// next track under a shuffled order is a fact about the room, and a device
+    /// that computed it locally would be guessing at a permutation it does not
+    /// hold.
+    ///
+    /// Repeat-one is ignored here. Looping one track is a statement about what
+    /// happens when it *ends*, not a request to be held on it — a Next button
+    /// that moved to the track already playing would look broken.
+    pub fn skip(&mut self, delta: i32, now_ns: u64) -> Option<String> {
+        if delta == 0 || self.queue.is_empty() {
+            return None;
+        }
+
+        // Well into a track, Back means "play this again" — the convention
+        // every phone and car stereo has taught, and the one that makes the
+        // button usable when you missed the first ten seconds of a song.
+        if delta < 0 && self.transport.position_at(now_ns) >= PREVIOUS_RESTARTS_AFTER_NS {
+            self.seek(0, now_ns);
+            return self.transport.media_id.clone();
+        }
+
+        let order = self.play_order();
+        let at = order.iter().position(|index| *index == self.queue_index)?;
+        let target = if delta < 0 {
+            match at.checked_sub(1) {
+                Some(previous) => order[previous],
+                None if self.repeat == RepeatMode::All => *order.last()?,
+                // Before the first track of a list that is not a loop. The
+                // useful answer is the start of what is playing; there is
+                // nowhere else to go.
+                None => {
+                    self.seek(0, now_ns);
+                    return self.transport.media_id.clone();
+                }
+            }
+        } else {
+            match order.get(at + 1) {
+                Some(next) => *next,
+                None if self.repeat == RepeatMode::All => *order.first()?,
+                // The end of a queue that is not a loop. Nothing to skip to,
+                // and silencing the room is not what Next looks like it does.
+                None => return None,
+            }
+        };
+        self.play_queued(target, now_ns)
+    }
+
+    /// Arms the sleep timer, or cancels it when `minutes` is `None` or zero.
+    pub fn set_sleep_timer(&mut self, minutes: Option<u32>, now_ns: u64) {
+        self.sleep_at_ns = minutes
+            .filter(|minutes| *minutes > 0)
+            // Capped so the arithmetic cannot overflow on a hostile value, and
+            // because a sleep timer longer than a night is a different feature.
+            .map(|minutes| now_ns + u64::from(minutes.min(MAX_SLEEP_MINUTES)) * 60 * 1_000_000_000);
+        self.dirty = true;
+    }
+
+    /// Pauses the room once its sleep deadline has passed.
+    ///
+    /// Returns whether the transport moved, so the caller knows whether to
+    /// broadcast one. Pause rather than stop: the position is kept, so the
+    /// answer to falling asleep four tracks in is Play, not finding your place
+    /// again.
+    pub fn expire_sleep_timer(&mut self, now_ns: u64) -> bool {
+        let Some(deadline) = self.sleep_at_ns else { return false };
+        if now_ns < deadline {
+            return false;
+        }
+        self.sleep_at_ns = None;
+        self.dirty = true;
+        // A start that was waiting for a device's clock must not fire after
+        // the room was told to go quiet.
+        self.cancel_pending_play();
+        if self.transport.state != TransportState::Playing {
+            return false;
+        }
+        self.pause(now_ns);
+        true
     }
 
     /// Replaces the queue.
@@ -1076,6 +1189,7 @@ impl Room {
             shuffle: self.shuffle,
             repeat: self.repeat,
             playlists,
+            sleep_at_ns: self.sleep_at_ns,
             health: self.health(now_ns),
             starting_when_ready: if self.pending_play { self.blockers() } else { Vec::new() },
             stream: self.stream.clone(),
@@ -1764,6 +1878,177 @@ mod tests {
             assert_eq!(finish_track(&mut room, &mut now).as_deref(), Some("one"));
         }
         assert_eq!(room.queue_index, 0, "repeat-one does not move through the queue");
+    }
+
+    /// A moment far enough into the current track that Back restarts it.
+    fn well_into_the_track(room: &Room) -> u64 {
+        room.transport.anchor_server_ns + PREVIOUS_RESTARTS_AFTER_NS + 500_000_000
+    }
+
+    #[test]
+    fn skipping_forward_moves_to_the_next_track_and_keeps_playing() {
+        let mut room = three_track_room();
+        assert_eq!(room.skip(1, 0).as_deref(), Some("two"));
+        assert_eq!(room.queue_index, 1);
+        assert_eq!(room.transport.state, TransportState::Playing, "skipping must not silence a playing room");
+        assert_eq!(room.transport.anchor_media_ns, 0, "the new track starts at its beginning");
+    }
+
+    #[test]
+    fn skipping_forward_at_the_end_of_a_queue_does_nothing() {
+        let mut room = three_track_room();
+        room.skip(1, 0);
+        room.skip(1, 0);
+        assert_eq!(room.queue_index, 2);
+        // Not "stop", and not a wrap: a Next button at the end of a list
+        // should leave the last track playing.
+        assert_eq!(room.skip(1, 0), None);
+        assert_eq!(room.queue_index, 2);
+        assert_eq!(room.transport.state, TransportState::Playing);
+    }
+
+    #[test]
+    fn skipping_back_early_in_a_track_steps_to_the_previous_one() {
+        let mut room = three_track_room();
+        room.skip(1, 0);
+        assert_eq!(room.queue_index, 1);
+        // Still inside the restart window, so this is a real step back.
+        assert_eq!(room.skip(-1, 0).as_deref(), Some("one"));
+        assert_eq!(room.queue_index, 0);
+    }
+
+    #[test]
+    fn skipping_back_well_into_a_track_restarts_it_instead() {
+        let mut room = three_track_room();
+        room.skip(1, 0);
+        let now = well_into_the_track(&room);
+        assert_eq!(room.skip(-1, now).as_deref(), Some("two"), "the same track, played again");
+        assert_eq!(room.queue_index, 1, "the queue must not move");
+        assert_eq!(room.transport.position_at(now), 0, "and it must be back at the start");
+    }
+
+    #[test]
+    fn skipping_back_from_the_first_track_restarts_it_rather_than_wrapping() {
+        let mut room = three_track_room();
+        let now = well_into_the_track(&room);
+        assert_eq!(room.skip(-1, now).as_deref(), Some("one"));
+        assert_eq!(room.queue_index, 0);
+        assert_eq!(room.transport.position_at(now), 0);
+    }
+
+    #[test]
+    fn skipping_back_from_the_first_track_wraps_when_the_queue_is_a_loop() {
+        let mut room = three_track_room();
+        room.set_playback_modes(false, RepeatMode::All);
+        assert_eq!(room.skip(-1, 0).as_deref(), Some("three"), "repeat-all makes the queue a ring");
+        assert_eq!(room.queue_index, 2);
+    }
+
+    #[test]
+    fn skipping_moves_on_even_under_repeat_one() {
+        // Repeat-one describes what happens when a track *ends*. A Next button
+        // that honoured it would restart the track that is already playing,
+        // which looks exactly like a broken button.
+        let mut room = three_track_room();
+        room.set_playback_modes(false, RepeatMode::One);
+        assert_eq!(room.skip(1, 0).as_deref(), Some("two"));
+        assert_eq!(room.queue_index, 1);
+    }
+
+    #[test]
+    fn skipping_forward_follows_the_shuffled_order() {
+        // Shuffle lives on the coordinator, so a skip must walk the same
+        // permutation the automatic advance does — otherwise pressing Next
+        // plays a track that was already coming up later, and the "every
+        // track once" property quietly stops holding.
+        let mut room = three_track_room();
+        room.set_playback_modes(true, RepeatMode::Off);
+        let mut played = vec!["one".to_string()];
+        while let Some(next) = room.skip(1, 0) {
+            played.push(next);
+        }
+        let mut sorted = played.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 3, "every track exactly once: {played:?}");
+        assert_eq!(played.first().map(String::as_str), Some("one"));
+    }
+
+    #[test]
+    fn skipping_an_empty_queue_is_harmless() {
+        let mut room = room();
+        assert_eq!(room.skip(1, 0), None);
+        assert_eq!(room.skip(-1, 0), None);
+    }
+
+    #[test]
+    fn the_sleep_timer_pauses_the_room_when_it_expires() {
+        let mut room = three_track_room();
+        room.set_sleep_timer(Some(30), 0);
+        let deadline = room.sleep_at_ns.expect("armed");
+        assert_eq!(deadline, 30 * 60 * 1_000_000_000);
+
+        assert!(!room.expire_sleep_timer(deadline - 1), "not yet");
+        assert_eq!(room.transport.state, TransportState::Playing);
+
+        assert!(room.expire_sleep_timer(deadline));
+        assert_eq!(room.transport.state, TransportState::Paused);
+        assert_eq!(room.sleep_at_ns, None, "a fired timer must disarm itself");
+        // Pause, not stop: the answer to falling asleep is Play, not finding
+        // your place again.
+        assert!(room.transport.anchor_media_ns > 0, "the position must be kept");
+    }
+
+    #[test]
+    fn an_expired_sleep_timer_does_not_fire_twice() {
+        let mut room = three_track_room();
+        room.set_sleep_timer(Some(1), 0);
+        let deadline = room.sleep_at_ns.expect("armed");
+        assert!(room.expire_sleep_timer(deadline));
+        assert!(!room.expire_sleep_timer(deadline + 1), "nothing left to expire");
+    }
+
+    #[test]
+    fn a_sleep_timer_stops_a_start_that_was_waiting_for_a_device() {
+        // A room can be holding Play while a device's clock settles. The
+        // deadline must cancel that too, or the room starts playing at
+        // bedtime because a phone finished warming up.
+        let mut room = room();
+        room.select_source(SourceMode::ControlledAudio, Some("one".into()), None, 0);
+        add(&mut room, "a", Role::Speaker);
+        room.set_ready("a", "one");
+        room.play(0, false).expect("play");
+        assert!(room.pending_play);
+
+        room.set_sleep_timer(Some(1), 0);
+        room.expire_sleep_timer(room.sleep_at_ns.expect("armed"));
+        assert!(!room.pending_play, "the held start must be cancelled");
+
+        room.set_clock_report("a", stable_clock());
+        assert!(!room.start_if_ready(0), "and must not fire once the clock settles");
+        assert_ne!(room.transport.state, TransportState::Playing);
+    }
+
+    #[test]
+    fn a_sleep_timer_can_be_cancelled() {
+        let mut room = three_track_room();
+        room.set_sleep_timer(Some(30), 0);
+        room.set_sleep_timer(None, 0);
+        assert_eq!(room.sleep_at_ns, None);
+        // Zero means the same thing, so a control that counts down to nothing
+        // does not arm a timer for right now.
+        room.set_sleep_timer(Some(0), 0);
+        assert_eq!(room.sleep_at_ns, None);
+        assert!(!room.expire_sleep_timer(u64::MAX / 2));
+        assert_eq!(room.transport.state, TransportState::Playing);
+    }
+
+    #[test]
+    fn a_sleep_timer_is_capped_rather_than_allowed_to_overflow() {
+        let mut room = room();
+        room.set_sleep_timer(Some(u32::MAX), u64::MAX / 2);
+        let deadline = room.sleep_at_ns.expect("armed");
+        assert_eq!(deadline, u64::MAX / 2 + u64::from(MAX_SLEEP_MINUTES) * 60 * 1_000_000_000);
     }
 
     #[test]

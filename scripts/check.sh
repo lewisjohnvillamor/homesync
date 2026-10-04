@@ -40,6 +40,9 @@ if command -v node >/dev/null 2>&1; then
 
   echo "==> browser end-to-end (skipped without Playwright)"
   node web/test/e2e.mjs
+
+  echo "==> browser room controls (skipped without Playwright)"
+  node web/test/controls.mjs
 else
   echo "==> browser tests SKIPPED (node not found)"
 fi

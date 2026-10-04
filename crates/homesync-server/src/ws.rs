@@ -426,6 +426,29 @@ fn handle_text(app: &Arc<App>, session: &mut Session, text: &str) {
             None
         }),
 
+        Payload::Skip(skip) => with_room(app, session, request_id, |app, _session, room| {
+            let now = app.now_ns();
+            // A press at the end of a queue that is not looping does nothing,
+            // and is not an error. Nothing is broadcast either: a snapshot
+            // repeating what every device already holds would only make all of
+            // them re-render.
+            if let Some(media) = room.skip(skip.delta, now) {
+                tracing::info!(room = %room.code, media = %media, delta = skip.delta, "skipped");
+                broadcast_transport_and_snapshot(app, room, now);
+                send_youtube_rendezvous(app, room, now, None);
+            }
+            None
+        }),
+
+        Payload::SleepTimer(timer) => with_room(app, session, request_id, |app, _session, room| {
+            let now = app.now_ns();
+            room.set_sleep_timer(timer.minutes, now);
+            let snapshot = snapshot_now(app, room);
+            room.broadcast(Payload::RoomSnapshot(Box::new(snapshot)), now);
+            room.dirty = false;
+            None
+        }),
+
         Payload::Volume(volume) => with_room(app, session, request_id, |app, session, room| {
             let target = volume.client_id.unwrap_or_else(|| session.client_id.clone());
             if let Some(client) = room.clients.get_mut(&target) {
@@ -804,6 +827,12 @@ pub fn flush_dirty_rooms(app: &App) {
         // "behind" and all of them were corrected forever.
         if let Some(shift) = room.youtube_reanchor(now) {
             tracing::info!(room = %room.code, shift_ms = shift * 1000.0, "re-anchored the room onto its devices");
+            room.broadcast(Payload::Transport(room.transport.clone()), now);
+        }
+        // Before the queue is advanced, so a deadline that falls in the gap
+        // between tracks stops the room rather than starting one more.
+        if room.expire_sleep_timer(now) {
+            tracing::info!(room = %room.code, "sleep timer expired; room paused");
             room.broadcast(Payload::Transport(room.transport.clone()), now);
         }
         if let Some(started) = room.advance_queue(now) {

@@ -43,6 +43,9 @@ link.
 - 📺 **YouTube together** — every device runs its own player; HomeSync keeps them lined up
 - 🔊 **One volume for the house** — turn everything down at once, or set a single device's level; the room's gain scales each device rather than overriding it
 - 🔀 **Shuffle, repeat and saved playlists** — shuffle plays every track once before any of them twice, repeat does off/all/one, and a named queue survives a restart
+- ⏭️ **Skip, search and queue in bulk** — next and previous move the whole room at once, and a search box with **Add all** queues an album in two clicks rather than twelve
+- 🌙 **A sleep timer** — the room stops after 15, 30, 45, 60 or 90 minutes, and the timer belongs to the house rather than to the phone that set it
+- 🔒 **Your phone's lock screen is the remote** — the media keys, the notification shade and a car head unit all drive the room, not just that one device
 - 🎚️ **Per-device equaliser** — tame the boomy speaker in the kitchen without touching the rest, and it costs nothing while it is flat
 - 📶 **No internet needed** — it is your LAN, your files, your machine
 - 🎛️ **Quiet drift correction** — a device whose clock runs fast is nudged back by a fraction of a percent instead of restarting the room
@@ -309,11 +312,45 @@ happens on its own.
    offering a button that cannot work. It has never been run against a real
    microphone; see [Status](#status).
 
+### Finding something to play
+
+The library picker has a search box over it. Type part of a title, and the
+count above the list says how far it has been narrowed — `2 of 312`. **Add all**
+then queues everything the search left showing, which is how an album gets into
+the queue in two clicks rather than a dozen trips through a dropdown.
+
+**Next** and **Previous** move the whole room, not the device you pressed them
+on. Under shuffle they follow the same order the queue would have taken on its
+own, so skipping does not break the promise that every track plays once before
+any of them plays twice. Previous restarts the current track if you are more
+than three seconds into it.
+
+### Stopping at bedtime
+
+The **Sleep** button in the transport steps through 15, 30, 45, 60 and 90
+minutes and back to off, counting down while it runs. The deadline belongs to
+the room, so setting one on a phone and then taking the phone upstairs does not
+take the timer with it. It pauses rather than stops: the position is kept, so
+the answer in the morning is Play.
+
+### Using a phone as the remote
+
+Once a phone has joined, its lock screen, notification shade and any car head
+unit it is paired to control the room. So do the media keys on a laptop
+keyboard. Each of those presses is a coordinator command, which is the part
+that matters — pausing from a locked phone pauses the house in step, rather
+than muting the phone and leaving everything else playing.
+
+On a laptop, with nothing focused: space plays and pauses, the arrow keys seek
+five seconds, and `p` and `n` skip. They are ignored while a text field has
+focus, so searching the library does not drive the transport.
+
 ### What is where
 
 The main view is deliberately short: the queue, the transport, and the devices.
 
 - **Volume and mute** live in the transport, beside the scrubber.
+- **The sleep timer** is in the transport too, because it is the room stopping.
 - **Timing compensation** and **Go easy on this device** are the two settings in
   the device panel, because both describe this device rather than the room.
 - **Everything else** — equaliser, acoustic calibration, the audio-path facts,
@@ -530,7 +567,7 @@ belong — including the failures.
 Formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **253 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+- **284 Rust unit tests.** Clock estimation against synthetic latency, jitter,
   drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and skew; the room state machine;
@@ -542,11 +579,12 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
   every device restart every few seconds, and it is a test rather than a
   changelog entry because that is the only form that stays true.
-- **Eight integration tests** drive the real binary over a socket with fake
+- **Nine integration tests** drive the real binary over a socket with fake
   devices: the calibration loop against known ground truth, a live stream
   holding its timeline across 400 frames, diagnostics access control, the join
   limiter — including that a device rejoining *correctly* thirty times is never
-  locked out, which is the case the design is shaped around — and SHA-256
+  locked out, which is the case the design is shaped around — the room-owned
+  settings checked by watching what a *second* device is told, and SHA-256
   against published vectors, because that digest is every media id and every
   integrity check a browser performs.
 - **98 browser tests**, including the drift-correction control law run as a
@@ -560,6 +598,12 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 - **End-to-end** (`node web/test/e2e.mjs`) drives two headless Chromium
   receivers through join, warm-up, verification, decode, the readiness barrier,
   play/pause/resume, compensation, a live PCM stream and a YouTube rendezvous.
+- **Room controls** (`node web/test/controls.mjs`) drives a browser against a
+  real library: searching it, bulk-adding what the search left, skipping
+  forward and back, the keyboard shortcuts — including that typing in a text
+  field does *not* reach the transport — the sleep timer counting down and
+  cycling back to off, and what the operating system's media controls were
+  told.
 
 ### Fuzzing
 

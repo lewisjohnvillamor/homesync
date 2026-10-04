@@ -106,6 +106,31 @@ late joiner lands on the room's timeline rather than trailing it.
 
 States: `idle` → `loading` → `ready` → `playing` ⇄ `paused`.
 
+## The queue, skipping and the sleep timer
+
+The queue, the position in it, shuffle, repeat and the sleep deadline all live
+on the coordinator and reach every device in `room_snapshot`. None of them is a
+device's to decide: a room plays one timeline, and two devices disagreeing
+about what comes next is the failure this project exists to prevent.
+
+`skip` carries a `delta` whose *sign* is all that is read — skipping is a button
+press, not a distance. The coordinator walks its own play order, so a skip
+under shuffle follows the same permutation an automatic advance would:
+
+- Forward past the last track wraps only under `repeat: all`; otherwise the
+  press does nothing and no snapshot is sent.
+- Back more than three seconds into a track restarts that track instead of
+  stepping, which is the convention every phone and car stereo has settled on.
+- `repeat: one` is ignored by `skip`. It describes what happens when a track
+  *ends*, not a request to be held on it.
+
+`sleep_timer` carries `minutes`, or omits it to cancel. The snapshot reports
+`sleep_at_ns` — an instant on the coordinator's clock, not a remaining
+duration, so a client can count down smoothly between the snapshots it
+receives. On expiry the coordinator pauses (keeping the position) and cancels
+any start it was holding for a device that had not finished warming up.
+Deadlines are capped at twelve hours.
+
 ## Source modes
 
 `select_source` carries a `mode`, and the mode decides what the rest of the
@@ -208,7 +233,12 @@ See `docs/calibration.md` for what the measurements mean.
 | `receiver_ready` | → | Hash verified and decoded |
 | `transport` | ← | Authoritative timeline |
 | `play` / `pause` / `seek` / `stop` | → | Transport commands |
+| `skip` | → | Step to the next or previous queued track |
 | `volume` / `mute` | → | Per-device output |
+| `room_volume` | → | One gain every device in the room is scaled by |
+| `playback_modes` | → | Shuffle and repeat for the room's queue |
+| `playlist` | → | Save, load or delete a named queue |
+| `sleep_timer` | → | Arm or cancel the deadline at which the room pauses |
 | `diagnostic_report` | → | Periodic telemetry |
 | `stream_start` / `stream_stop` | → | Begin or end live system audio |
 | `stream_info` | ← | Format and buffering parameters of the live stream |

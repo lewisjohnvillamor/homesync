@@ -105,6 +105,10 @@ pub enum Payload {
     Seek(Seek),
     /// Controller command: stop and unload the current position.
     Stop,
+    /// Controller command: step to the next or previous queued track.
+    Skip(Skip),
+    /// Controller command: arm or cancel the room's sleep timer.
+    SleepTimer(SleepTimer),
     /// Controller command: set a receiver's gain.
     Volume(Volume),
     /// Controller command: mute or unmute a receiver.
@@ -491,6 +495,26 @@ pub struct YoutubeRendezvous {
     pub start_latency_ms: f64,
 }
 
+/// A step through the queue made by hand, rather than because a track ended.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct Skip {
+    /// Which way to move. Only the sign is read: skipping is a button press,
+    /// not a distance, and "forward seven" is not a thing any interface offers.
+    pub delta: i32,
+}
+
+/// A deadline after which the room pauses itself.
+///
+/// The deadline belongs to the room rather than to the device that set it,
+/// because the room is what falls silent. Somebody setting a sleep timer on a
+/// phone and then taking the phone to bed should not take the timer with them.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SleepTimer {
+    /// Minutes from now, or `None` to cancel a timer already armed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u32>,
+}
+
 /// A gain for every receiver in the room at once.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RoomVolume {
@@ -874,6 +898,14 @@ pub struct RoomSnapshot {
     /// Names of the saved queues on this coordinator, alphabetically.
     #[serde(default)]
     pub playlists: Vec<String>,
+    /// When the sleep timer will pause the room, on the coordinator's clock.
+    ///
+    /// An instant rather than a remaining duration, because snapshots arrive
+    /// about once a second: a client that is told the deadline can count down
+    /// smoothly against its own clock estimate, while one told "nineteen
+    /// minutes left" can only jump a second at a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sleep_at_ns: Option<u64>,
     /// Plain-language reading of whether the room is in sync.
     #[serde(default)]
     pub health: RoomHealth,

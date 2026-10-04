@@ -135,8 +135,17 @@
             <div class="field-row">
               <label class="field grow">
                 <span>Library</span>
+                <input type="search" id="media-search" placeholder="Search by title"
+                       autocomplete="off" />
+              </label>
+              <!-- The count labels the list it sits above, so a narrowed
+                   library says how far it has been narrowed. -->
+              <label class="field grow">
+                <span id="media-count">Tracks</span>
                 <select id="media-select"></select>
               </label>
+              <button id="media-add-all" class="btn" type="button"
+                      title="Add every track shown to the queue">Add all</button>
               <button id="queue-clear" class="btn">Clear</button>
             </div>
 
@@ -215,17 +224,27 @@
           <p id="pending-start" class="pending hidden"></p>
 
           <div class="transport">
+            <button id="previous" class="btn btn-icon" type="button"
+                    title="Previous track (or start this one again)" aria-label="Previous track">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 5.5v13L8 12z" /><rect x="5" y="5.5" width="2.5" height="13" rx="1" /></svg>
+            </button>
             <button id="play" class="btn btn-primary btn-icon" title="Play" aria-label="Play">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
             </button>
             <button id="pause" class="btn btn-icon" title="Pause" aria-label="Pause">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="5.5" width="3.5" height="13" rx="1" /><rect x="13.5" y="5.5" width="3.5" height="13" rx="1" /></svg>
             </button>
+            <button id="next" class="btn btn-icon" type="button" title="Next track" aria-label="Next track">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.5v13l9-6.5z" /><rect x="16.5" y="5.5" width="2.5" height="13" rx="1" /></svg>
+            </button>
             <button id="stop" class="btn btn-icon" title="Stop" aria-label="Stop">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
             </button>
             <input type="range" id="seek" class="scrub" min="0" max="1000" value="0" step="1" aria-label="Position" />
             <span id="position" class="time">0:00 / 0:00</span>
+
+            <button id="sleep" class="btn btn-toggle" type="button" aria-pressed="false"
+                    title="Sleep timer: press to set how long the room keeps playing">Sleep</button>
 
             <div class="volume">
               <button id="volume-toggle" class="btn btn-icon" type="button" title="Volume"
