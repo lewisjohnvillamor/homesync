@@ -53,8 +53,7 @@ const PART_X = 0.1;
 /** The instant T: the plane of light, above the floor. */
 const T_HEIGHT = 1.4;
 const T_Y = Y0 + T_HEIGHT;
-/** Where the dot hovers on T, in plan. */
-const DOT_XZ = [-0.05, 0.85];
+
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
 const RISE = 0.45;
 
@@ -154,6 +153,9 @@ function planeTexture() {
 }
 
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
+  /** Where the dot hovers on T, in plan: over open floor (16:9: the kitchen's
+   * front corner; 9:16: the doorway), never over furniture. */
+  const DOT_XZ = portrait ? [-0.05, 0.85] : [-1.95, 1.0];
   // Underneath composition 6's diagram, which lifts away to reveal the house.
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
@@ -327,7 +329,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const stemGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 24);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
-    const stem = new THREE.Mesh(stemGeo, accent(0.3));
+    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: BRAND.accent.clone().multiplyScalar(0.42), toneMapped: false, fog: false }));
     stem.position.set(ax, from, az);
     stem.scale.set(1, Math.max(0.0001, d.baseY - from), 1);
     d.guide.add(stem);
@@ -368,7 +370,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const plumb = new THREE.Mesh(plumbGeo, accent(0));
   plumb.position.set(DOT_XZ[0], Y0, DOT_XZ[1]);
   scene.add(plumb);
-  const spot = new THREE.Mesh(new THREE.CircleGeometry(0.09, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
+  const spot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
   spot.rotation.x = -Math.PI / 2;
   spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
   scene.add(spot);
@@ -414,10 +416,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const to = handoff.lanDotAt?.(HOST[1]);
     if (k > 0 && to) {
       const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
+      const up = 180 * u * Math.sin(Math.PI * Math.min(1, k * 1.15));
       return {
         x: lerp(s.x, to.x, e),
-        y: lerp(s.y, to.y, e),
-        d: lerp(d, to.d, e),
+        y: lerp(s.y, to.y, e) - up,
+        d: lerp(d, Math.max(to.d, d * 1.3), Math.min(1, k * 1.6)),
         glow: lerp(0.35, 0.45, k),
       };
     }
@@ -434,8 +437,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     'beforeend',
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
-     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 80 * u}px ${pad2[0] + 40 * u}px ${pad2[1]}px;
-        background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);mask-composite:intersect">
+     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 10 * u}px ${pad2[0] + 8 * u}px ${pad2[1]}px;
+        background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -480,11 +483,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The plane fades in under the settling dot; brightens briefly at the touch.
     const touch = Math.exp(-Math.max(0, t - HOUSE_TOUCH) * 5) * (t >= HOUSE_TOUCH ? 1 : 0);
-    planeMat.opacity = 0.65 * smooth(span(t, 18.1, 18.6)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
-    plane.position.y = T_Y + 0.7 * (1 - easeOut(span(t, 18.1, 19.0)));
+    planeMat.opacity = 0.65 * smooth(span(t, 18.35, 18.75)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
     const hover = smooth(span(t, SETTLE, SETTLE + 0.3)) * (1 - smooth(span(t, 21.3, 21.5)));
     plumb.material.opacity = 0.35 * hover;
-    spot.material.opacity = 0.35 * hover;
+    spot.material.opacity = 0.55 * hover;
     const kr = span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.7);
     ring.visible = kr > 0 && kr < 1;
     ring.scale.setScalar(0.06 + 0.1 * easeOut(kr));
@@ -501,7 +503,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? 1 + 0.4 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
       d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
-      for (const seg of d.guide.children) seg.material.opacity = 0.4 * smooth(span(t, d.start - 0.3, d.start));
+      
       const pop = smooth(span(t, d.start, d.start + 0.15));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -513,13 +515,16 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const dd = DOT_D * (refDistance / probe.position.distanceTo(p));
     const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, 21.38, 21.5)));
     label.style.opacity = String(show);
-    label.style.transform = `translate(${s.x + dd / 2 + 40 * u}px, ${s.y - 22 * u}px)`;
+    // 16:9: the T label sits left of the dot, away from the laptop's bar.
+    label.style.transform = portrait
+      ? `translate(${s.x + dd / 2 + 40 * u}px, ${s.y - 22 * u}px)`
+      : `translate(${s.x - dd / 2 - 40 * u - label.offsetWidth}px, ${s.y - 22 * u}px)`;
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
     const lift = span(t, 21.56, 21.74) ** 1.4;
     el.style.transformOrigin = '50% 50%';
-    el.style.transform = lift > 0 ? `scale(${1 - 0.8 * lift})` : '';
+    el.style.transform = lift > 0 ? `scale(${1 + 1.4 * lift})` : '';
     el.style.opacity = String(1 - smooth(span(t, 21.6, 21.72)));
 
 

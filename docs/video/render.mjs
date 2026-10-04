@@ -173,6 +173,9 @@ async function main() {
       '-y', '-loglevel', 'error',
       '-framerate', String(args.fps),
       '-i', join(framesDir, '%05d.png'),
+      // Convert with the BT.709 matrix the file is tagged with; swscale's
+      // default is BT.601, which decodes the accent ~10 levels off in red.
+      '-vf', 'scale=out_color_matrix=bt709:out_range=tv',
       '-c:v', 'libx264', '-preset', 'slow', '-crf', '15',
       // Gradients on a near-black ground band badly at default settings.
       '-tune', 'film', '-x264-params', 'aq-mode=3',
