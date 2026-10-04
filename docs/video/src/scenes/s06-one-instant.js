@@ -77,7 +77,7 @@ const BACK0 = 15.3;
 /** In composition 6's hold all three devices acknowledge T together — one instant, never one after another. */
 const ACK = 12.1;
 
-export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
+export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) {
   const L = laneLayout(W, H, u, portrait);
   const track = joinTrack(W, H, u, portrait);
   const order = ['laptop', 'phone', 'tv'];
@@ -282,7 +282,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   /** Where the dot (T) sits once the camera is frozen for the lift; set each frame, the same value from LIFT_SPAN[0] on. */
   let restDot = null;
 
-  onFrame((t) => {
+  const frame = (t) => {
     // The camera holds still for the lift, so the lift alone moves the plane.
     const c = cam(Math.min(t, LIFT_SPAN[0]));
     world.style.transform =
@@ -463,16 +463,34 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const e = lift ** 1.1;
       const g = 1 + 1.1 * e;
       const fall = 1.25 * H * e;
+      const pivot = frozenDot ?? restDot;
       perspEl.style.transformOrigin = '0 0';
       perspEl.style.transform =
-        `translate(0, ${fall}px) translate(${restDot.x}px, ${restDot.y}px) scale(${g}) translate(${-restDot.x}px, ${-restDot.y}px)`;
+        `translate(0, ${fall}px) translate(${pivot.x}px, ${pivot.y}px) scale(${g}) translate(${-pivot.x}px, ${-pivot.y}px)`;
     }
-  });
+  };
+  onFrame(frame);
+
+  // Where T is once the camera is frozen for the lift (from LIFT_SPAN[0]):
+  // a constant, measured once per worker at build time, before any frame is
+  // drawn, by laying this scene out at the release. Nothing that needs it
+  // reads the page layout while frames are drawn.
+  let frozenDot = null;
+  waitFor(
+    document.fonts.ready.then(() => {
+      const prev = el.style.display;
+      el.style.display = 'block';
+      frame(DOT_RELEASE);
+      frozenDot = { ...restDot };
+      el.style.display = prev;
+    }),
+  );
 
   // The dot is the instant T: it lands at the top of the T line and rides the
-  // camera exactly, because its place is read from an element in the diagram.
+  // camera exactly, because its place is read from an element in the diagram
+  // (the same frame's layout before the lift; the frozen constant from it on).
   const dotAt = (t) => {
-    const r = restDot;
+    const r = t >= LIFT_SPAN[0] && frozenDot ? frozenDot : restDot;
     const ex = (at) => (t >= at ? Math.exp(-(t - at) * 5) : 0);
     const pulse = Math.max(ex(FIRE7 + RUN7), ex(ARRIVE8), 0.6 * ex(GROW8.tv[1]));
     // As the plane lifts away the dot starts to sink, so the house's drop continues one motion.
@@ -480,9 +498,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return { x: r.x, y: r.y + sinkY, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
   };
   hostDot(11.0, DOT_RELEASE, dotAt);
-  // Composition 9 starts its dot from exactly here. From LIFT_SPAN[0] the
-  // camera is frozen, so `restDot` (read this frame) is the same point it was
-  // at the release; clamped so any t ≥ the release gives the release value.
+  // Composition 9 starts its dot from exactly here: a pure function of t
+  // (from the frozen constant), clamped so any t ≥ the release gives the release value.
   handoff.liftDotAt = (t) => {
     const p = dotAt(Math.min(t, DOT_RELEASE));
     return { x: p.x, y: p.y, d: p.d };
