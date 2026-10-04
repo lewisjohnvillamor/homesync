@@ -3,6 +3,7 @@
   python3 tools/critic_kit.py sheet    VIDEO OUT.png [--every 0.2] [--from S] [--to S] [--cols 10]
   python3 tools/critic_kit.py dense    VIDEO OUT.png --at T [--fps 20] [--span 1.0]
   python3 tools/critic_kit.py frozen   VIDEO [--threshold 0.6] [--window 0.25]
+  python3 tools/critic_kit.py flicker  VIDEO
   python3 tools/critic_kit.py loudness VIDEO_OR_WAV
   python3 tools/critic_kit.py frame    VIDEO OUT.png --at T
   python3 tools/critic_kit.py contrast IMAGE.png X1 Y1 X2 Y2
@@ -146,6 +147,20 @@ def cmd_frozen(a):
     }, indent=2))
 
 
+def cmd_flicker(a):
+    """Frames that jump against their neighbour but match the frame four
+    back: the signature of something shown on alternate pairs of frames."""
+    fs = [img.astype(np.float32).mean(axis=2) for _, img in frames(a.video, 320)]
+    _, _, rate, _ = probe(a.video)
+    hits = []
+    for i in range(4, len(fs)):
+        near = float(np.abs(fs[i] - fs[i - 1]).mean())
+        far = float(np.abs(fs[i] - fs[i - 4]).mean())
+        if near > 1.5 and far < 0.3 * near:
+            hits.append(round(i / rate, 3))
+    print(json.dumps({"flicker_frames": len(hits), "first": hits[:20]}))
+
+
 def cmd_loudness(a):
     out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", a.path, "-af", "ebur128=peak=true", "-f", "null", "-"],
                          capture_output=True, text=True).stderr
@@ -188,6 +203,7 @@ def main():
     d.add_argument("--cols", type=int, default=10); d.add_argument("--width", type=int, default=320); d.set_defaults(fn=cmd_dense)
     f = sub.add_parser("frozen"); f.add_argument("video"); f.add_argument("--threshold", type=float, default=0.6)
     f.add_argument("--window", type=float, default=0.0, help="compare with the frame this many seconds earlier"); f.set_defaults(fn=cmd_frozen)
+    fl = sub.add_parser("flicker"); fl.add_argument("video"); fl.set_defaults(fn=cmd_flicker)
     l = sub.add_parser("loudness"); l.add_argument("path"); l.set_defaults(fn=cmd_loudness)
     fr = sub.add_parser("frame"); fr.add_argument("video"); fr.add_argument("out"); fr.add_argument("--at", type=float, required=True); fr.set_defaults(fn=cmd_frame)
     c = sub.add_parser("contrast"); c.add_argument("image")
