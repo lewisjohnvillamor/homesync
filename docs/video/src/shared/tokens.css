@@ -1,0 +1,86 @@
+/* The product's own dark tokens (web/src/styles.css). Nothing here is
+   invented: if a colour is not in the app, it is not in the film. */
+@font-face { font-family: Inter; font-weight: 400; src: url(/node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2) format('woff2'); }
+@font-face { font-family: Inter; font-weight: 500; src: url(/node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2) format('woff2'); }
+@font-face { font-family: Inter; font-weight: 600; src: url(/node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2) format('woff2'); }
+@font-face { font-family: Inter; font-weight: 700; src: url(/node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2) format('woff2'); }
+@font-face { font-family: Inter; font-weight: 800; src: url(/node_modules/@fontsource/inter/files/inter-latin-800-normal.woff2) format('woff2'); }
+@font-face { font-family: Mono; font-weight: 400; src: url(/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2) format('woff2'); }
+@font-face { font-family: Mono; font-weight: 500; src: url(/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2) format('woff2'); }
+
+:root {
+  --bg: #0b0e13;
+  --bg-sunken: #070a0e;
+  --surface: #12171f;
+  --surface-2: #182029;
+  --line: #232c38;
+  --line-strong: #2f3b4a;
+  --text: #e9eef5;
+  --text-dim: #94a3b4;
+  --text-faint: #64748b;
+  --accent: #5aa9ff;
+  --accent-ink: #041322;
+  --ok: #3ddc97;
+  --sans: Inter, sans-serif;
+  --mono: Mono, monospace;
+}
+
+/* The ground colour is on html only. On body it would paint over any layer
+   with a negative z-index — which is how composition 9's house sits under
+   composition 8's lifting diagram — and hide it. */
+html { background: var(--bg); }
+
+html, body {
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  font-kerning: normal;
+}
+
+/* Every scene is an absolutely positioned layer the size of the frame. */
+.scene { position: absolute; inset: 0; visibility: hidden; overflow: hidden; }
+.layer { position: absolute; inset: 0; }
+
+/* Type that sits over picture always has this behind it (rule: never over busy
+   picture without something behind it). Contrast is measured, not assumed. */
+.band {
+  position: absolute;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border-radius: 14px;
+}
+
+.example-tag {
+  font: 500 var(--tag-size, 22px)/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 0.35em 0.75em;
+  white-space: nowrap;
+}
+
+#dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+#dot i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--d, 28px);
+  height: var(--d, 28px);
+  margin: calc(var(--d, 28px) / -2) 0 0 calc(var(--d, 28px) / -2);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 calc(var(--d, 28px) * var(--glow, 0)) calc(var(--d, 28px) * var(--glow, 0) * 0.25) #5aa9ff88;
+}

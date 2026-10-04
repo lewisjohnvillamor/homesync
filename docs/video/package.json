@@ -1,0 +1,13 @@
+{
+  "name": "homesync-video",
+  "private": true,
+  "type": "module",
+  "description": "The HomeSync promo film: scenes as HTML pages on one GSAP timeline, rendered frame by frame.",
+  "dependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "gsap": "3.15.0",
+    "qrcode": "1.5.4",
+    "three": "0.186.1"
+  }
+}

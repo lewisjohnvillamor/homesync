@@ -35,3 +35,8 @@ homesync-downloads/
 /docs/demo/frames/
 /docs/demo/media/
 /docs/demo/banner-frames/
+
+# Promo film: dependencies and intermediate frames are rebuilt, not committed.
+docs/video/node_modules/
+docs/video/frames/
+docs/video/work/

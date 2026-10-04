@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script type="importmap">{ "imports": { "three": "/node_modules/three/build/three.module.js" } }</script>
+<style>
+  @font-face { font-family: Inter; font-weight: 700; src: url(/node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2) format('woff2'); }
+  html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #0b0e13; }
+  canvas { position: absolute; inset: 0; }
+  h1 { position: absolute; left: 120px; top: 380px; margin: 0; font: 700 140px/1 Inter; color: #e9eef5; letter-spacing: -0.03em; }
+</style>
+</head>
+<body>
+<h1 id="t">HomeSync</h1>
+<script src="/node_modules/gsap/dist/gsap.min.js"></script>
+<script type="module">
+  import * as THREE from 'three';
+  const W = innerWidth, H = innerHeight;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H); renderer.setPixelRatio(1);
+  document.body.prepend(renderer.domElement);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#0b0e13');
+  const camera = new THREE.PerspectiveCamera(35, W / H, 0.1, 100); camera.position.set(0, 2, 8); camera.lookAt(0, 0, 0);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x0b0e13, 0.6));
+  const key = new THREE.DirectionalLight(0xffffff, 2); key.position.set(-4, 5, 4); scene.add(key);
+  const box = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: '#5aa9ff', roughness: 0.4 }));
+  box.position.x = 3; scene.add(box);
+  const tl = gsap.timeline({ paused: true });
+  tl.fromTo('#t', { x: -200, opacity: 0 }, { x: 0, opacity: 1, duration: 1.2, ease: 'power3.out' }, 0)
+    .to(box.rotation, { y: Math.PI * 2, duration: 5, ease: 'power1.inOut' }, 0);
+  window.__film = {
+    duration: 5,
+    ready: document.fonts.ready,
+    seek(t) { tl.seek(t, false); renderer.render(scene, camera); },
+  };
+</script>
+</body>
+</html>
