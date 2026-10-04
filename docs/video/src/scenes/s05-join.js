@@ -61,7 +61,7 @@ export function laneLayout(W, H, u, portrait) {
     iconX,
     iconScale,
     tX: tX0 + dx,
-    laneStart: (portrait ? 320 * u : 390 * u) + dx,
+    laneStart: (portrait ? 370 * u : 390 * u) + dx,
     laneEnd: laneEnd0 + dx,
     // 9:16: the lanes spread down the frame, so its lower quarter is not left empty.
     ...(portrait ? { lanes: { laptop: H * 0.38, phone: H * 0.62, tv: H * 0.86 }, tTop: H * 0.38 - 150 * u } : {}),
@@ -144,7 +144,7 @@ export function joinTrack(W, H, u, portrait) {
   // Screen coordinates within the phone (fractions of the glass).
   const button = { x: 0.03, y: 0.5, w: 0.94, h: 0.11 };
   const face = { fx: 0.91, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
-  const wait = { fx: 0.895, fy: portrait ? 0.72 : 0.84 }; // where it rides in, below where the button will be
+  const wait = { fx: portrait ? 0.955 : 0.895, fy: portrait ? 0.72 : 0.84 }; // where it rides in, below where the button will be
   const indicator = { fx: 0.83, fy: 0.43 };
   const fs = phoneW * 0.088;
 
@@ -257,6 +257,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
                border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-right:${glassW * (button.x + button.w - face.fx + 0.04)}px;justify-content:center;
                display:flex;align-items:center;font:600 ${fs * 0.92 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
           <div class="pressed" style="position:absolute;inset:0;background:var(--accent-ink);opacity:0"></div>
+          <div class="sweep" style="position:absolute;left:0;bottom:0;height:12%;width:100%;background:var(--text);opacity:0;transform-origin:0 50%"></div>
           <div class="socket" style="display:none;position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
                border-radius:50%;background:var(--accent-ink);opacity:0"></div>
           <div style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${well}px;height:${well}px;margin:${-well / 2}px 0 0 ${-well / 2}px;
@@ -278,6 +279,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const btn = el.querySelector('.btn');
   const ripple = el.querySelector('.ripple');
   const pressed = el.querySelector('.pressed');
+  const sweep = el.querySelector('.sweep');
   const meRow = el.querySelector('.room .me');
   const room = el.querySelector('.room');
   const meText = el.querySelector('.me-text');
@@ -293,8 +295,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const dotAt = (t) => {
     const catchK = easeInOut(span(t, HOST[0], SCAN[0] + 0.02));
     // 9:16: across first, then down slowly beside the phone (right of the viewfinder's code).
-    const catchX = portrait ? easeOut(span(t, HOST[0], 8.45)) : catchK;
-    const catchY = portrait ? easeInOut(span(t, 8.2, 8.75)) : catchK;
+    const catchX = portrait ? easeOut(span(t, HOST[0], 8.32)) : catchK;
+    const catchY = portrait ? easeInOut(span(t, 8.3, 8.8)) : catchK;
     const onPhone = (() => {
       const toFace = easeInOut(span(t, PRESS - 0.24, PRESS - 0.02));
       const toList = easeInOut(span(t, PRESS + 0.3, JOINED));
@@ -327,6 +329,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     el.style.opacity = t < 7.95 ? '0' : '1';
     const r = phoneRect(t);
     wrap.style.transform = `translate(${r.x}px, ${r.y}px) scale(${r.s})`;
+    // As it shrinks into the lane icon it picks up the icon's glow, so it never reads as fading.
+    const sh0 = span(t, 10.45, 10.9);
+    wrap.style.filter = sh0 > 0 ? `drop-shadow(0 0 ${(6 + 6 * sh0) * u / r.s}px rgba(90,169,255,${0.25 + 0.2 * sh0}))` : 'none';
 
     // The laptop: opened by an iris from the dot, moved aside, pushed with the camera, then out fast.
     const sh = laptopShift(t);
@@ -379,6 +384,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // The button's own colour darkens (not an overlay, which would dim its label too).
     btn.style.background = `color-mix(in srgb, var(--accent-ink) ${50 * down}%, var(--accent))`;
     pressed.style.opacity = '0';
+    // Joining: a thin progress line sweeps along the pressed button.
+    const sw = span(t, PRESS + 0.06, PRESS + 0.3);
+    sweep.style.opacity = String(sw > 0 ? 0.85 : 0);
+    sweep.style.transform = `scaleX(${easeInOut(sw)})`;
     btn.style.color = down >= 0.5 ? 'var(--text)' : 'var(--accent-ink)';
     // A small ring from the dot, held inside its circle at the button's free end (clear of the label).
     const rip = span(t, PRESS, PRESS + 0.35);
