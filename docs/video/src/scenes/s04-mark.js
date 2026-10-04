@@ -38,7 +38,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   // 16:9: the lockup spans 90 % of the width (96 px margins) with a larger
   // word; 9:16: the mark ~80 % of the width, the lockup centred vertically.
   const wordSize = portrait ? 176 * u : 160 * u;
-  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.92 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
+  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.89 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
   /** Clear space between the outer arc (at its largest, with the push) and the word. */
   const GAP = portrait ? 0 : GAPK * S;
 
@@ -143,7 +143,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       const phase = (t - HOME) * ((2 * Math.PI) / 1.25) - (outer ? 0.9 : 0);
       // One visible breath across the hold, the outer pair swelling most,
       // over the small ripple.
-      const swell = Math.sin(Math.PI * span(t, HOME + 0.1, LEAVE)) * (outer ? 0.07 : 0.05);
+      const swell = Math.sin(Math.PI * span(t, HOME + 0.1, LEAVE)) * (outer ? 0.05 : 0.04);
       a.style.transform = `scale(${1 + swell + b * (outer ? 0.025 : 0.02) * Math.sin(phase)})`;
       a.style.opacity = String(lerp(1, 0.93, b * (0.5 + 0.5 * Math.sin(phase))));
     });
