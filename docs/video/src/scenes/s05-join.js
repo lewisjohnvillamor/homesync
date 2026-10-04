@@ -351,7 +351,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     btn.style.transform = `translateY(${sink * 3 * u}px) scale(${(1 - 0.012 * sink) * (1 - 0.06 * gone)})`;
     btn.style.opacity = String(1 - gone);
     const down = span(t, PRESS - 0.1, PRESS - 0.04);
-    pressed.style.opacity = String(0.5 * down);
+    // The button's own colour darkens (not an overlay, which would dim its label too).
+    btn.style.background = `color-mix(in srgb, var(--accent-ink) ${50 * down}%, var(--accent))`;
+    pressed.style.opacity = '0';
     btn.style.color = down >= 0.5 ? 'var(--text)' : 'var(--accent-ink)';
     ripple.style.opacity = '0';
     // As the phone becomes an icon its words go before they would be too small to read.

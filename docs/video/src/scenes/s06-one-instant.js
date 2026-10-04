@@ -214,7 +214,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const camC = (t) => {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
-      s: (portrait ? 0.8 : 1.2) * lerp(1, 1.04, k),
+      s: (portrait ? 0.76 : 1.2) * lerp(1, 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
       px: W / 2 + (portrait ? 0 : 10 * u) + (portrait ? 10 : 30) * u * k,
@@ -322,6 +322,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const aside = kind === 'phone' ? 0 : span(rush, 0.22, 0.4) * (1 - span(back, 0.3, 0.7));
       l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside) * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
       l.rule.style.opacity = String(0.7 * (1 - aside));
+      // 9:16, tilted: the lanes stop just past T, so nothing runs to the frame's edge.
+      const trimTo = (L.tX + 16 * u - L.laneStart) / (L.laneEnd - L.laneStart);
+      l.rule.style.transformOrigin = '0 50%';
+      l.rule.style.transform = portrait ? `scaleX(${lerp(1, trimTo, back)})` : '';
       l.name.style.color = lit > 0.5 ? 'var(--text)' : 'var(--text-dim)';
       // A tick and a ring flash where T crosses the lane — on the line, never travelling along it.
       const tk = span(t, reach, reach + 0.18);
@@ -389,7 +393,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       }
       void i;
     });
-    tline.style.transform = `scaleY(${fallK(t)})`;
+    // 9:16, tilted: T's line ends just below the TV lane.
+    const tTrim = portrait ? lerp(1, (L.lanes.tv + 16 * u - L.tTop) / tLen, back) : 1;
+    tline.style.transform = `scaleY(${fallK(t) * tTrim})`;
     // The dot (T) and its label stay at the top of the T line, held inside
     // the frame in the close-up, the label at a readable size. One example
     // tag, always beside the phone's 90 ms, in 7 and 8.
