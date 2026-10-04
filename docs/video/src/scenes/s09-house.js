@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { span, lerp, clamp01, rng } from '../shared/beats.js';
 import { makeRenderer, makeStage, MAKE, BRAND, toScreen } from '../shared/three-kit.js';
-import { HOUSE_VIEW, HOUSE_TOUCH } from '../shared/house-view.js';
+import { HOUSE_VIEW, HOUSE_VIEW_PORTRAIT, HOUSE_TOUCH } from '../shared/house-view.js';
 import { LATE } from './s01-press-play.js';
 import { handoff } from '../shared/handoff.js';
 
@@ -54,7 +54,7 @@ const PART_X = 0.1;
 const T_HEIGHT = 1.4;
 const T_Y = Y0 + T_HEIGHT;
 /** Where the dot hovers on T, in plan. */
-const DOT_XZ = [0.8, 0.85];
+const DOT_XZ = [0.3, 0.95];
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
 const RISE = 0.45;
 
@@ -324,7 +324,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 12);
+    const stemGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 24);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
     const stem = new THREE.Mesh(stemGeo, accent(0.3));
@@ -338,16 +338,16 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const camera = new THREE.PerspectiveCamera(HOUSE_VIEW.fov, W / H, 0.1, 80);
   // 9:16: the model sits lower in the frame, under the three-line headline,
   // without changing the camera's angle or distance.
-  if (portrait) camera.setViewOffset(W, H, 0, -230 * u, W, H);
+  if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
-    ? { distance: 22.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
+    ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
     : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.2, 0.62, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
-    const x = clamp01((t - t0) / (t1 - t0));
+    const x = clamp01((t - 17.8) / (t1 - 17.8));
     const k = x * (1.4 - 0.4 * x);
-    const azimuth = (HOUSE_VIEW.azimuth + 6 * k + 3.5 * smooth(span(t, HOUSE_TOUCH, 21.5))) * DEG;
+    const azimuth = ((portrait ? HOUSE_VIEW_PORTRAIT.azimuth : HOUSE_VIEW.azimuth) + 6 * k + 6 * smooth(span(t, HOUSE_TOUCH, 21.5))) * DEG;
     const elevation = frame.elevation * DEG;
     const distance = frame.distance * (1 - (portrait ? 0.1 : 0.06) * k);
     const tg = frame.target;
@@ -435,7 +435,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
      <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1]}px;
-        overflow:hidden;background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${40 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${26 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${40 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${26 * u}px),transparent);mask-composite:intersect">
+        overflow:hidden;background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${90 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${50 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -500,8 +500,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? 1 + 0.4 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
       d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
-      for (const seg of d.guide.children) seg.material.opacity = 0.18 * smooth(span(t, d.start - 0.3, d.start));
-      const pop = smooth(span(t, d.start - 0.12, d.start));
+      for (const seg of d.guide.children) seg.material.opacity = 0.22 * smooth(span(t, d.start - 0.3, d.start));
+      const pop = smooth(span(t, d.start, d.start + 0.15));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
 
@@ -516,10 +516,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
-    const lift = span(t, 21.45, 21.8) ** 1.6;
+    const lift = span(t, 21.45, 21.8) ** 1.4;
     el.style.transformOrigin = '50% 50%';
-    el.style.transform = lift > 0 ? `translateY(${-H * 0.5 * lift}px) scale(${1 - 0.75 * lift})` : '';
-    el.style.opacity = String(1 - smooth(span(t, 21.62, 21.8)));
+    el.style.transform = lift > 0 ? `scale(${1 - 0.8 * lift})` : '';
+    el.style.opacity = String(1 - smooth(span(t, 21.58, 21.76)));
     el.style.opacity = '1';
 
 

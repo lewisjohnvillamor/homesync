@@ -53,24 +53,36 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   const PUSH = [t0, LEAVE];
 
   // Layout (measured once the font is in).
-  const geo = { stop: { x: W * 0.72, y: H * 0.55 }, d: size * 0.19, gap: size * 0.05, w: [0, 0, 0], left: [0, 0, 0], top: 0, base: 0 };
+  const geo = { stop: { x: W * 0.72, y: H * 0.55 }, d: size * 0.19, gap: size * 0.05, w: [0, 0, 0], left: [0, 0, 0], top: [0, 0, 0], sz: [size, size, size] };
   waitFor(
     document.fonts.ready.then(() => {
+      // Each line is set as large as the frame allows — one line per beat,
+      // so each fills the width on its own — all right-aligned to the one
+      // full stop, which never moves.
+      const target = portrait ? W - 210 * u : W * 0.8;
+      const w0 = lines.map((l) => l.getBoundingClientRect().width);
+      const k = w0.map((w) => Math.min(target / w, 1.9));
+      geo.sz = k.map((ki) => size * ki);
+      lines.forEach((l, i) => { l.style.fontSize = `${geo.sz[i]}px`; });
+      const kd = Math.sqrt(Math.min(...k) * Math.max(...k));
+      geo.d = size * 0.19 * kd;
+      geo.gap = size * 0.08 * kd;
       geo.w = lines.map((l) => l.getBoundingClientRect().width);
-      const blTop = lines[0].querySelector('.bl').getBoundingClientRect().top - lines[0].getBoundingClientRect().top;
-      geo.base = blTop; // baseline below the line box's top
+      const blTops = lines.map((l) => l.querySelector('.bl').getBoundingClientRect().top - l.getBoundingClientRect().top);
       const block = Math.max(...geo.w) + geo.gap + geo.d;
       const left = (W - block) / 2;
-      // Landscape: caps centred on the frame. Portrait: the dot sits low.
-      const baseline = portrait ? H * 0.565 : H / 2 + size * 0.36;
-      geo.top = baseline - blTop;
+      // Caps centred on the frame (by the largest line); 9:16 sits a little low.
+      const big = Math.max(...geo.sz);
+      const baseline = portrait ? H * 0.56 + big * 0.3 : H / 2 + big * 0.36;
+      geo.top = blTops.map((b) => baseline - b);
       geo.stop = { x: left + block - geo.d / 2, y: baseline - geo.d * 0.5 };
       geo.left = geo.w.map((w) => geo.stop.x - geo.d / 2 - geo.gap - w);
     }),
   );
 
-  const travel = 560 * u;
-  const drop = size * 1.06; // the lower lane: cap tops clear the dot's bottom
+  // Lines from the left come from off the frame's edge.
+  const travelOf = (i) => (i === 1 ? 560 * u : geo.left[i] + geo.w[i] + 80 * u);
+  const dropOf = (i) => geo.sz[i] * 1.06; // the lower lane: cap tops clear the dot's bottom
 
   /** A line's offset from its resting place at time t, and its opacity. */
   const lineAt = (i, t) => {
@@ -82,18 +94,17 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       // From the right, below the dot's line; rises only once its last
       // letter has passed left of the dot.
       const kx = span(t, IN[i], IN[i] + 0.5);
-      x = travel * (1 - expoOut(kx));
-      y = drop * (1 - cubicOut(span(t, IN[i] + 0.22, IN[i] + 0.44)));
+      x = travelOf(i) * (1 - expoOut(kx));
+      y = dropOf(i) * (1 - cubicOut(span(t, IN[i] + 0.2, IN[i] + 0.34)));
       o = clamp01((t - IN[i]) / 0.14);
     } else {
-      x = -travel * (1 - expoOut(kIn));
-      // The first line waits for the ground to cover composition 9.
-      o = clamp01((t - IN[i] - 0.02) / 0.12);
+      x = -travelOf(i) * (1 - cubicOut(span(t, IN[i], IN[i] + 0.42)));
+      o = clamp01((t - IN[i]) / 0.06);
     }
     if (i < 2) {
       // Eased up and out by the next line.
       const k = span(t, OUT[i], OUT[i] + 0.3);
-      y -= size * 1.3 * quartOut(k);
+      y -= geo.sz[i] * 1.3 * quartOut(k);
       o *= 1 - clamp01((t - OUT[i]) / 0.22);
     } else {
       // The last line rushes past the camera with the whole sentence (see
@@ -122,7 +133,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     words.style.transform = `translate(${(W / 2 - P.x) * (rush - 1)}px, ${(H / 2 - P.y) * (rush - 1)}px) scale(${s * rush})`;
     lines.forEach((l, i) => {
       const p = lineAt(i, t);
-      l.style.transform = `translate(${geo.left[i] + p.x}px, ${geo.top + p.y}px)`;
+      l.style.transform = `translate(${geo.left[i] + p.x}px, ${geo.top[i] + p.y}px)`;
       l.style.opacity = String(p.o);
       l.style.visibility = p.o > 0.001 ? 'visible' : 'hidden';
     });
@@ -137,7 +148,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // Where the dot arrives, a little large, for composition 9 to aim at.
   handoff.lanDotAt = (t) => {
     const st = stopAt(t);
-    return { x: st.x, y: st.y, d: st.d * 1.15 };
+    return { x: st.x, y: st.y, d: st.d };
   };
 
   hostDot(t0, LEAVE + 0.075, (t) => {
@@ -147,7 +158,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return {
       x: st.x + drift,
       y: st.y,
-      d: st.d * lerp(1.15, 1, k) * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
+      d: st.d * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
       glow: lerp(0.45, 0.08, k) + 0.3 * span(t, LEAVE - 0.05, LEAVE + 0.075),
     };
   });

@@ -13,6 +13,12 @@ export const HOUSE_VIEW = {
 };
 
 /**
+ * 9:16: turned so the model's long side runs up the tall frame, which lets it
+ * fill the height. Composition 8 tilts to this in 9:16.
+ */
+export const HOUSE_VIEW_PORTRAIT = { elevation: 54, azimuth: -70, fov: 30 };
+
+/**
  * When the three bars touch the plane of light inside the house — the film's
  * one "arrival" moment, which the score marks with its only chime.
  */

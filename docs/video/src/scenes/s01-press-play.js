@@ -163,12 +163,12 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.08, 0.15, 0.05], d0: 4.4, d1: 4.1, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.16, 0.15, 0.15], d0: 4.05, d1: 3.55, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 38, tg: [0.36, 0.25, 0.15], d0: 4.1, d1: 3.9, orb0: 0.42, orb1: 0.35 },
+        c1: { el: 38, tg: [0.36, 0.25, 0.15], d0: 4.35, d1: 3.9, orb0: 0.46, orb1: 0.35 },
         c2: { el: 42, tg: [0.2, 0.0, -0.26], d: 4.8, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
@@ -199,7 +199,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
     ? { x0: -0.45, speed: 0.17, clear: 0.34, icon: 0.06, dx: { laptop: 0.1, phone: -0.06, tv: 0 }, rows: { laptop: [0, 1.4], phone: [0.95, 2.3], tv: [-1.0, 1.15] }, turn: 0 }
-    : { x0: -0.7, speed: 0.42, clear: 0.48, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.1 }, rows: { laptop: [0, 1.8], phone: [0.8, 2.6], tv: [-1.0, 1.7] }, turn: 0.2 };
+    : { x0: -0.7, speed: 0.42, clear: 0.48, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.24 }, rows: { laptop: [0, 1.8], phone: [0.8, 2.6], tv: [-1.1, 1.7] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -247,6 +247,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     blob.rotation.z = LAYOUT.turn;
     blob.position.set(d.x, 0.0008, d.z);
     blob.scale.set(HALF[d.kind] * d.s * 2.25, DEPTH[d.kind] * d.s * 2.1 + 0.05, 1);
+    // The TV's footprint is mostly air between its legs: a softer pool there.
+    if (d.kind === 'tv') blob.material.opacity = 0.55;
     blob.renderOrder = 1;
     scene.add(blob);
   }
@@ -334,6 +336,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
         return `<div class="icon" style="position:absolute;left:0;top:0;width:${h * ASPECT[d.kind]}px;height:${h}px">${svg}</div>`;
       })
       .join('')}</div>
+     <div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
+     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">starts</div>`).join('')}
      <div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
      <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;top:${portrait ? 150 * u : 104 * u}px;
        font:700 ${portrait ? 88 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text)">Press play on all three.</div>`,
@@ -342,6 +346,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const dim = el.querySelector('.dim');
   const iconsEl = el.querySelector('.icons');
   const icons = [...el.querySelectorAll('.icon')];
+  const lblPress = el.querySelector('.lbl-press');
+  const lblStart = [...el.querySelectorAll('.lbl-start')];
   for (const ic of icons) ic.firstElementChild.style.cssText = 'width:100%;height:100%;display:block';
   // Never still while it is read: the line drifts with the camera's ease-in.
   tl.fromTo(headline, { x: 0 }, { x: 14 * u, duration: 1.4, ease: 'sine.out' }, 0);
@@ -384,8 +390,21 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       const w = ic.offsetWidth;
       const h = ic.offsetHeight;
       ic.style.transform = `translate(${p.x - w}px, ${p.y - h / 2}px)`;
+      // Interface-style labels, not claims: where each row's sound starts.
+      const m = toScreen(markerWorld(d, t), camera, W, H);
+      const ls = lblStart[i];
+      ls.style.transform = `translate(${m.x + 18 * u}px, ${m.y - 30 * u}px)`;
+      ls.style.opacity = String(smooth(span(t, PRESS + d.late, PRESS + d.late + 0.2)) * (1 - sink));
     });
-    dim.style.opacity = String(sink);
+    // "pressed" at one end of the shared start line.
+    // (16:9: at the line's near end, clear of the caption at the top left.)
+    const head = toScreen(new THREE.Vector3(LAYOUT.x0, 0, portrait ? zMin : zMax), camera, W, H);
+    lblPress.style.transform = portrait
+      ? `translate(${head.x - 50 * u}px, ${head.y - 40 * u}px)`
+      : `translate(${head.x + 16 * u}px, ${head.y + 6 * u}px)`;
+    lblPress.style.opacity = String(smooth(span(t, PRESS, PRESS + 0.2)) * (1 - sink));
+    // The floor stays at ~40 % until the beat; the incoming words sweep it away.
+    dim.style.opacity = String(0.6 * sink);
 
     // The press: down fast, held a moment, up again as the screens come up.
     const down = easeOut(span(t, PRESS, PRESS + 0.06));
@@ -406,8 +425,9 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       // Each screen comes up only when its own sound starts (its marker
       // lands): picture-on is sound-on. Until then its button stays pressed.
       const start = PRESS + d.late;
-      const lit = smooth(span(t, start, start + 0.25));
-      const glyph = 1 - smooth(span(t, start + 0.05, start + 0.35));
+      const lit = smooth(span(t, start, start + 0.2));
+      // The paused button clears on the frame the marker lands.
+      const glyph = t < start ? 1 : 0;
       const held = t < start ? Math.max(press, 0.6 * down) : press * (1 - lit);
       paintPlayer(d.screen, { lit, press: held, ring: t >= PRESS ? ring : 0, glyph });
 

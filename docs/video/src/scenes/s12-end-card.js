@@ -25,8 +25,8 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   const S = portrait ? 700 * u : 540 * u; // the mark's box; arcs span ±0.35 S
   const sizes = portrait
-    ? { word: 168 * u, try: 42 * u, url: 44 * u, lic: 34 * u }
-    : { word: 142 * u, try: 48 * u, url: 56 * u, lic: 32 * u };
+    ? { word: 168 * u, try: 58 * u, url: 44 * u, lic: 34 * u }
+    : { word: 142 * u, try: 68 * u, url: 56 * u, lic: 32 * u };
   const gaps = portrait
     ? { mark: 64 * u, word: 34 * u, try: 46 * u, url: 34 * u }
     : { mark: 40 * u, word: 22 * u, try: 34 * u, url: 28 * u };
@@ -119,8 +119,8 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
 
     parts.forEach((node, i) => {
       const k = span(t, IN[i], IN[i] + DUR[i]);
-      const e = expoOut(k);
-      node.style.opacity = String(clamp01((t - IN[i]) / (DUR[i] * 0.45)));
+      const e = cubicOut(k);
+      node.style.opacity = String(clamp01((t - IN[i]) / (DUR[i] * 0.18)));
       node.style.transform = `translateX(${(i % 2 ? 1 : -1) * (portrait ? 200 : 280) * u * (1 - e)}px)`;
     });
     ground.style.opacity = '1';

@@ -34,11 +34,11 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   // ~1.3× its round-1 size. "HomeSync" at this weight is ~5.43 em wide; the
   // exact width is measured below for centring.
   const PUSH = 1.04;
-  const GAPK = portrait ? 0.11 : 0.07;
+  const GAPK = portrait ? 0.11 : 0.05;
   // 16:9: the lockup spans 90 % of the width (96 px margins) with a larger
   // word; 9:16: the mark ~80 % of the width, the lockup centred vertically.
-  const wordSize = portrait ? 176 * u : 160 * u;
-  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.89 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
+  const wordSize = portrait ? 176 * u : 148 * u;
+  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.955 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
   /** Clear space between the outer arc (at its largest, with the push) and the word. */
   const GAP = portrait ? 0 : GAPK * S;
 
@@ -86,20 +86,20 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   const DRAW = t0 + 0.08; // 6.33: the arcs start drawing, once the dot is on its way in
   const HOME = t0 + 0.5; // 6.75: dot home, mark at full size
   const WORD = HOME + 0.02; // the word only once the mark has stopped growing
-  const LEAVE = t1 - 0.275; // 7.85
-  const GONE = LEAVE + 0.12; // 7.97: nothing of this composition is left
+  const LEAVE = t1 - 0.145; // 7.98: held until the cut is near
+  const GONE = t1 - 0.015; // 8.11: nothing of this composition is left before the 8.125 cut
 
   // The drop: from 7.76 s the dot leaves the mark's centre, shrinking (ease-in,
   // 13 frames) and falling to where composition 5 picks it up at 7.98 s —
   // s05's dot at its first frame: (700u, 830u) in 16:9, (W/2, 980u) in 9:16,
   // 36u across. If s05 moves it, the film's flight bridges the last frame.
-  const DROP = [LEAVE - 0.09, 7.98];
+  const DROP = [7.9, t1];
   const PICKUP = portrait ? { x: W / 2, y: 980 * u, d: 36 * u, glow: 0.25 } : { x: 700 * u, y: 830 * u, d: 36 * u, glow: 0.25 };
   const from = () => handoff.stopAt?.(START) ?? { x: W * 0.7, y: H * 0.6, d: 30 * u };
   const dotFull = S * MARK_DOT_RATIO;
 
   /** The whole lockup's push through the hold: 3 %, about the frame's centre. */
-  const LOCK = portrait ? 1.04 : 1.02;
+  const LOCK = portrait ? 1.04 : 1.01;
   const lockAt = (t) => lerp(1, LOCK, span(t, HOME, LEAVE));
   const pushed = (p, t) => ({ x: W / 2 + (p.x - W / 2) * lockAt(t), y: H / 2 + (p.y - H / 2) * lockAt(t) });
   /** The dot's path and size: glides home while it grows into the mark's centre. */
@@ -143,7 +143,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       const phase = (t - HOME) * ((2 * Math.PI) / 1.25) - (outer ? 0.9 : 0);
       // One visible breath across the hold, the outer pair swelling most,
       // over the small ripple.
-      const swell = Math.sin(Math.PI * span(t, HOME + 0.1, LEAVE)) * (outer ? 0.05 : 0.04);
+      const swell = Math.sin(Math.PI * span(t, HOME + 0.1, LEAVE)) * (portrait ? (outer ? 0.05 : 0.04) : outer ? 0.02 : 0.035);
       a.style.transform = `scale(${1 + swell + b * (outer ? 0.025 : 0.02) * Math.sin(phase)})`;
       a.style.opacity = String(lerp(1, 0.93, b * (0.5 + 0.5 * Math.sin(phase))));
     });

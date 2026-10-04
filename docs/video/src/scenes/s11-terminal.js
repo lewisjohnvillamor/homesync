@@ -93,7 +93,8 @@ export function cursorAt(t, g) {
   // Swallowing the printed line, it swells a little and glows.
   const swell = 1 + 0.2 * cubicOut(span(t, COLLAPSE + 0.06, COLLAPSE + 0.24));
   const drift = Math.sin(t * 2.2) * 1.2 * g.u;
-  return { x: x + drift, y, d: g.d * s * dip * swell * blink, glow: 0.12 + 0.35 * span(t, COLLAPSE, COLLAPSE + 0.15) };
+  const off = t > 24.66 && t < 24.75 ? 0.12 : 1;
+  return { opacity: off, x: x + drift, y, d: g.d * s * dip * swell * blink, glow: 0.12 + 0.35 * span(t, COLLAPSE, COLLAPSE + 0.15) };
 }
 
 export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
@@ -164,7 +165,10 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     const capDrift = lerp(0, -8 * u, span(t, C0 + 0.4, COLLAPSE));
     cap.style.transformOrigin = `50% 50%`;
     // Sits inside the window's lower edge as the window grows, scaled with it.
-    const capTop = g.winY + g.winH * lerp(portrait ? 0.62 : 0.8, 1, grow) - cap.offsetHeight - 30 * u;
+    const capFoot = g.winY + g.winH * lerp(portrait ? 0.62 : 0.8, 1, grow) - cap.offsetHeight - 30 * u;
+    // A row the cursor never crosses before the output prints.
+    const capRow = g.textY + g.lineH * 2.5 - cap.offsetHeight / 2;
+    const capTop = lerp(capRow, capFoot, grow);
     cap.style.top = `${H / 2 + (capTop - H / 2) * s}px`;
     cap.style.transform = `translate(-50%, ${22 * u * (1 - ci) + capDrift}px)`;
   });
