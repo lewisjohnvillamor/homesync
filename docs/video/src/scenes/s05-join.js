@@ -149,7 +149,7 @@ export function joinTrack(W, H, u, portrait) {
   // shrinks. It pushes about a fixed point low on the phone.
   // 16:9 pushes less than before, so the phone reads as a phone (both edges and
   // ground around it), centred in frame; its words are set larger to stay ≥ 48 px.
-  const PUSH = portrait ? 1.17 : 1.35;
+  const PUSH = portrait ? 1.17 : 1.45;
   const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
   const O = portrait
     ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
@@ -187,7 +187,7 @@ export function joinTrack(W, H, u, portrait) {
 export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phoneRect, onGlass } = joinTrack(W, H, u, portrait);
   /** 16:9 sets the interface words larger (its push-in is smaller). */
-  const tScale = portrait ? 1 : 1.04;
+  const tScale = 1;
   const roomScale = portrait ? 1 : 1.12;
   /** The press ring's circle: around the dot, inside the button's free right end. */
   const well = button.h * glassH * 0.75;
