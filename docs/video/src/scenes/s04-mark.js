@@ -30,11 +30,11 @@ const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor }) {
   // The outer arcs reach 0.51 S either side of the centre and ±0.34 S above
   // and below it (radius 11 over a chord of 15, plus the stroke).
-  const S = portrait ? 980 * u : 900 * u;
-  const wordSize = portrait ? 200 * u : 140 * u;
+  const S = portrait ? 920 * u : 900 * u;
+  const wordSize = portrait ? 176 * u : 140 * u;
   /** Clear space between the outer arc (at its largest, with the push) and the word. */
   const GAP = portrait ? 0 : 0.11 * S;
-  const PUSH = 1.03;
+  const PUSH = 1.04;
 
   el.innerHTML = `
     <div class="mark" style="position:absolute;left:0;top:0;width:${S}px;height:${S}px;will-change:transform">${arcsSvg()}</div>
@@ -122,7 +122,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       const k = expoOut(span(t, DRAW + (outer ? 0.12 : 0), DRAW + (outer ? 0.12 : 0) + 0.55));
       a.style.strokeDashoffset = `${lens[i] * (1 - k)}`;
       const phase = (t - HOME) * ((2 * Math.PI) / 1.25) - (outer ? 0.9 : 0);
-      a.style.transform = `scale(${1 + b * (outer ? 0.03 : 0.022) * Math.sin(phase)})`;
+      a.style.transform = `scale(${1 + b * (outer ? 0.04 : 0.03) * Math.sin(phase)})`;
       a.style.opacity = String(lerp(1, 0.93, b * (0.5 + 0.5 * Math.sin(phase))));
     });
 
@@ -147,7 +147,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     return {
       x: c.x,
       y: c.y + Math.sin((t - START) * 2.3) * 1.5 * u * b,
-      d: dotFull * markScale(t) * (1 + 0.035 * b * pulse),
+      d: dotFull * markScale(t) * (1 + 0.05 * b * pulse),
       glow: lerp(from().glow ?? 0.4, 0.14, span(t, START, HOME)) + 0.12 * b * (0.5 + 0.5 * pulse),
     };
   });

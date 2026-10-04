@@ -156,12 +156,12 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 36, tg: [0.1, 0.2, 0.05], d0: 4.15, d1: 3.8, orb0: 0.08, orb1: 0.0 },
+        c1: { el: 36, tg: [0.1, 0.2, 0.05], d0: 4.3, d1: 3.75, orb0: 0.16, orb1: 0.0 },
         c2: { el: 52, tg: [0.04, 0.0, 0.12], d: 4.45, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 35, tg: [0.0, 0.27, 0.0], d0: 3.1, d1: 2.8, orb0: 0.52, orb1: 0.42 },
+        c1: { el: 35, tg: [0.0, 0.27, 0.0], d0: 3.2, d1: 2.75, orb0: 0.66, orb1: 0.42 },
         c2: { el: 50, tg: [0.2, 0.0, -0.04], d: 4.6, orbDrift: -0.05 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);

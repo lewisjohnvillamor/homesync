@@ -81,11 +81,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   // Then the words rush past the camera; the full stop stays.
   tl.to(words, { scale: 2.6, opacity: 0, filter: 'blur(14px)', duration: 0.32, ease: 'power3.in', transformOrigin: '50% 50%' }, EXIT);
 
-  // Held, never still: a 5 % push on the whole sentence, and its two lines
+  // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = 1.05;
+  const PUSH = 1.06;
   const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, SET - 0.2, EXIT + 0.1)));
-  const driftAt = (t) => sineInOut(span(t, SET - 0.2, EXIT + 0.1)) * 16 * u;
+  const driftAt = (t) => sineInOut(span(t, SET - 0.2, EXIT + 0.1)) * 28 * u;
 
   /** Where the full stop is at time t, with the push and the drift. */
   const stopAt = (t) => {
