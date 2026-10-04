@@ -166,8 +166,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       }
     : {
         fov: 30,
-        c1: { el: 38, tg: [0.3, 0.25, -0.36], d0: 4.1, d1: 3.8, orb0: 0.6, orb1: 0.5 },
-        c2: { el: 42, tg: [0.15, 0.0, -0.45], d: 4.7, orbDrift: -0.04 },
+        c1: { el: 38, tg: [0.25, 0.25, 0.0], d0: 4.05, d1: 3.75, orb0: 0.42, orb1: 0.35 },
+        c2: { el: 42, tg: [0.1, 0.0, -0.2], d: 4.6, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -193,8 +193,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
-    ? { x0: -0.42, speed: 0.22, gap: 0.06, rows: { laptop: [0, 1.5], phone: [0.95, 2.4], tv: [-1.0, 1.25] }, turn: 0 }
-    : { x0: -0.75, speed: 0.6, gap: 0.06, rows: { laptop: [0, 1.8], phone: [0.7, 2.6], tv: [-1.25, 1.7] }, turn: 0.2 };
+    ? { x0: -0.55, speed: 0.22, clear: 0.12, dx: { laptop: 0.12, phone: -0.06, tv: 0 }, rows: { laptop: [0, 1.5], phone: [0.95, 2.4], tv: [-1.0, 1.25] }, turn: 0 }
+    : { x0: -0.8, speed: 0.5, clear: 0.14, dx: { laptop: 0.28, phone: -0.25, tv: 0 }, rows: { laptop: [0, 1.8], phone: [0.8, 2.6], tv: [-1.0, 1.7] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -202,11 +202,18 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const depthOf = (z) => -new THREE.Vector3(LAYOUT.x0, 0, z).applyMatrix4(probe.matrixWorldInverse).z;
   const refDepth = depthOf(LAYOUT.rows.laptop[0]);
 
+  // A bar's length is time, never distance. The devices stand in a column
+  // clear of the longest bar, and how far each is from the press line has
+  // nothing to do with its bar: the laptop (shortest bar) stands farthest
+  // away, the TV (longest) no farther than the others, and each marker stops
+  // short of its device by a different amount.
+  const perSecondOf = (z) => LAYOUT.speed * (depthOf(z) / refDepth);
+  const [tvZ, tvS] = LAYOUT.rows.tv;
+  const column = LAYOUT.x0 + LATE.tv * perSecondOf(tvZ) + LAYOUT.clear + HALF.tv * tvS;
   const devices = Object.entries(LAYOUT.rows).map(([kind, [z, s]]) => {
     const d = MAKE[kind]();
-    const perSecond = LAYOUT.speed * (depthOf(z) / refDepth);
-    const full = LATE[kind] * perSecond;
-    const x = LAYOUT.x0 + full + LAYOUT.gap + HALF[kind] * s;
+    const perSecond = perSecondOf(z);
+    const x = column + LAYOUT.dx[kind];
     d.group.position.set(x, 0, z);
     d.group.scale.setScalar(s);
     d.group.rotation.y = LAYOUT.turn;

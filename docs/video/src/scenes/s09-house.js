@@ -198,12 +198,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const zF = HOUSE_D / 2 - WALL_T / 2;
   const innerD = HOUSE_D - 2 * WALL_T;
   // Back wall.
-  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zB));
+  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zB, { radius: 0.018 }));
   // Front wall.
-  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zF));
+  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zF, { radius: 0.018 }));
   // Side walls.
-  house.add(box(WALL_T, wh, innerD, wall, xL, PLINTH_TOP, 0));
-  house.add(box(WALL_T, wh, innerD, wall, xR, PLINTH_TOP, 0));
+  house.add(box(WALL_T, wh, innerD, wall, xL, PLINTH_TOP, 0, { radius: 0.018 }));
+  house.add(box(WALL_T, wh, innerD, wall, xR, PLINTH_TOP, 0, { radius: 0.018 }));
   // Partition, with a doorway near the front.
   const pd = [0.35, 0.8];
   const zIn0 = -HOUSE_D / 2 + WALL_T;
@@ -302,7 +302,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.start = HOUSE_TOUCH - d.late;
     d.baseY = T_Y - length;
     // A bar whose top rises; geometry has its origin at the bottom.
-    const geo = new THREE.CylinderGeometry(0.036, 0.036, 1, 20);
+    const geo = new THREE.CylinderGeometry(0.05, 0.05, 1, 24);
     geo.translate(0, 0.5, 0);
     d.bar = new THREE.Mesh(geo, accent(1));
     const { x: ax, y: ay, z: az } = d.anchor;
@@ -316,7 +316,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.disc.renderOrder = 7;
     scene.add(d.disc);
     // Where its top meets T: marked on the plane the moment it arrives.
-    d.contact = new THREE.Mesh(new THREE.CircleGeometry(0.085, 40), accent(1));
+    d.contact = new THREE.Mesh(new THREE.RingGeometry(0.11, 0.15, 48), accent(1));
     d.contact.rotation.x = -Math.PI / 2;
     d.contact.position.set(ax, T_Y + 0.003, az);
     d.contact.renderOrder = 8;
@@ -324,7 +324,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.036, 0.036, 1, 20);
+    const stemGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 12);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
     const stem = new THREE.Mesh(stemGeo, accent(0.3));
@@ -336,14 +336,17 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
   // --- camera --------------------------------------------------------------------
   const camera = new THREE.PerspectiveCamera(HOUSE_VIEW.fov, W / H, 0.1, 80);
+  // 9:16: the model sits lower in the frame, under the three-line headline,
+  // without changing the camera's angle or distance.
+  if (portrait) camera.setViewOffset(W, H, 0, -230 * u, W, H);
   const frame = portrait
-    ? { distance: 24, elevation: 54, target: new THREE.Vector3(0.1, 0.3, -0.02) }
+    ? { distance: 22.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
     : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.2, 0.62, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
     const k = smooth(clamp01((t - t0) / (t1 - t0)));
-    const azimuth = (HOUSE_VIEW.azimuth + 6 * k) * DEG;
+    const azimuth = (HOUSE_VIEW.azimuth + 6 * k + 3.5 * smooth(span(t, HOUSE_TOUCH, 21.5))) * DEG;
     const elevation = frame.elevation * DEG;
     const distance = frame.distance * (1 - 0.06 * k);
     const tg = frame.target;
@@ -359,6 +362,15 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // --- the dot ---------------------------------------------------------------------
   // Over the bedroom's open floor: clear of every bar top and its label.
   const DOT_HOME = new THREE.Vector3(DOT_XZ[0], T_Y, DOT_XZ[1]);
+  const plumbGeo = new THREE.CylinderGeometry(0.008, 0.008, T_Y - Y0, 8);
+  plumbGeo.translate(0, (T_Y - Y0) / 2, 0);
+  const plumb = new THREE.Mesh(plumbGeo, accent(0));
+  plumb.position.set(DOT_XZ[0], Y0, DOT_XZ[1]);
+  scene.add(plumb);
+  const spot = new THREE.Mesh(new THREE.CircleGeometry(0.09, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
+  spot.rotation.x = -Math.PI / 2;
+  spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
+  scene.add(spot);
   const probe = camera.clone();
   poseCamera(probe, SETTLE);
   const refDistance = probe.position.distanceTo(DOT_HOME);
@@ -402,8 +414,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     if (k > 0 && to) {
       const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
       return {
-        x: lerp(s.x, to.x, e),
-        y: lerp(s.y, to.y, e),
+        x: (1 - e) ** 2 * s.x + 2 * e * (1 - e) * lerp(s.x, to.x, 0.4) + e * e * to.x,
+        y: (1 - e) ** 2 * s.y + 2 * e * (1 - e) * (Math.min(s.y, to.y) - 220 * u) + e * e * to.y,
         d: lerp(d, to.d, e),
         glow: lerp(0.35, 0.45, k),
       };
@@ -422,7 +434,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
      <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1]}px;
-        overflow:hidden;background:rgba(11,14,19,0.88);box-shadow:0 0 ${36 * u}px ${22 * u}px rgba(11,14,19,0.88)">
+        overflow:hidden;background:rgba(11,14,19,0.88);box-shadow:0 0 ${120 * u}px ${50 * u}px rgba(11,14,19,0.8)">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -466,11 +478,14 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The plane fades in under the settling dot; brightens briefly at the touch.
     const touch = Math.exp(-Math.max(0, t - HOUSE_TOUCH) * 5) * (t >= HOUSE_TOUCH ? 1 : 0);
-    planeMat.opacity = 0.5 * smooth(span(t, 18.1, 18.6)) + 0.4 * touch;
+    planeMat.opacity = 0.5 * smooth(span(t, 18.1, 18.6)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
     plane.position.y = T_Y + 0.7 * (1 - easeOut(span(t, 18.1, 19.0)));
+    const hover = smooth(span(t, SETTLE, SETTLE + 0.3)) * (1 - smooth(span(t, 21.3, 21.5)));
+    plumb.material.opacity = 0.35 * hover;
+    spot.material.opacity = 0.35 * hover;
     const kr = span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.7);
     ring.visible = kr > 0 && kr < 1;
-    ring.scale.setScalar(0.1 + 0.34 * easeOut(kr));
+    ring.scale.setScalar(0.08 + 0.2 * easeOut(kr));
     ringMat.opacity = 0.9 * (1 - kr);
 
     for (const d of devices) {
@@ -482,8 +497,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
-      d.contact.scale.setScalar(met ? 1 + 0.9 * Math.exp(-(t - HOUSE_TOUCH) * 9) : 0.0001);
-      for (const seg of d.guide.children) seg.material.opacity = 0.55 * smooth(span(t, d.start - 0.3, d.start));
+      d.contact.scale.setScalar(met ? 1 + 1.2 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
+      d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
+      for (const seg of d.guide.children) seg.material.opacity = 0.3 * smooth(span(t, d.start - 0.3, d.start));
       const pop = smooth(span(t, d.start - 0.12, d.start));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -503,8 +519,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     el.style.transformOrigin = '50% 50%';
     el.style.transform = lift > 0 ? `translateY(${H * 1.25 * lift}px) scale(${1 - 0.25 * lift})` : '';
     el.style.opacity = '1';
-    const lit = smooth(span(t, 17.85, 18.125));
-    el.style.filter = lit < 1 ? `brightness(${lerp(0.4, 1, lit)})` : '';
+
 
     // Each bar's delay, by its start disc: the example values of F8.
     for (const d of devices) {
@@ -514,16 +529,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // Right of its disc; the TV's (leftmost, beside the T label) to the
       // left, or under its disc where the left would leave the frame.
       const lw = d.label.offsetWidth;
-      let lx = sp.x + 22 * u;
-      let ly = sp.y - msSize * 0.62;
-      if (portrait) {
-        const top = toScreen(new THREE.Vector3(d.anchor.x, T_Y, d.anchor.z), camera, W, H);
-        ly = top.y - msSize * 2.1;
-        lx = d.kind === 'tv' ? Math.max(40 * u, top.x - lw - 18 * u) : top.x + 18 * u;
-      } else if (d.kind === 'tv') {
-        if (sp.x - 80 * u - lw >= 40 * u) lx = sp.x - 80 * u - lw;
-        else { lx = Math.max(40 * u, sp.x - lw / 2); ly = sp.y + 26 * u; }
-      }
+      // Rides on the bar's own top as it rises, and stays beside it at T.
+      const capY = d.baseY + clamp01((t - d.start) / d.late) * d.late * RISE;
+      const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
+      const lh = d.label.offsetHeight;
+      const lx = d.kind === 'tv' ? Math.max(40 * u, top.x - lw - 30 * u) : top.x + 30 * u;
+      const ly = top.y - lh / 2;
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 

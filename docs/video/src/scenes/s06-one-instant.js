@@ -53,9 +53,13 @@ const C9 = 18.125;
  * diagram is ever seen through or over the house; it only moves off it.
  */
 const LIFT = 17.85;
-const LIFT_SPAN = [17.62, 18.12];
-/** The dot is let go as the lift starts; the film flies it to the house's host (18.15). */
-const DOT_RELEASE = LIFT_SPAN[0];
+const LIFT_SPAN = [17.74, 18.14];
+/**
+ * The dot stays where T was as the plane drops away beneath it (everything of
+ * the diagram moves away from it, nothing crosses it), then is let go and the
+ * film flies it into the house's host (17.95).
+ */
+const DOT_RELEASE = 17.8;
 
 /** Composition 6: the T line falls from the dot through the lanes. */
 const FALL = [11.0, 11.8];
@@ -78,10 +82,14 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const label = { laptop: 'laptop', phone: 'phone', tv: 'TV' };
   const barH = 18 * u;
   const ruleH = 14 * u;
+  /** How far the lift card reaches above T: just past the top of the frame in composition 8. */
+  const CARD_TOP = (portrait ? 900 : 760) * u;
   const ic = L.phoneIcon;
   const devW = 180 * u * L.iconScale;
   const devH = 116 * u * L.iconScale;
 
+  /** Each device's name sits under its icon, well away from the bars' start markers. */
+  const nameY = (kind) => L.lanes[kind] + (kind === 'phone' ? ic.h / 2 : devH / 2) + 4 * u;
   const lane = (kind) => {
     const y = L.lanes[kind];
     const icon =
@@ -100,8 +108,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         <div class="rule" style="position:absolute;left:${L.laneStart}px;top:${y - ruleH / 2}px;width:${L.laneEnd - L.laneStart}px;height:${ruleH}px;
              background:var(--text-faint);opacity:0.7;border-radius:${ruleH / 2}px"></div>
         ${icon}
-        <div class="name" style="position:absolute;left:${L.laneStart + 6 * u}px;top:${y + 46 * u}px;transform-origin:0 0;
-             font:600 ${32 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}</div>
+        <div class="name" style="position:absolute;left:${L.iconX - 100 * u}px;width:${200 * u}px;text-align:center;top:${nameY(kind)}px;transform-origin:0 0;
+             font:600 ${28 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}</div>
         <div class="tick" style="position:absolute;left:${L.tX - 5 * u}px;top:${y - 34 * u}px;width:${10 * u}px;height:${68 * u}px;border-radius:${5 * u}px;background:var(--accent)"></div>
         <div class="flash" style="position:absolute;left:${L.tX - 30 * u}px;top:${y - 30 * u}px;width:${60 * u}px;height:${60 * u}px;border-radius:50%;
              border:${4 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
@@ -111,12 +119,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
              background:var(--bg);border:${6 * u}px solid var(--accent);box-sizing:border-box"></div>
         <div class="fire" style="position:absolute;left:${L.tX - w - 15 * u}px;top:${y - 15 * u}px;width:${30 * u}px;height:${30 * u}px;border-radius:50%;
              border:${3 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
-        <div class="pulse" style="position:absolute;left:${-22 * u}px;top:${y - 11 * u}px;width:${44 * u}px;height:${22 * u}px;border-radius:${11 * u}px;
-             background:var(--text);box-shadow:0 0 ${24 * u}px ${6 * u}px #5aa9ffaa;opacity:0"></div>
+        <div class="pulse" style="position:absolute;left:${L.tX - w}px;top:${y - barH / 2}px;width:${w}px;height:${barH}px;border-radius:${barH / 2}px;
+             background:var(--text);transform-origin:0 50%;opacity:0"></div>
         <div class="ms" style="position:absolute;left:${L.tX - w - 260 * u}px;width:${w + 234 * u}px;top:${y - barH / 2 - 54 * u}px;text-align:right;transform-origin:100% 100%;
-             font:500 ${34 * u}px/1 var(--mono);color:var(--text-dim);white-space:nowrap">${DELAY_MS[kind]} ms${
-               kind === 'phone' ? ` <span class="ex example-tag" style="--tag-size:${16 * u}px;vertical-align:middle;margin-left:${8 * u}px">example</span>` : ''
-             }</div>
+             font:500 ${34 * u}px/1 var(--mono);color:var(--text-dim);white-space:nowrap">${DELAY_MS[kind]} ms <span class="ex example-tag" style="--tag-size:${16 * u}px;vertical-align:middle;margin-left:${8 * u}px">example</span></div>
       </div>`;
   };
 
@@ -130,8 +136,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
          font:700 ${portrait ? 84 * u : 76 * u}px/1.08 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${portrait ? 'Every device is told<br>one instant…' : 'Every device is told one instant…'}</div>
     <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
       <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
-        <div class="card" style="position:absolute;left:${-2600 * u}px;top:${-2600 * u}px;width:${5200 * u + W}px;height:${2600 * u + L.lanes.tv + 520 * u}px;display:none;
-             background:linear-gradient(to bottom, var(--bg) calc(100% - ${300 * u}px), transparent)"></div>
+        <div class="card" style="position:absolute;left:${-2600 * u}px;top:${L.tTop - CARD_TOP}px;width:${5200 * u + W}px;height:${CARD_TOP + 2600 * u}px;display:none;
+             background:linear-gradient(to top, var(--bg) calc(100% - ${260 * u}px), transparent)"></div>
         ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
              background:var(--accent);transform-origin:50% 0;border-radius:${3 * u}px"></div>
@@ -244,14 +250,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     elx.style.transform = `translate(${wx - ax}px, ${wy - ay}px) scale(${k})`;
   };
 
+  /** Where the dot (T) sits once the camera is frozen for the lift; set each frame, the same value from LIFT_SPAN[0] on. */
+  let restDot = null;
+
   onFrame((t) => {
-    const c = cam(t);
-    // The lift: towards the camera and up, fast.
-    // It starts a beat of frames before LIFT, so it is visibly moving (and
-    // ≥ 1.3× larger) before it goes; it is gone by LIFT + 0.14.
-    const lk = easeIn(span(t, ...LIFT_SPAN));
+    // The camera holds still for the lift, so the lift alone moves the plane.
+    const c = cam(Math.min(t, LIFT_SPAN[0]));
     world.style.transform =
-      `translate3d(0, ${-lk * 0.75 * H}px, ${lk * 0.62 * persp}px) ` +
       `translate(${c.px}px, ${c.py}px) rotateX(${c.tilt}deg) rotateZ(${c.rot}deg) scale(${c.s}) translate(${-c.fx}px, ${-c.fy}px)`;
     // The flat ground covers the frame until the plane's own card takes over
     // for the lift; after the lift nothing of this layer is left.
@@ -260,6 +265,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     card.style.display = t >= LIFT_SPAN[0] - 0.05 && t < LIFT_SPAN[1] + 0.02 ? 'block' : 'none';
     // '' (inherit), never 'visible': an explicit 'visible' would show through the layer while the film hides it.
     perspEl.style.visibility = t < LIFT_SPAN[1] + 0.02 ? '' : 'hidden';
+    // The lift: the plane — its own opaque card under the lanes — grows
+    // (≥ 2×) about the point where T is and falls away down the frame
+    // towards the camera, uncovering the house from the top down. Every part
+    // of the diagram moves away from the dot, so nothing crosses it.
+    perspEl.style.transform = 'none';
     // While composition 5's phone shrinks into its icon, the lanes draw in
     // behind it: nothing of the diagram is drawn left of the phone's edge.
     if (t < ICON_LANDS - 0.04) {
@@ -379,14 +389,27 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const flash = (at) => (t >= at ? Math.exp(-(t - at) * 4) : 0);
     const home = Math.max(1.4 * flash(FIRE7 + RUN7), flash(ARRIVE8), 0.35 * span(t, GROW8.tv[1], GROW8.tv[1] + 0.2));
     tline.style.boxShadow = `0 0 ${home * 34 * u}px ${home * 6 * u}px #5aa9ffaa`;
+
+    // Read where T is before the lift moves the plane; from LIFT_SPAN[0] on
+    // the camera is frozen, so this is the same point on every later frame.
+    const ar = anchor.getBoundingClientRect();
+    restDot = { x: ar.left + ar.width / 2, y: ar.top + ar.height / 2, d: Math.min(46 * u, Math.max(24 * u, (ar.width + ar.height) / 2)) };
+    const lift = span(t, ...LIFT_SPAN);
+    if (lift > 0) {
+      const e = lift ** 1.6;
+      const g = 1 + 1.1 * e;
+      const fall = 1.25 * H * e;
+      perspEl.style.transformOrigin = '0 0';
+      perspEl.style.transform =
+        `translate(0, ${fall}px) translate(${restDot.x}px, ${restDot.y}px) scale(${g}) translate(${-restDot.x}px, ${-restDot.y}px)`;
+    }
   });
 
   // The dot is the instant T: it lands at the top of the T line and rides the
   // camera exactly, because its place is read from an element in the diagram.
   hostDot(11.0, DOT_RELEASE, (t) => {
-    const r = anchor.getBoundingClientRect();
+    const r = restDot;
     const pulse = Math.max(t >= FIRE7 + RUN7 ? Math.exp(-(t - FIRE7 - RUN7) * 5) : 0, t >= ARRIVE8 ? Math.exp(-(t - ARRIVE8) * 5) : 0);
-    const d = Math.min(46 * u, Math.max(24 * u, (r.width + r.height) / 2));
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, d: d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
+    return { x: r.x, y: r.y, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
   });
 }
