@@ -11,9 +11,9 @@ export function build({ el, tl, u, W, portrait, t0 }) {
     <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1500 * u : 800 * u}px;text-align:right;
          font:700 ${portrait ? 86 * u : 80 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);white-space:nowrap">Scheduled to be heard<br>at one agreed instant.</div>`;
   const line = el.querySelector('.line');
-  // In from the right as the tilt settles, set by ~16.4 s; drifts; leaves before the plane lifts.
-  tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0 + 0.45);
-  tl.to(line, { x: -30 * u, duration: 17.55 - (t0 + 0.95), ease: 'sine.inOut' }, t0 + 0.95);
+  // In from the right as the tilt settles, set by ~16.3 s, starting 15.9 s; drifts; leaves before the plane lifts.
+  tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0 + 0.27);
+  tl.to(line, { x: -30 * u, duration: 17.55 - (t0 + 0.77), ease: 'sine.inOut' }, t0 + 0.77);
   tl.to(line, { y: 40 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 17.55);
   void W;
 }
