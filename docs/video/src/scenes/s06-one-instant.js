@@ -42,12 +42,19 @@ const sine = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 const C7 = 13.125;
 const C8 = 15.625;
 const C9 = 18.125;
-/** The plane lifts towards the camera; everything of the diagram is gone by LIFT + 0.14. */
+/**
+ * The lift: the plane — lanes and its own opaque ground together, one card —
+ * rises towards the camera and away over LIFT_SPAN, uncovering the house
+ * that waits underneath from the bottom of the frame up. Nothing of the
+ * diagram is ever seen through or over the house; it only moves off it.
+ */
 const LIFT = 17.85;
+const LIFT_SPAN = [17.62, 18.12];
+/** The dot is let go as the lift starts; the film flies it to the house's host (18.15). */
+const DOT_RELEASE = LIFT_SPAN[0];
 
-/** Composition 6: T reaches each lane (s), and the pulse that tells it gets back to the device. */
-const REACH = { laptop: 11.12, phone: 11.22, tv: 11.32 };
-const TELL = 0.6;
+/** Composition 6: the T line falls from the dot through the lanes. */
+const FALL = [11.0, 11.8];
 /** Composition 7: the phone's start fires, and its pulse takes 90 ms × 8 to reach T. */
 const FIRE7 = 14.3;
 const RUN7 = 0.72;
@@ -62,7 +69,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const order = ['laptop', 'phone', 'tv'];
   const label = { laptop: 'laptop', phone: 'phone', tv: 'TV' };
   const barH = 18 * u;
-  const ruleH = 10 * u;
+  const ruleH = 14 * u;
   const ic = L.phoneIcon;
   const devW = 180 * u * L.iconScale;
   const devH = 116 * u * L.iconScale;
@@ -83,13 +90,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return `
       <div class="lane lane-${kind}">
         <div class="rule" style="position:absolute;left:${L.laneStart}px;top:${y - ruleH / 2}px;width:${L.laneEnd - L.laneStart}px;height:${ruleH}px;
-             background:var(--text-faint);opacity:0.55;border-radius:${ruleH / 2}px"></div>
-        <div class="told" style="position:absolute;left:${L.laneStart}px;top:${y - ruleH / 2}px;width:${L.tX - L.laneStart}px;height:${ruleH}px;
-             background:linear-gradient(90deg,transparent,var(--accent) 30%);border-radius:${ruleH / 2}px;transform-origin:100% 50%"></div>
+             background:var(--text-faint);opacity:0.7;border-radius:${ruleH / 2}px"></div>
         ${icon}
         <div class="name" style="position:absolute;left:${L.laneStart + 6 * u}px;top:${y + 36 * u}px;transform-origin:0 0;
              font:600 ${32 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}</div>
-        <div class="tick" style="position:absolute;left:${L.tX - 4 * u}px;top:${y - 28 * u}px;width:${8 * u}px;height:${56 * u}px;border-radius:${4 * u}px;background:var(--accent)"></div>
+        <div class="tick" style="position:absolute;left:${L.tX - 5 * u}px;top:${y - 34 * u}px;width:${10 * u}px;height:${68 * u}px;border-radius:${5 * u}px;background:var(--accent)"></div>
+        <div class="flash" style="position:absolute;left:${L.tX - 30 * u}px;top:${y - 30 * u}px;width:${60 * u}px;height:${60 * u}px;border-radius:50%;
+             border:${4 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
         <div class="bar" style="position:absolute;left:${L.tX - w}px;top:${y - barH / 2}px;width:${w}px;height:${barH}px;border-radius:${barH / 2}px;
              background:var(--accent);transform-origin:100% 50%"></div>
         <div class="start" style="position:absolute;left:${L.tX - 15 * u}px;top:${y - 15 * u}px;width:${30 * u}px;height:${30 * u}px;border-radius:50%;
@@ -98,8 +105,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
              border:${3 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
         <div class="pulse" style="position:absolute;left:${-22 * u}px;top:${y - 11 * u}px;width:${44 * u}px;height:${22 * u}px;border-radius:${11 * u}px;
              background:var(--text);box-shadow:0 0 ${24 * u}px ${6 * u}px #5aa9ffaa;opacity:0"></div>
-        <div class="ms" style="position:absolute;left:${L.tX - w - 260 * u}px;width:${w + 234 * u}px;top:${y - barH / 2 - 54 * u}px;text-align:right;
-             font:500 ${34 * u}px/1 var(--mono);color:var(--text-dim);white-space:nowrap"><span class="n">0</span> ms${
+        <div class="ms" style="position:absolute;left:${L.tX - w - 260 * u}px;width:${w + 234 * u}px;top:${y - barH / 2 - 54 * u}px;text-align:right;transform-origin:100% 100%;
+             font:500 ${34 * u}px/1 var(--mono);color:var(--text-dim);white-space:nowrap">${DELAY_MS[kind]} ms${
                kind === 'phone' ? ` <span class="ex example-tag" style="--tag-size:${16 * u}px;vertical-align:middle;margin-left:${8 * u}px">example</span>` : ''
              }</div>
       </div>`;
@@ -115,12 +122,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
          font:700 ${portrait ? 84 * u : 76 * u}px/1.08 var(--sans);letter-spacing:-0.025em;color:var(--text);${portrait ? `width:${940 * u}px` : 'white-space:nowrap'}">Every device is told one instant…</div>
     <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
       <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
+        <div class="card" style="position:absolute;left:${-6000 * u}px;top:${-6000 * u}px;width:${12000 * u + W}px;height:${6000 * u + L.lanes.tv + 520 * u}px;
+             background:linear-gradient(to bottom, var(--bg) calc(100% - ${300 * u}px), transparent)"></div>
         ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
              background:var(--accent);transform-origin:50% 0;border-radius:${3 * u}px"></div>
         <div class="tlabel" style="position:absolute;left:${L.tX + 30 * u}px;top:${L.tTop - 30 * u}px;font:700 ${56 * u}px/1 var(--sans);color:var(--accent)">T</div>
         <div class="anchor" style="position:absolute;left:${L.tX - 13 * u}px;top:${L.tTop - 13 * u}px;width:${26 * u}px;height:${26 * u}px"></div>
-        <div class="tag example-tag" style="position:absolute;left:${L.laneStart + 84 * u}px;top:${L.lanes.tv + 32 * u}px;--tag-size:${24 * u}px">example</div>
       </div>
     </div>`;
 
@@ -134,18 +142,32 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const tline = el.querySelector('.tline');
   const tlabel = el.querySelector('.tlabel');
   const anchor = el.querySelector('.anchor');
-  const tag = el.querySelector('.tag');
+  const card = el.querySelector('.card');
   const lanes = Object.fromEntries(
     order.map((kind) => {
       const root = el.querySelector(`.lane-${kind}`);
       const q = (c) => root.querySelector(c);
       return [kind, {
-        icon: q('.icon'), name: q('.name'), rule: q('.rule'), told: q('.told'), tick: q('.tick'), bar: q('.bar'),
-        screen: q('.screen'), start: q('.start'), fire: q('.fire'), pulse: q('.pulse'), ms: q('.ms'), n: q('.ms .n'),
+        icon: q('.icon'), name: q('.name'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
+        screen: q('.screen'), start: q('.start'), fire: q('.fire'), pulse: q('.pulse'), ms: q('.ms'),
         w: DELAY_MS[kind] * L.pxPerMs,
       }];
     }),
   );
+  /** When the falling T line crosses each lane. */
+  const tLen = L.lanes.tv + 70 * u - L.tTop;
+  const fallK = (t) => easeInOut(span(t, ...FALL));
+  const REACH = Object.fromEntries(order.map((kind) => {
+    const target = (L.lanes[kind] - L.tTop) / tLen;
+    let lo = FALL[0];
+    let hi = FALL[1];
+    for (let n = 0; n < 40; n += 1) {
+      const mid = (lo + hi) / 2;
+      if (fallK(mid) < target) lo = mid;
+      else hi = mid;
+    }
+    return [kind, lo];
+  }));
   for (const svg of el.querySelectorAll('.icon svg')) svg.style.cssText = 'width:100%;height:100%;overflow:visible';
 
   // --- the camera --------------------------------------------------------------
@@ -155,7 +177,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const barPhone = lanes.phone.w;
   const camA = (t) => {
     const k = sine(span(t, ICON_LANDS, C7));
-    return { s: lerp(1, 1.06, k), fx: W / 2, fy: H * 0.55, px: W / 2 - 34 * u * k, py: H * 0.55 - 14 * u * k, tilt: 0, rot: 0 };
+    return { s: lerp(1, 1.05, k), fx: W / 2, fy: H * 0.55, px: W / 2 - 30 * u * k, py: H * 0.55 - 14 * u * k, tilt: 0, rot: 0 };
   };
   const camB = (t) => ({
     s: (portrait ? 720 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
@@ -169,10 +191,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const camC = (t) => {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
-      s: (portrait ? 1.1 : 1.02) * lerp(1, 1.045, k),
+      s: (portrait ? 1.22 : 1.2) * lerp(1, 1.045, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
-      px: W / 2 + (portrait ? 0 : 40 * u) + 30 * u * k,
+      px: W / 2 + (portrait ? 0 : 10 * u) + 30 * u * k,
       py: (portrait ? H * 0.4 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
       rot: HOUSE_VIEW.azimuth,
@@ -183,8 +205,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     for (const key of Object.keys(a)) out[key] = key === 's' ? a.s * (b.s / a.s) ** k : lerp(a[key], b[key], k);
     return out;
   };
-  const rushK = (t) => expoOut(span(t, C7 - 0.05, C7 + 0.6));
-  const backK = (t) => easeInOut(span(t, C8 - 0.08, C8 + 0.5));
+  // The camera starts leaning in on the phone lane from 12.35 s, then rushes in on the cut.
+  const rushK = (t) => Math.max(0.1 * easeIn(span(t, 12.35, C7)), expoOut(span(t, C7 - 0.05, C7 + 0.6)));
+  // The pull back leaves fast and lands slowly.
+  const backK = (t) => {
+    const k = span(t, C8 - 0.1, C8 + 1.1);
+    return k < 0.12 ? easeIn(k / 0.12) * 0.12 * 0.5 : 0.06 + 0.94 * (1 - (1 - (k - 0.12) / 0.88) ** 4);
+  };
   const cam = (t) => mix(mix(camA(t), camB(t), rushK(t)), camC(t), backK(t));
 
   /**
@@ -192,15 +219,21 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
    * out with weight 0: world anchor (ax, ay) is drawn at screen (sx, sy) at
    * on-screen scale `scr`.
    */
-  const pin = (elx, c, ax, ay, sx, sy, scr, w) => {
+  const pin = (elx, c, c6, ax, ay, sx, sy, scr, w) => {
     if (w <= 0) {
       elx.style.transform = '';
       return;
     }
-    const wx = c.fx + (sx - c.px) / c.s;
-    const wy = c.fy + (sy - c.py) / c.s;
-    const k = lerp(1, scr / c.s, w);
-    elx.style.transform = `translate(${(wx - ax) * w}px, ${(wy - ay) * w}px) scale(${k})`;
+    // Blend on screen, never further left than where it sat in composition 6.
+    const ux = c.px + (ax - c.fx) * c.s;
+    const uy = c.py + (ay - c.fy) * c.s;
+    const u6 = c6.px + (ax - c6.fx) * c6.s;
+    const x = Math.max(lerp(ux, sx, w), lerp(u6, sx, w));
+    const y = lerp(uy, sy, w);
+    const k = lerp(c.s, scr, w) / c.s;
+    const wx = c.fx + (x - c.px) / c.s;
+    const wy = c.fy + (y - c.py) / c.s;
+    elx.style.transform = `translate(${wx - ax}px, ${wy - ay}px) scale(${k})`;
   };
 
   onFrame((t) => {
@@ -208,20 +241,15 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // The lift: towards the camera and up, fast.
     // It starts a beat of frames before LIFT, so it is visibly moving (and
     // ≥ 1.3× larger) before it goes; it is gone by LIFT + 0.14.
-    const lk = easeIn(span(t, LIFT - 0.24, LIFT + 0.14));
+    const lk = easeIn(span(t, ...LIFT_SPAN));
     world.style.transform =
-      `translate3d(0, ${-lk * 380 * u}px, ${lk * 0.4 * persp}px) ` +
-      `translate(${c.px}px, ${c.py}px) rotateX(${c.tilt}deg) rotateZ(${c.rot}deg) scale(${c.s * (1 + 0.25 * lk)}) translate(${-c.fx}px, ${-c.fy}px)`;
-    // Everything of the diagram is gone before any of the house shows, so
-    // nothing is double-exposed over the model; then the ground opens from
-    // the centre, an iris on to the house.
-    perspEl.style.opacity = String(1 - span(t, LIFT, LIFT + 0.14));
-    const iris = easeOut(span(t, LIFT + 0.14, C9 + 0.2)) * Math.hypot(W, H) * 0.62;
-    const soft = 140 * u;
-    const hole = iris > 0 ? `radial-gradient(circle at 50% 52%, transparent ${iris}px, #000 ${iris + soft}px)` : 'none';
-    ground.style.maskImage = hole;
-    ground.style.webkitMaskImage = hole;
-    ground.style.opacity = t < ICON_LANDS ? '0' : '1';
+      `translate3d(0, ${-lk * 1.7 * H}px, ${lk * 0.25 * persp}px) ` +
+      `translate(${c.px}px, ${c.py}px) rotateX(${c.tilt}deg) rotateZ(${c.rot}deg) scale(${c.s}) translate(${-c.fx}px, ${-c.fy}px)`;
+    // The flat ground covers the frame until the plane's own card takes over
+    // for the lift; after the lift nothing of this layer is left.
+    ground.style.opacity = t >= ICON_LANDS && t < LIFT_SPAN[0] ? '1' : '0';
+    card.style.opacity = t >= ICON_LANDS ? '1' : '0';
+    perspEl.style.visibility = t < LIFT_SPAN[1] + 0.02 ? 'visible' : 'hidden';
     // While composition 5's phone shrinks into its icon, the lanes draw in
     // behind it: nothing of the diagram is drawn left of the phone's edge.
     if (t < ICON_LANDS - 0.04) {
@@ -244,8 +272,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const iconK = kind === 'phone' ? (t >= ICON_LANDS ? 1 : 0) : easeOut(span(t, ICON_LANDS - 0.05 + i * 0.06, ICON_LANDS + 0.3 + i * 0.06));
       l.icon.style.opacity = String(iconK);
       const reach = REACH[kind];
-      const told = span(t, reach, reach + TELL);
-      const lit = easeOut(span(t, reach + TELL - 0.05, reach + TELL + 0.15)) * (1 - 0.6 * span(t, reach + TELL + 0.2, reach + TELL + 1.0));
+      // The device lights the moment T crosses its lane, and stays lit, dimming a little.
+      const lit = easeOut(span(t, reach, reach + 0.18)) * (1 - 0.45 * sine(span(t, reach + 0.3, C7)));
       // The device lights as its pulse arrives: a glow and a small lift.
       const glowPx = (6 + 22 * lit) * u;
       const glow = lit > 0 ? `drop-shadow(0 0 ${glowPx}px rgba(90,169,255,${0.25 + 0.55 * lit}))` : 'none';
@@ -258,29 +286,28 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit})`;
       l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)));
       l.name.style.color = lit > 0.5 ? 'var(--text)' : 'var(--text-dim)';
-      // The tick pops as T reaches the lane.
+      // A tick and a ring flash where T crosses the lane — on the line, never travelling along it.
       const tk = span(t, reach, reach + 0.18);
       l.tick.style.opacity = String((tk > 0 ? 1 : 0) * (1 - span(t, C7 + 0.3, C7 + 0.5)));
       l.tick.style.transform = `scaleY(${easeOut(tk) * (1 + 0.5 * Math.sin(Math.PI * tk))})`;
-      // The pulse runs back along the lane to the device; the lane lights behind it, then dims.
-      const runK = easeInOut(told);
-      const fromX = L.tX;
-      const toX = L.laneStart + 10 * u;
-      let px = lerp(fromX, toX, runK);
-      let pOp = told > 0 && told < 1 ? 1 : 0;
-      l.told.style.transform = `scaleX(${told > 0 ? runK : 0})`;
-      l.told.style.opacity = String(0.55 * (1 - span(t, reach + TELL, reach + TELL + 0.6)));
+      const fl = span(t, reach, reach + 0.45);
+      l.flash.style.opacity = String(fl > 0 && fl < 1 ? 0.9 * (1 - fl) : 0);
+      l.flash.style.transform = `scale(${0.4 + 1.4 * easeOut(fl)})`;
+      let px = 0;
+      let pOp = 0;
 
       // --- compositions 7 and 8: the bar grows back from T; its start marker
-      // slides left by exactly the bar's length; the label counts up ---
+      // slides left by exactly the bar's length; its value fades in as it lands ---
       const grow = kind === 'phone' ? easeInOut(span(t, C7 + 0.45, C7 + 1.0)) : easeInOut(span(t, ...GROW8[kind]));
       l.bar.style.transform = `scaleX(${Math.max(0.0001, grow)})`;
       l.bar.style.opacity = String(grow > 0 ? 1 : 0);
       l.start.style.transform = `translateX(${-l.w * grow}px)`;
       const startOn = kind === 'phone' ? C7 + 0.35 : GROW8[kind][0] - 0.1;
       l.start.style.opacity = String(span(t, startOn, startOn + 0.1));
-      l.n.textContent = String(Math.round(DELAY_MS[kind] * grow));
-      const msOn = kind === 'phone' ? span(t, C7 + 0.45, C7 + 0.6) : span(t, GROW8[kind][0], GROW8[kind][0] + 0.15);
+      const landed = kind === 'phone' ? C7 + 1.0 : GROW8[kind][1];
+      const msOn = easeOut(span(t, landed - 0.12, landed + 0.12));
+      // Tilted, the labels foreshorten; they grow so they read at ≥ 24 px.
+      l.ms.style.transform = `scale(${lerp(1, 1.5, back)})`;
       // Gone before the plane lifts, so no label is ever seen over the house.
       l.ms.style.opacity = String(msOn * (1 - span(t, LIFT - 0.32, LIFT - 0.14)));
 
@@ -304,21 +331,17 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         const iconScreenH = portrait ? 220 * u : 240 * u;
         const iconScr = iconScreenH / ic.h;
         const sx = portrait ? 90 * u : 140 * u;
-        pin(l.icon, c, ic.x, L.lanes.phone, sx, c.py, iconScr, wPin);
+        const c6 = camA(t);
+        pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, c.py, iconScr, wPin);
         // Its name sits under it, clear of the lane and the start marker.
-        pin(l.name, c, L.laneStart + 6 * u, L.lanes.phone + 36 * u, sx - 50 * u, c.py + iconScreenH / 2 + 16 * u, portrait ? 1.3 : 1.35, wPin);
+        pin(l.name, c, c6, L.laneStart + 6 * u, L.lanes.phone + 36 * u, sx - 50 * u, c.py + iconScreenH / 2 + 16 * u, portrait ? 1.3 : 1.35, wPin);
       }
       void i;
     });
-    const fall = easeOut(span(t, 11.0, 11.35));
-    tline.style.transform = `scaleY(${fall})`;
+    tline.style.transform = `scaleY(${fallK(t)})`;
     tlabel.style.opacity = String(span(t, 11.05, 11.3));
 
-    // In 8 the single tag covers all three bars; in 7 the phone's label
-    // carries its own, because the close-up crops the diagram's corner.
-    tag.style.opacity = String(span(t, GROW8.tv[1] - 0.1, GROW8.tv[1] + 0.1) * (1 - span(t, LIFT - 0.32, LIFT - 0.14)));
-    const ex = lanes.phone.ms.querySelector('.ex');
-    if (ex) ex.style.opacity = String(1 - span(t, GROW8.tv[1] - 0.1, GROW8.tv[1] + 0.1));
+    // One example tag, always beside the phone's 90 ms, in 7 and 8.
     // The dot rides the T line down to the phone's lane for the close-up —
     // where the phone's sound must be heard — and back up after.
     const down = easeInOut(span(t, C7 + 0.05, C7 + 0.5)) * (1 - easeInOut(span(t, C8 + 0.1, C8 + 0.6)));
@@ -331,7 +354,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
 
   // The dot is the instant T: it lands at the top of the T line and rides the
   // camera exactly, because its place is read from an element in the diagram.
-  hostDot(11.0, LIFT + 0.05, (t) => {
+  hostDot(11.0, DOT_RELEASE, (t) => {
     const r = anchor.getBoundingClientRect();
     const pulse = Math.max(t >= FIRE7 + RUN7 ? Math.exp(-(t - FIRE7 - RUN7) * 5) : 0, t >= ARRIVE8 ? Math.exp(-(t - ARRIVE8) * 5) : 0);
     const d = Math.min(46 * u, Math.max(24 * u, (r.width + r.height) / 2));

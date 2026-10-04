@@ -23,6 +23,7 @@ import { span, lerp, clamp01, rng } from '../shared/beats.js';
 import { makeRenderer, makeStage, MAKE, BRAND, toScreen } from '../shared/three-kit.js';
 import { HOUSE_VIEW, HOUSE_TOUCH } from '../shared/house-view.js';
 import { LATE } from './s01-press-play.js';
+import { handoff } from '../shared/handoff.js';
 
 /** Visible from 17.825 s, when composition 8's plane lifts off it, to just past the cut. */
 export const pad = [0.3, 0.075];
@@ -33,7 +34,7 @@ const easeOut = (k) => 1 - (1 - k) ** 3;
 const easeIn = (k) => k * k * k;
 
 /** The dot's host range. */
-const HOST = [18.15, 21.62];
+const HOST = [17.95, 21.875];
 /** The dot has dropped and settled. */
 const SETTLE = 18.6;
 
@@ -299,7 +300,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.start = HOUSE_TOUCH - d.late;
     d.baseY = T_Y - length;
     // A bar whose top rises; geometry has its origin at the bottom.
-    const geo = new THREE.CylinderGeometry(0.03, 0.03, 1, 20);
+    const geo = new THREE.CylinderGeometry(0.036, 0.036, 1, 20);
     geo.translate(0, 0.5, 0);
     d.bar = new THREE.Mesh(geo, accent(0.95));
     const { x: ax, y: ay, z: az } = d.anchor;
@@ -321,7 +322,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.018, 0.018, 1, 16);
+    const stemGeo = new THREE.CylinderGeometry(0.026, 0.026, 1, 16);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
     const stem = new THREE.Mesh(stemGeo, accent(0.3));
@@ -342,7 +343,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const k = (t - t0) / (t1 - t0);
     const azimuth = (HOUSE_VIEW.azimuth + 6 * k) * DEG;
     const elevation = frame.elevation * DEG;
-    const distance = frame.distance * (1 - 0.06 * k - 0.6 * span(t, 21.4, t1) ** 2);
+    const distance = frame.distance * (1 - 0.06 * k);
     const tg = frame.target;
     cam.position.set(
       tg.x + Math.sin(azimuth) * distance * Math.cos(elevation),
@@ -364,12 +365,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   function dotWorld(t, cam) {
     const p = DOT_HOME.clone();
     // Drop: from above, slowing as it settles onto T.
-    p.y += 0.9 * (1 - easeOut(span(t, HOST[0], SETTLE)));
+    p.y += 0.35 * (1 - easeOut(span(t, HOST[0], SETTLE)));
     // Hover: a slow, small breath so it is never still.
     p.y += 0.025 * Math.sin((t - SETTLE) * 2.4) * smooth(span(t, SETTLE, SETTLE + 0.4));
     // Leave: up and towards the camera, accelerating.
     // After the payoff has been held (~0.7 s past HOUSE_TOUCH); still under way when composition 10 takes it.
-    const rise = span(t, 21.3, HOST[1] + 0.1) ** 2;
+    const rise = 0;
     if (rise > 0) {
       const toCam = cam.position.clone().sub(p).normalize();
       p.addScaledVector(toCam, 4.0 * rise);
@@ -390,6 +391,20 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const p = dotWorld(t, probe);
     const s = toScreen(p, probe, W, H);
     const d = DOT_D * (refDistance / probe.position.distanceTo(p)) * (1 + 0.4 * pulse(t));
+    // Leaving: the dot comes forward — swelling as it nears the lens — and
+    // settles back on to the exact pixels where composition 10 takes it,
+    // while the house lifts away above it.
+    const k = span(t, 21.5, HOST[1]);
+    const to = handoff.lanDotAt?.(HOST[1]);
+    if (k > 0 && to) {
+      const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
+      return {
+        x: lerp(s.x, to.x, e),
+        y: lerp(s.y, to.y, e),
+        d: lerp(d, to.d, e) * (1 + 1.8 * Math.sin(Math.PI * k)),
+        glow: lerp(0.35, 0.45, k),
+      };
+    }
     return { x: s.x, y: s.y, d, glow: 0.35 + 0.5 * pulse(t) };
   });
 
@@ -430,12 +445,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 18.15);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 220 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, 18.22 + i * 0.03);
+    tl.fromTo(ln, { x: from * 220 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.4, ease: 'expo.out' }, 18.22 + i * 0.03);
   });
   // Held, never still: a slow push on the whole band.
-  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.2 - 18.45, ease: 'none', immediateRender: false }, 18.45);
+  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.45, ease: 'none', immediateRender: false }, 18.45);
   // Leaves fast.
-  tl.to(band, { y: -50 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.2);
+  tl.to(band, { y: -50 * u, opacity: 0, duration: 0.18, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
@@ -448,10 +463,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The plane fades in under the settling dot; brightens briefly at the touch.
     const touch = Math.exp(-Math.max(0, t - HOUSE_TOUCH) * 5) * (t >= HOUSE_TOUCH ? 1 : 0);
-    planeMat.opacity = 0.5 * smooth(span(t, 18.3, 18.75)) + 0.4 * touch;
+    planeMat.opacity = 0.5 * smooth(span(t, 18.1, 18.6)) + 0.4 * touch;
+    plane.position.y = T_Y + 0.7 * (1 - easeOut(span(t, 18.1, 19.0)));
     const kr = span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.7);
     ring.visible = kr > 0 && kr < 1;
-    ring.scale.setScalar(0.2 + 1.55 * easeOut(kr));
+    ring.scale.setScalar(0.15 + 0.5 * easeOut(kr));
     ringMat.opacity = 0.9 * (1 - kr);
 
     for (const d of devices) {
@@ -464,7 +480,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? 1 + 0.9 * Math.exp(-(t - HOUSE_TOUCH) * 10) : 0.0001);
-      for (const seg of d.guide.children) seg.material.opacity = 0.32 * smooth(span(t, d.start - 0.3, d.start));
+      for (const seg of d.guide.children) seg.material.opacity = 0.42 * smooth(span(t, d.start - 0.3, d.start));
       const pop = smooth(span(t, d.start - 0.12, d.start));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -474,18 +490,21 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const p = dotWorld(t, probe);
     const s = toScreen(p, probe, W, H);
     const dd = DOT_D * (refDistance / probe.position.distanceTo(p));
-    const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, 21.15, 21.3)));
+    const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, 21.38, 21.5)));
     label.style.opacity = String(show);
     label.style.transform = `translate(${s.x + dd / 2 + 14 * u}px, ${s.y - 22 * u}px)`;
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
-    el.style.opacity = String(1 - smooth(span(t, 21.58, t1 - 0.02)));
+    const lift = span(t, 21.5, t1 - 0.01) ** 2.2;
+    el.style.transformOrigin = '50% 50%';
+    el.style.transform = lift > 0 ? `translateY(${-H * 1.35 * lift}px) scale(${1 + 0.55 * lift})` : '';
+    el.style.opacity = '1';
 
     // Each bar's delay, by its start disc: the example values of F8.
     for (const d of devices) {
       const sp = toScreen(new THREE.Vector3(d.anchor.x, d.baseY, d.anchor.z), camera, W, H);
-      const o = smooth(span(t, d.start - 0.1, d.start + 0.15)) * (1 - smooth(span(t, 21.4, 21.55)));
+      const o = smooth(span(t, d.start, d.start + 0.25)) * (1 - smooth(span(t, 21.38, 21.5)));
       d.label.style.opacity = String(o);
       // Right of its disc; the TV's (leftmost, beside the T label) to the
       // left, or under its disc where the left would leave the frame.
@@ -493,7 +512,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       let lx = sp.x + 22 * u;
       let ly = sp.y - msSize * 0.62;
       if (d.kind === 'tv') {
-        if (sp.x - 22 * u - lw >= 40 * u) lx = sp.x - 22 * u - lw;
+        if (sp.x - 62 * u - lw >= 40 * u) lx = sp.x - 62 * u - lw;
         else { lx = Math.max(40 * u, sp.x - lw / 2); ly = sp.y + 26 * u; }
       }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;

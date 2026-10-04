@@ -57,7 +57,7 @@ export function terminalGeo(W, H, u, portrait) {
 export function windowScale(t) {
   const arrive = lerp(0.93, 1, expoOut(span(t, T0 - 0.18, T0 + 0.45)));
   const push = lerp(1, 1.09, span(t, T0, COLLAPSE));
-  const leave = lerp(1, 1.6, cubicIn(span(t, GONE, 26.875)));
+  const leave = lerp(1, 2.8, cubicIn(span(t, GONE, 26.875)));
   return arrive * push * leave;
 }
 
@@ -129,7 +129,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
 
   onFrame((t) => {
     const s = windowScale(t);
-    const fade = 1 - clamp01((t - GONE - 0.04) / 0.14);
+    const fade = 1 - clamp01((t - 26.8) / 0.075);
     const appear = clamp01((t - (t0 - 0.18)) / 0.2);
     // The window waits under the leaving words; its text comes up once
     // they have cleared, so no word passes over another.
@@ -138,6 +138,8 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     txt.style.transformOrigin = `${W / 2}px ${H / 2}px`;
     win.style.transformOrigin = `${W / 2 - g.winX}px ${H / 2 - g.winY}px`;
     win.style.transform = `scale(${s})`;
+    const grow = expoOut(span(t, PRINT - 0.12, PRINT + 0.3));
+    win.style.height = `${g.winH * lerp(0.66, 1, grow)}px`;
     txt.style.transform = `scale(${s})`;
 
     // The printed line: appears whole, as terminal output does, with the
@@ -146,7 +148,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     const kc = cubicIn(span(t, COLLAPSE, COLLAPSE + 0.16));
     const settle = 1 - expoOut(span(t, PRINT, PRINT + 0.25));
     l1.style.visibility = shown && kc < 1 ? 'visible' : 'hidden';
-    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01((kc - 0.6) / 0.4)));
+    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01(kc / 0.35)));
     l1.style.transformOrigin = `0px ${g.lineH / 2}px`;
     l1.style.transform = `translate(${-6 * u * settle}px, ${g.lineH * kc}px) scale(${1 - kc}, ${1 - 0.75 * kc})`;
 
@@ -158,6 +160,9 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     cap.style.opacity = String(clamp01((t - C0) / 0.14) * (1 - co) * fade);
     const capDrift = lerp(0, -8 * u, span(t, C0 + 0.4, COLLAPSE));
     cap.style.transformOrigin = `50% 50%`;
+    // Sits inside the window's lower edge as the window grows, scaled with it.
+    const capTop = g.winY + g.winH * lerp(0.66, 1, grow) - cap.offsetHeight - 30 * u;
+    cap.style.top = `${H / 2 + (capTop - H / 2) * s}px`;
     cap.style.transform = `translate(-50%, ${22 * u * (1 - ci) + capDrift}px)`;
   });
 

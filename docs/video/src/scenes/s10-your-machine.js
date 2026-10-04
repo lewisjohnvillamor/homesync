@@ -16,6 +16,7 @@
  */
 
 import { span, lerp, clamp01 } from '../shared/beats.js';
+import { handoff } from '../shared/handoff.js';
 
 export const pad = [0, 0.06];
 
@@ -47,7 +48,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // because it has a longer road: along the lower lane, then up.
   const IN = [t0, t0 + 0.38, t0 + 1.25];
   const OUT = [t0 + 0.625, t0 + 1.155, t1 - 0.17];
-  const LEAVE = t1 - 0.17; // 24.205
+  const LEAVE = t1 - 0.25; // 24.125: gone before the terminal frame shows
   const PUSH = [t0, LEAVE];
 
   // Layout (measured once the font is in).
@@ -75,13 +76,13 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     let x = 0;
     let y = 0;
     let o = 1;
-    const kIn = span(t, IN[i], IN[i] + 0.6);
+    const kIn = span(t, IN[i], IN[i] + 0.45);
     if (i === 1) {
       // From the right, below the dot's line; rises only once its last
       // letter has passed left of the dot.
       const kx = span(t, IN[i], IN[i] + 0.5);
       x = travel * (1 - expoOut(kx));
-      y = drop * (1 - cubicOut(span(t, IN[i] + 0.26, IN[i] + 0.52)));
+      y = drop * (1 - cubicOut(span(t, IN[i] + 0.22, IN[i] + 0.44)));
       o = clamp01((t - IN[i]) / 0.14);
     } else {
       x = -travel * (1 - expoOut(kIn));
@@ -103,7 +104,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return { x, y, o };
   };
 
-  const pushAt = (t) => lerp(1, portrait ? 1.05 : 1.08, span(t, ...PUSH));
+  const pushAt = (t) => lerp(1, portrait ? 1.07 : 1.1, span(t, ...PUSH) ** 1.6);
 
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {
@@ -128,6 +129,12 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // Hosts the dot from the start of the composition to just after the words
   // begin to clear. It arrives a little large (it has risen towards the
   // camera) and settles to the size of a full stop as "Your LAN" lands.
+  // Where the dot arrives, a little large, for composition 9 to aim at.
+  handoff.lanDotAt = (t) => {
+    const st = stopAt(t);
+    return { x: st.x, y: st.y, d: st.d * 1.9 };
+  };
+
   hostDot(t0, LEAVE + 0.075, (t) => {
     const st = stopAt(t);
     const k = cubicOut(span(t, t0, t0 + 0.36));

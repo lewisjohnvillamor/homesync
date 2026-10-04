@@ -18,4 +18,10 @@ export const handoff = {
    * @type {((t:number) => {x:number,y:number,d:number}) | null}
    */
   stopAt: null,
+  /**
+   * Composition 10's dot (its arrival size) at time t: set by composition 10,
+   * read by composition 9 so its dot comes forward on to the same pixels.
+   * @type {((t:number) => {x:number,y:number,d:number}) | null}
+   */
+  lanDotAt: null,
 };

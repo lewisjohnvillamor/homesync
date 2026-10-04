@@ -41,7 +41,7 @@ export const pad = [0, 4 * BEAT];
 const VISIBLE_UNTIL = 6 * BEAT + 0.5;
 /** Composition 3 takes the markers from here on; the floor sinks away. */
 const LIFT = 6 * BEAT - 0.35;
-const SUNK = 6 * BEAT - 0.03;
+const SUNK = LIFT + 0.22;
 
 const smooth = (k) => k * k * (3 - 2 * k);
 const easeOut = (k) => 1 - (1 - k) ** 3;
@@ -79,6 +79,15 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
+  // The press ring, behind the player's lines so it never crosses them.
+  if (glyph > 0 && ring > 0 && ring < 1) {
+    const r0 = m * 0.17 * 1.35;
+    ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * (1 - ring) ** 1.5})`;
+    ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.55 * easeOut(ring)), 0, Math.PI * 2);
+    ctx.stroke();
+  }
   // Title line and progress line: the shape of a player, not words.
   ctx.fillStyle = `rgba(148,163,180,${0.55 - 0.25 * lit})`;
   ctx.fillRect(w * 0.12, h * 0.16, w * 0.46, m * 0.035);
@@ -94,13 +103,6 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
     ctx.save();
     ctx.globalAlpha = glyph;
     ctx.translate(w / 2, h / 2);
-    if (ring > 0 && ring < 1) {
-      ctx.strokeStyle = `rgba(90,169,255,${0.9 * (1 - ring) ** 1.5})`;
-      ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
-      ctx.beginPath();
-      ctx.arc(0, sink, r * 1.35 * (1 + 1.1 * easeOut(ring)), 0, Math.PI * 2);
-      ctx.stroke();
-    }
     // The raised edge: a lighter rim under the disc that the press closes.
     ctx.fillStyle = `rgba(148,163,180,${0.32 * (1 - press)})`;
     ctx.beginPath();
@@ -162,7 +164,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     : {
         fov: 30,
         c1: { el: 35, tg: [0.0, 0.27, 0.0], d0: 3.2, d1: 2.75, orb0: 0.66, orb1: 0.42 },
-        c2: { el: 50, tg: [0.2, 0.0, -0.04], d: 4.6, orbDrift: -0.05 },
+        c2: { el: 46, tg: [0.15, 0.0, -0.03], d: 3.4, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -189,7 +191,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
     ? { x0: -0.52, speed: 0.27, gap: 0.06, rows: { laptop: [0, 1.6], phone: [1.0, 2.4], tv: [-1.0, 1.3] }, turn: 0 }
-    : { x0: -0.75, speed: 0.36, gap: 0.06, rows: { laptop: [0, 1.6], phone: [0.74, 2.4], tv: [-0.86, 1.4] }, turn: 0.2 };
+    : { x0: -0.9, speed: 0.72, gap: 0.06, rows: { laptop: [0, 1.6], phone: [0.56, 2.4], tv: [-0.64, 1.4] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -215,20 +217,21 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   // Contact shadows: a soft dark footprint under each device, so nothing
   // seems to float even where the key light's shadow falls behind it.
   const contact = radialTexture([
-    [0, 'rgba(0,0,0,0.85)'],
-    [0.55, 'rgba(0,0,0,0.45)'],
+    [0, 'rgba(0,0,0,1)'],
+    [0.5, 'rgba(0,0,0,0.8)'],
+    [0.8, 'rgba(0,0,0,0.25)'],
     [1, 'rgba(0,0,0,0)'],
   ]);
   contact.colorSpace = THREE.SRGBColorSpace;
   for (const d of devices) {
     const blob = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshBasicMaterial({ map: contact, transparent: true, depthWrite: false, color: '#000000', opacity: 0.9 }),
+      new THREE.MeshBasicMaterial({ map: contact, transparent: true, depthWrite: false, color: '#000000', opacity: 1 }),
     );
     blob.rotation.x = -Math.PI / 2;
     blob.rotation.z = LAYOUT.turn;
     blob.position.set(d.x, 0.0008, d.z);
-    blob.scale.set(HALF[d.kind] * d.s * 2.8, DEPTH[d.kind] * d.s * 2.6 + 0.08, 1);
+    blob.scale.set(HALF[d.kind] * d.s * 2.25, DEPTH[d.kind] * d.s * 2.1 + 0.05, 1);
     blob.renderOrder = 1;
     scene.add(blob);
   }
@@ -252,6 +255,11 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     d.marker.rotation.x = -Math.PI / 2;
     d.marker.renderOrder = 4;
     scene.add(d.marker);
+    // The moment this device's sound starts: a burst at its marker.
+    d.burst = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.06, 64), accent(0));
+    d.burst.rotation.x = -Math.PI / 2;
+    d.burst.renderOrder = 4;
+    scene.add(d.burst);
     d.rings = Array.from({ length: 3 }, () => {
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.11, 96), accent(0));
       ring.rotation.x = -Math.PI / 2;
@@ -271,8 +279,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const headline = el.querySelector('.headline');
   const dim = el.querySelector('.dim');
   // Never still while it is read: the line drifts with the camera's ease-in.
-  tl.fromTo(headline, { x: 0 }, { x: 14 * u, duration: 1.6, ease: 'sine.out' }, 0);
-  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -50 * u, opacity: 0, duration: 0.3, ease: 'power2.in', immediateRender: false }, 1.6);
+  tl.fromTo(headline, { x: 0 }, { x: 14 * u, duration: 1.4, ease: 'sine.out' }, 0);
+  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.24, ease: 'power2.in', immediateRender: false }, 1.38);
 
   /** Where each device's lag marker sits on the floor at time t. */
   const barLength = (d, t) => Math.max(0.0001, clamp01((t - PRESS) / d.late) * d.late * d.perSecond);
@@ -295,10 +303,11 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     // Nothing of this scene is on screen after its layer is gone; skip the
     // texture painting and rendering rather than pay for them every frame.
     if (t >= VISIBLE_UNTIL) return;
-    poseCamera(camera, t);
-
-    // The floor sinks and darkens away as composition 3 lifts the markers off it.
+    // The floor sinks and darkens away as composition 3 lifts the markers off
+    // it; the picture itself holds its last state while it goes.
     const sink = smooth(span(t, LIFT, SUNK));
+    t = Math.min(t, LIFT);
+    poseCamera(camera, t);
     canvasEl.style.transform = sink > 0 ? `translateY(${90 * u * sink}px) scale(${1 - 0.05 * sink})` : '';
     dim.style.opacity = String(sink);
 
@@ -309,7 +318,10 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     const ring = span(t, PRESS, PRESS + 0.45);
     const lit = smooth(span(t, PRESS + 0.08, PRESS + 0.4));
     const glyph = 1 - smooth(span(t, PRESS + 0.3, PRESS + 0.6));
-    pressLine.material.opacity = 0.6 * smooth(span(t, PRESS, PRESS + 0.15));
+    // The shared start line flashes at the press, then stays as the origin of every bar.
+    const flash = t >= PRESS ? Math.exp(-(t - PRESS) * 7) : 0;
+    pressLine.material.opacity = Math.min(1, 0.6 * smooth(span(t, PRESS, PRESS + 0.1)) + 0.4 * flash);
+    pressLine.scale.x = 1 + 2.2 * flash;
 
     for (const d of devices) {
       paintPlayer(d.screen, { lit, press, ring: t >= PRESS ? ring : 0, glyph });
@@ -324,6 +336,10 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       const arrived = t >= PRESS + d.late && t < LIFT;
       d.marker.scale.setScalar(arrived ? 1 + 0.6 * Math.exp(-(t - PRESS - d.late) * 9) : 0.0001);
       d.marker.material.opacity = arrived ? 1 : 0;
+      const b = span(t, PRESS + d.late, PRESS + d.late + 0.4);
+      d.burst.position.copy(markerWorld(d, t));
+      d.burst.scale.setScalar(1 + 3.5 * easeOut(b));
+      d.burst.material.opacity = t >= PRESS + d.late && b < 1 ? 0.9 * (1 - b) ** 1.5 : 0;
 
       // Rings: only from this device's own moment.
       const start = PRESS + d.late;

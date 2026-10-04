@@ -27,7 +27,9 @@ const easeOut = (k) => 1 - (1 - k) ** 3;
 
 /** Times, on beats where an action happens. */
 const REVEAL = 7.98; // composition 4's arcs and wordmark are off screen
-const SCAN = [8.36, 8.75]; // the scan completes on beat 14
+/** The phone comes in once the reveal has opened most of the frame. */
+const ENTER = 8.12;
+const SCAN = [8.4, 8.75]; // the scan completes on beat 14
 const PRESS = 15 * BEAT; // 9.375
 const JOINED = 16 * BEAT; // 10.0
 /** The room is held, then the phone becomes the diagram's icon. */
@@ -41,12 +43,21 @@ export const ICON_LANDS = SHRINK[1];
 export function laneLayout(W, H, u, portrait) {
   const L = diagramLayout(W, H, u, portrait);
   const iconScale = portrait ? 1.2 : 1.5;
-  const iconX = portrait ? 130 * u : L.iconX;
+  // The lanes end just past T, and the whole diagram — icons to T's label —
+  // is centred in the frame, so nothing past T is left empty.
+  const iconX0 = portrait ? 130 * u : L.iconX;
+  const laneEnd0 = L.tX + (portrait ? 110 * u : 150 * u);
+  const left = iconX0 - 90 * u * iconScale;
+  const right = laneEnd0 + 30 * u;
+  const dx = W / 2 - (left + right) / 2;
+  const iconX = iconX0 + dx;
   return {
     ...L,
     iconX,
     iconScale,
-    laneStart: portrait ? 250 * u : 390 * u,
+    tX: L.tX + dx,
+    laneStart: (portrait ? 250 * u : 390 * u) + dx,
+    laneEnd: laneEnd0 + dx,
     phoneIcon: { x: iconX, y: L.lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
   };
 }
@@ -103,7 +114,7 @@ export function joinTrack(W, H, u, portrait) {
   /** The laptop makes room for the phone after the scan. */
   const laptopShift = (t) => {
     const k = easeInOut(span(t, 8.72, 9.25));
-    return portrait ? { x: 0, y: -40 * u * k } : { x: -470 * u * k, y: 0 };
+    return portrait ? { x: 0, y: -40 * u * k } : { x: -60 * u * k, y: 0 };
   };
 
   const rest = portrait ? { x: W / 2 - phoneW / 2, y: H * 0.38 } : { x: 1480 * u - phoneW / 2, y: (H - phoneH) / 2 + 20 * u };
@@ -122,7 +133,7 @@ export function joinTrack(W, H, u, portrait) {
   // --- the phone's path, before the camera ----------------------------------
   const phonePose = (t) => {
     if (t < SCAN[0]) {
-      const k = easeOut(span(t, REVEAL + 0.02, SCAN[0]));
+      const k = easeOut(span(t, ENTER, SCAN[0]));
       return { x: lerp(enter.x, over.x, k), y: lerp(enter.y, over.y, k) };
     }
     // Held over the code, lifting a little in the hand; then to rest.
@@ -209,11 +220,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
           <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
                border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.035}px;
-               display:flex;align-items:center;font:600 ${fs * 0.92}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em">Enable audio &amp; join</div>
-          <div class="socket" style="position:absolute;left:${face.fx * 100}%;top:${face.fy * 100}%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
+               display:flex;align-items:center;font:600 ${fs * 0.92}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
+          <div class="socket" style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
                border-radius:50%;background:var(--accent-ink);opacity:0"></div>
-          <div class="ripple" style="position:absolute;left:${face.fx * 100}%;top:${face.fy * 100}%;width:${60 * u}px;height:${60 * u}px;margin:${-30 * u}px 0 0 ${-30 * u}px;
-               border-radius:50%;border:${4 * u}px solid var(--text);box-sizing:border-box;opacity:0"></div>
+          <div class="ripple" style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${60 * u}px;height:${60 * u}px;margin:${-30 * u}px 0 0 ${-30 * u}px;
+               border-radius:50%;border:${4 * u}px solid var(--text);box-sizing:border-box;opacity:0"></div></div>
         </div>
         ${roomHtml(phoneW)}`,
       )}
@@ -260,7 +271,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   hostDot(HOST[0], HOST[1], dotAt);
   // The laptop's screen opens from where the dot lands, after composition 4 has cleared.
   const irisC = dotAt(HOST[0]);
-  const irisR = Math.hypot(W, H) * 1.1;
+  const irisR = Math.hypot(W, H) * 1.15 + 260 * u;
 
   onFrame((t) => {
     el.style.opacity = t < REVEAL ? '0' : '1';
@@ -274,8 +285,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     world.style.transform =
       `translate(${O.x}px, ${O.y}px) scale(${s}) translate(${-O.x}px, ${-O.y}px) translate(${sh.x - out * out * 300 * u}px, ${sh.y}px)`;
     world.style.opacity = String(1 - out);
-    const ir = easeOut(span(t, REVEAL, 8.4)) * irisR;
-    world.style.clipPath = t < 8.4 ? `circle(${ir}px at ${irisC.x - sh.x}px ${irisC.y - sh.y}px)` : 'none';
+    // A soft-edged reveal over 0.32 s; the phone is inside it, so nothing appears outside the opening.
+    const ik = span(t, REVEAL, 8.3);
+    const ir = easeInOut(ik) * irisR;
+    const soft = 260 * u;
+    const mask = ik < 1 ? `radial-gradient(circle at ${irisC.x}px ${irisC.y}px, #000 ${Math.max(0, ir - soft)}px, transparent ${ir + 1}px)` : 'none';
+    el.style.maskImage = mask;
+    el.style.webkitMaskImage = mask;
 
     // The viewfinder sees the code where it is relative to the phone: it
     // slides into the brackets as the phone arrives over it, and out as the
@@ -303,10 +319,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // Where the dot lands on the button a dark well opens, so the accent dot reads on the accent button.
     const well = span(t, PRESS - 0.16, PRESS - 0.04) * (1 - span(t, PRESS + 0.3, PRESS + 0.45));
     socket.style.opacity = String(well);
-    socket.style.transform = `translateY(${sink * 3 * u}px) scale(${0.6 + 0.4 * easeOut(well)})`;
+    socket.style.transform = `scale(${0.6 + 0.4 * easeOut(well)})`;
     const rip = span(t, PRESS, PRESS + 0.45);
     ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.7 * (1 - rip) : 0);
-    ripple.style.transform = `scale(${0.6 + 2.6 * easeOut(rip)})`;
+    ripple.style.transform = `scale(${0.6 + 3.2 * easeOut(rip)})`;
     // As the phone becomes an icon its words go before they would be too small to read.
     if (meText) meText.style.opacity = String(1 - span(t, 10.66, 10.8));
   });
