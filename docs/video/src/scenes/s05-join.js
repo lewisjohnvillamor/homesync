@@ -84,7 +84,11 @@ export function roomHtml(pw, text = true) {
   </div>`;
 }
 
-export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
+/**
+ * The phone's track on screen, as a pure function of t: shared with composition 6,
+ * which reveals its lanes behind the phone as it shrinks into the lane icon.
+ */
+export function joinTrack(W, H, u, portrait) {
   // --- geometry ------------------------------------------------------------
   const phoneH = portrait ? 1380 * u : 1000 * u;
   const phoneW = phoneH * 0.485;
@@ -109,70 +113,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const enter = portrait ? { x: over.x, y: H + 60 * u } : { x: W + 60 * u, y: rest.y };
 
   // Screen coordinates within the phone (fractions of the glass).
-  const button = { x: 0.05, y: 0.65, w: 0.9, h: 0.11 };
-  const face = { fx: 0.85, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
-  const wait = { fx: 0.85, fy: 0.84 }; // where it rides in, below where the button will be
+  const button = { x: 0.03, y: 0.65, w: 0.94, h: 0.11 };
+  const face = { fx: 0.895, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
+  const wait = { fx: 0.895, fy: 0.84 }; // where it rides in, below where the button will be
   const indicator = { fx: 0.83, fy: 0.585 };
   const fs = phoneW * 0.088;
-
-  // --- the laptop ----------------------------------------------------------
-  const lid = 14 * u;
-  const laptopHtml = `
-    <div class="laptop" style="position:absolute;left:${laptop.x}px;top:${laptop.y}px;width:${laptop.w}px;height:${laptop.h}px">
-      <div style="position:absolute;inset:0;border-radius:${24 * u}px;background:linear-gradient(160deg,var(--line-strong),var(--line) 55%,var(--surface-2));
-           box-shadow:0 ${20 * u}px ${60 * u}px #000a"></div>
-      <div style="position:absolute;inset:${lid}px;border-radius:${14 * u}px;background:radial-gradient(80% 70% at 50% 45%, var(--surface-2), var(--surface));
-           box-shadow:inset 0 0 ${50 * u}px #0008"></div>
-      <div style="position:absolute;left:50%;top:${lid / 2 - 3 * u}px;width:${6 * u}px;height:${6 * u}px;margin-left:${-3 * u}px;border-radius:50%;background:var(--bg-sunken)"></div>
-      <div style="position:absolute;left:${-30 * u}px;right:${-30 * u}px;top:${laptop.h}px;height:${16 * u}px;border-radius:0 0 ${8 * u}px ${8 * u}px;
-           background:linear-gradient(var(--line-strong),var(--line))"></div>
-      <div style="position:absolute;left:${-30 * u}px;right:${-30 * u}px;top:${laptop.h + 16 * u}px;height:${portrait ? 40 * u : 160 * u}px;
-           background:linear-gradient(var(--surface-2),var(--bg));clip-path:polygon(0 0,100% 0,${portrait ? 102 : 106}% 100%,${portrait ? -2 : -6}% 100%)">
-        <div style="position:absolute;left:43%;right:43%;top:0;height:${6 * u}px;border-radius:0 0 ${6 * u}px ${6 * u}px;background:var(--line-strong)"></div>
-      </div>
-    </div>`;
-
-  el.innerHTML = `
-    <div class="world" style="position:absolute;inset:0;transform-origin:0 0">
-      ${laptopHtml}
-      <img class="qr" src="/src/assets/qr-repo.svg" style="position:absolute;left:${qrC0.x - qrSize / 2}px;top:${qrC0.y - qrSize / 2}px;width:${qrSize}px;height:${qrSize}px;
-           border-radius:${14 * u}px;image-rendering:pixelated">
-    </div>
-    <div class="phone-wrap" style="position:absolute;left:0;top:0;transform-origin:0 0">
-      ${phoneHtml(
-        phoneW,
-        phoneH,
-        `
-        <div class="viewfinder" style="position:absolute;inset:0;overflow:hidden;background:var(--bg-sunken)">
-          <div style="position:absolute;inset:0;background:radial-gradient(90% 60% at 50% 45%, var(--surface-2), var(--bg-sunken))"></div>
-          <img class="vf-qr" src="/src/assets/qr-repo.svg" style="position:absolute;left:50%;top:30%;width:${phoneW * 0.58}px;height:${phoneW * 0.58}px;margin:${phoneW * 0.09}px 0 0 ${-phoneW * 0.29}px;image-rendering:pixelated;border-radius:${8 * u}px">
-          <div class="vf-frame" style="position:absolute;left:12%;right:12%;top:30%;height:${phoneW * 0.76}px;border:${5 * u}px solid var(--text);border-radius:${18 * u}px;box-sizing:border-box"></div>
-          <div class="scanline" style="position:absolute;left:10%;right:10%;height:${4 * u}px;background:var(--accent);box-shadow:0 0 ${20 * u}px var(--accent)"></div>
-        </div>
-        <div class="join" style="position:absolute;inset:0;background:var(--bg)">
-          <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
-          <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
-          <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
-               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.045}px;
-               display:flex;align-items:center;font:600 ${fs * 0.8}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.02em">Enable audio &amp; join</div>
-          <div class="ripple" style="position:absolute;left:${face.fx * 100}%;top:${face.fy * 100}%;width:${60 * u}px;height:${60 * u}px;margin:${-30 * u}px 0 0 ${-30 * u}px;
-               border-radius:50%;border:${4 * u}px solid var(--text);box-sizing:border-box;opacity:0"></div>
-        </div>
-        ${roomHtml(phoneW)}`,
-      )}
-    </div>`;
-
-  const world = el.querySelector('.world');
-  const wrap = el.querySelector('.phone-wrap');
-  const viewfinder = el.querySelector('.viewfinder');
-  const vfQr = el.querySelector('.vf-qr');
-  const vfFrame = el.querySelector('.vf-frame');
-  const scanline = el.querySelector('.scanline');
-  const join = el.querySelector('.join');
-  const btn = el.querySelector('.btn');
-  const ripple = el.querySelector('.ripple');
-  const room = el.querySelector('.room');
-  const meText = el.querySelector('.me-text');
 
   // --- the phone's path, before the camera ----------------------------------
   const phonePose = (t) => {
@@ -218,6 +163,74 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const r = phoneRect(t);
     return { x: r.x + (inset + fx * glassW) * r.s, y: r.y + (inset + fy * glassH) * r.s, s: r.s };
   };
+
+  return { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phonePose, phoneRect, onGlass };
+}
+
+export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
+  const { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phoneRect, onGlass } = joinTrack(W, H, u, portrait);
+
+  // --- the laptop ----------------------------------------------------------
+  const lid = 14 * u;
+  const laptopHtml = `
+    <div class="laptop" style="position:absolute;left:${laptop.x}px;top:${laptop.y}px;width:${laptop.w}px;height:${laptop.h}px">
+      <div style="position:absolute;inset:0;border-radius:${24 * u}px;background:linear-gradient(160deg,var(--line-strong),var(--line) 55%,var(--surface-2));
+           box-shadow:0 ${20 * u}px ${60 * u}px #000a"></div>
+      <div style="position:absolute;inset:${lid}px;border-radius:${14 * u}px;background:radial-gradient(80% 70% at 50% 45%, var(--surface-2), var(--surface));
+           box-shadow:inset 0 0 ${50 * u}px #0008"></div>
+      <div style="position:absolute;left:50%;top:${lid / 2 - 3 * u}px;width:${6 * u}px;height:${6 * u}px;margin-left:${-3 * u}px;border-radius:50%;background:var(--bg-sunken)"></div>
+      <div style="position:absolute;left:${-30 * u}px;right:${-30 * u}px;top:${laptop.h}px;height:${16 * u}px;border-radius:0 0 ${8 * u}px ${8 * u}px;
+           background:linear-gradient(var(--line-strong),var(--line))"></div>
+      <div style="position:absolute;left:${-30 * u}px;right:${-30 * u}px;top:${laptop.h + 16 * u}px;height:${portrait ? 40 * u : 160 * u}px;
+           background:linear-gradient(var(--surface-2),var(--bg));clip-path:polygon(0 0,100% 0,${portrait ? 102 : 106}% 100%,${portrait ? -2 : -6}% 100%)">
+        <div style="position:absolute;left:43%;right:43%;top:0;height:${6 * u}px;border-radius:0 0 ${6 * u}px ${6 * u}px;background:var(--line-strong)"></div>
+      </div>
+    </div>`;
+
+  el.innerHTML = `
+    <div class="world" style="position:absolute;inset:0;transform-origin:0 0">
+      ${laptopHtml}
+      <img class="qr" src="/src/assets/qr-repo.svg" style="position:absolute;left:${qrC0.x - qrSize / 2}px;top:${qrC0.y - qrSize / 2}px;width:${qrSize}px;height:${qrSize}px;
+           border-radius:${14 * u}px;image-rendering:pixelated">
+    </div>
+    <div class="phone-wrap" style="position:absolute;left:0;top:0;transform-origin:0 0">
+      ${phoneHtml(
+        phoneW,
+        phoneH,
+        `
+        <div class="viewfinder" style="position:absolute;inset:0;overflow:hidden;background:var(--bg-sunken)">
+          <div style="position:absolute;inset:0;background:radial-gradient(90% 60% at 50% 45%, var(--surface-2), var(--bg-sunken))"></div>
+          <img class="vf-qr" src="/src/assets/qr-repo.svg" style="position:absolute;left:50%;top:30%;width:${phoneW * 0.58}px;height:${phoneW * 0.58}px;margin:${phoneW * 0.09}px 0 0 ${-phoneW * 0.29}px;image-rendering:pixelated;border-radius:${8 * u}px">
+          <div class="vf-frame" style="position:absolute;left:12%;right:12%;top:30%;height:${phoneW * 0.76}px;border:${5 * u}px solid var(--text);border-radius:${18 * u}px;box-sizing:border-box"></div>
+          <div class="scanline" style="position:absolute;left:10%;right:10%;height:${4 * u}px;background:var(--accent);box-shadow:0 0 ${20 * u}px var(--accent)"></div>
+        </div>
+        <div class="join" style="position:absolute;inset:0;background:var(--bg)">
+          <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
+          <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
+          <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
+               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.035}px;
+               display:flex;align-items:center;font:600 ${fs * 0.92}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em">Enable audio &amp; join</div>
+          <div class="socket" style="position:absolute;left:${face.fx * 100}%;top:${face.fy * 100}%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
+               border-radius:50%;background:var(--accent-ink);opacity:0"></div>
+          <div class="ripple" style="position:absolute;left:${face.fx * 100}%;top:${face.fy * 100}%;width:${60 * u}px;height:${60 * u}px;margin:${-30 * u}px 0 0 ${-30 * u}px;
+               border-radius:50%;border:${4 * u}px solid var(--text);box-sizing:border-box;opacity:0"></div>
+        </div>
+        ${roomHtml(phoneW)}`,
+      )}
+    </div>`;
+
+  const world = el.querySelector('.world');
+  const wrap = el.querySelector('.phone-wrap');
+  const viewfinder = el.querySelector('.viewfinder');
+  const vfQr = el.querySelector('.vf-qr');
+  const vfFrame = el.querySelector('.vf-frame');
+  const scanline = el.querySelector('.scanline');
+  const join = el.querySelector('.join');
+  const btn = el.querySelector('.btn');
+  const ripple = el.querySelector('.ripple');
+  const socket = el.querySelector('.socket');
+  const room = el.querySelector('.room');
+  const meText = el.querySelector('.me-text');
 
   // --- the dot ----------------------------------------------------------------
   // It falls out of the mark to just below the code, is caught by the phone as
@@ -287,6 +300,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // The press: the button sinks 3 px and a ripple spreads from the dot.
     const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
     btn.style.transform = `translateY(${sink * 3 * u}px) scale(${1 - 0.012 * sink})`;
+    // Where the dot lands on the button a dark well opens, so the accent dot reads on the accent button.
+    const well = span(t, PRESS - 0.16, PRESS - 0.04) * (1 - span(t, PRESS + 0.3, PRESS + 0.45));
+    socket.style.opacity = String(well);
+    socket.style.transform = `translateY(${sink * 3 * u}px) scale(${0.6 + 0.4 * easeOut(well)})`;
     const rip = span(t, PRESS, PRESS + 0.45);
     ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.7 * (1 - rip) : 0);
     ripple.style.transform = `scale(${0.6 + 2.6 * easeOut(rip)})`;

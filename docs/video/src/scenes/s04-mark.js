@@ -7,8 +7,8 @@
  * so the two cannot come apart. Only once the dot is home and the mark at full
  * size does "HomeSync" slide in to its right, so the dot never passes over the
  * word and the arcs never cross it. While it holds, the arcs breathe and the
- * dot pulses softly under a slow push. In 9:16 the mark is larger than the
- * frame and cropped by its edges, so this is never the end card's layout.
+ * dot pulses softly under a slow push. In 9:16 the mark fills the
+ * width of the upper half, the word under it (storyboard).
  *
  * Then the arcs and wordmark lift up and out fast (ease-in, ~7 frames from
  * 7.85 s, gone by 7.97 s) and the dot is let go — into the next composition.
@@ -30,10 +30,10 @@ const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor }) {
   // The outer arcs reach 0.51 S either side of the centre and ±0.34 S above
   // and below it (radius 11 over a chord of 15, plus the stroke).
-  const S = portrait ? 1500 * u : 940 * u;
-  const wordSize = portrait ? 200 * u : 150 * u;
+  const S = portrait ? 980 * u : 900 * u;
+  const wordSize = portrait ? 200 * u : 140 * u;
   /** Clear space between the outer arc (at its largest, with the push) and the word. */
-  const GAP = portrait ? 0 : 0.12 * S;
+  const GAP = portrait ? 0 : 0.11 * S;
   const PUSH = 1.03;
 
   el.innerHTML = `
@@ -123,7 +123,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       a.style.strokeDashoffset = `${lens[i] * (1 - k)}`;
       const phase = (t - HOME) * ((2 * Math.PI) / 1.25) - (outer ? 0.9 : 0);
       a.style.transform = `scale(${1 + b * (outer ? 0.03 : 0.022) * Math.sin(phase)})`;
-      a.style.opacity = String(lerp(1, outer ? 0.82 : 0.92, b * (0.5 + 0.5 * Math.sin(phase))));
+      a.style.opacity = String(lerp(1, 0.93, b * (0.5 + 0.5 * Math.sin(phase))));
     });
 
     // The word: slides in from beyond the mark (from the right in 16:9, from

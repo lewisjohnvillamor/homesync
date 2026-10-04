@@ -1,20 +1,19 @@
 /**
- * Composition 8's line, on a band: the diagram is tilting beneath it.
+ * Composition 8's line. The diagram is tilted to the house camera's angle,
+ * its lanes rising to the right, which leaves the lower right of the frame
+ * open: the line is set there, right-aligned on plain ground, and only after
+ * the tilt has settled, so no line of the diagram ever passes through it.
  */
 
-export function build({ el, tl, u, portrait, t0, t1 }) {
+export function build({ el, tl, u, W, portrait, t0 }) {
+  const right = portrait ? 70 * u : 110 * u;
   el.innerHTML = `
-    <div class="band" style="left:${portrait ? 60 * u : 104 * u}px;top:${portrait ? 130 * u : 72 * u}px;padding:${20 * u}px ${30 * u}px;
-         background:rgba(11,14,19,0.9)">
-      <div class="line" style="font:700 ${portrait ? 72 * u : 72 * u}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);
-           ${portrait ? `width:${900 * u}px` : 'white-space:nowrap'}">Scheduled to be heard at one agreed instant.</div>
-    </div>`;
-  const band = el.querySelector('.band');
+    <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1500 * u : 800 * u}px;text-align:right;
+         font:700 ${portrait ? 86 * u : 80 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);white-space:nowrap">Scheduled to be heard<br>at one agreed instant.</div>`;
   const line = el.querySelector('.line');
-  // Set by 16.00 s; held while the plane drifts; leaves as the plane lifts.
-  tl.fromTo(band, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: 'power2.out' }, t0 + 0.05);
-  tl.fromTo(line, { x: -60 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.45, ease: 'expo.out' }, t0 + 0.05);
-  tl.to(line, { x: 16 * u, duration: 17.75 - (t0 + 0.5), ease: 'none' }, t0 + 0.5);
-  tl.to([band, line], { y: -40 * u, opacity: 0, duration: 0.22, ease: 'power2.in' }, 17.78);
-  void t1;
+  // In from the right as the tilt settles, set by ~16.4 s; drifts; leaves before the plane lifts.
+  tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0 + 0.45);
+  tl.to(line, { x: -30 * u, duration: 17.55 - (t0 + 0.95), ease: 'sine.inOut' }, t0 + 0.95);
+  tl.to(line, { y: 40 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 17.55);
+  void W;
 }

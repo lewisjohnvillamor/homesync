@@ -1,17 +1,18 @@
 /**
- * Composition 7's line. The picture is s06's camera, in close on the phone.
+ * Composition 7's line. The picture is s06's camera, in close on the phone's
+ * lane: the bar fills the width and the T line runs the full height at the
+ * right, so the line is set low on plain ground, left of T and below the
+ * lane, where nothing of the diagram passes. Different framing from 6 and 8.
  */
 
 export function build({ el, tl, u, portrait, t0, t1 }) {
-  // On a band: in the close-up the T line runs to the top of the frame, and
-  // the line of type must sit in front of it, not be crossed by it.
   el.innerHTML = `
-    <div class="band" style="left:${portrait ? 54 * u : 104 * u}px;top:${portrait ? 130 * u : 76 * u}px;padding:${18 * u}px ${28 * u}px;background:rgba(11,14,19,0.94)">
-      <div class="line" style="font:700 ${portrait ? 80 * u : 76 * u}px/1.08 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">…and works out how early to start.</div>
-    </div>`;
-  const line = el.querySelector('.band');
-  // Set by 13.80 s; leaves fast before the camera pulls back.
-  tl.fromTo(line, { x: -60 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0 + 0.2);
-  tl.to(line, { x: 20 * u, duration: t1 - 0.25 - (t0 + 0.7), ease: 'none' }, t0 + 0.7);
-  tl.to(line, { y: -40 * u, opacity: 0, duration: 0.22, ease: 'power2.in' }, t1 - 0.25);
+    <div class="line" style="position:absolute;left:${portrait ? 70 * u : 104 * u}px;top:${portrait ? 1060 * u : 846 * u}px;
+         font:700 ${portrait ? 88 * u : 84 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);
+         ${portrait ? `width:${800 * u}px` : 'white-space:nowrap'}">…and works out how early to start.</div>`;
+  const line = el.querySelector('.line');
+  // Set by 13.80 s, rising in from below; drifts; leaves fast before the camera pulls back.
+  tl.fromTo(line, { y: 70 * u, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0 + 0.2);
+  tl.to(line, { x: 36 * u, duration: t1 - 0.25 - (t0 + 0.7), ease: 'sine.inOut' }, t0 + 0.7);
+  tl.to(line, { y: 50 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, t1 - 0.25);
 }

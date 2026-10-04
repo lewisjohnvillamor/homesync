@@ -24,7 +24,7 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
-  const size = portrait ? 124 * u : 184 * u;
+  const size = portrait ? 112 * u : 184 * u;
   el.innerHTML = `
     <div class="ground" style="position:absolute;inset:0;background:var(--bg)"></div>
     <div class="words" style="position:absolute;inset:0">
@@ -75,7 +75,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: 'power1.inOut' }, LIFT + 0.08);
   // The lines from opposite sides, slowing as they land; set by 4.40 s.
   const enter = portrait ? { y: -260 * u } : { x: -520 * u };
-  const enter2 = portrait ? { y: 300 * u } : { x: 520 * u };
+  const enter2 = portrait ? { y: 230 * u } : { x: 520 * u };
   tl.fromTo(l1, { ...enter, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: 'expo.out' }, t0 - 0.07);
   tl.fromTo(l2, { ...enter2, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: 'expo.out' }, t0 + 0.03);
   // Then the words rush past the camera; the full stop stays.
@@ -106,15 +106,20 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   const markers = () => (handoff.markersAt ? handoff.markersAt(LIFT) : []);
 
   /** The row below the sentence the markers lift into. */
-  const rowY = () => geo.bottom + (portrait ? 240 : 120) * u;
+  const rowY = () => geo.bottom + (portrait ? 400 : 120) * u;
   const margin = 110 * u;
 
   /** A marker's path at t: lift towards the camera, sweep, merge. */
   const markerAt = (m, i, t) => {
     const lift = easeOut(span(t, LIFT, SWEEP));
     // Lifted: larger, lower, a little closer together, inside the margins.
+    // Spread evenly about where they were, laptop to the left, TV to the
+    // right, so no two ever overlap.
+    const ms = markers();
+    const mean = ms.reduce((acc, q) => acc + q.x, 0) / Math.max(1, ms.length);
+    const spacing = (portrait ? 150 : 190) * u;
     const lifted = {
-      x: Math.min(W - margin, Math.max(margin, lerp(m.x, W / 2, 0.15))),
+      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (i - 1) * spacing)),
       y: rowY() + (i - 1) * 14 * u,
       d: m.d * 1.7,
     };

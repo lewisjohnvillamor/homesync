@@ -2,16 +2,23 @@
  * Compositions 1 and 2: three devices on one floor, pressed together, each
  * still starting at its own moment.
  *
- * One continuous camera: at ~35° and easing in through composition 1, rising
- * across the cut to ~52° over the same floor for composition 2, so the
- * devices themselves carry the shot.
+ * The devices stand one behind another on a lit studio floor — TV at the
+ * back, laptop in the middle, phone in front — so that their lag bars can
+ * all run the same way, across the picture, from one shared press line. One
+ * continuous camera: ~35° and easing in through composition 1, seen a little
+ * from the side; rising across the cut to ~50° and swinging square to the
+ * floor for composition 2, so the devices themselves carry the shot.
  *
- * At the shared press, an accent bar grows on the floor in front of each
- * device until that device's sound actually starts — laptop short, phone
- * longer, TV longest, in the ratio 40 : 90 : 210, slowed eight times so it can
- * be read while the camera rises. Each bar ends in a marker: that device's own "now". Rings spread
- * from a device only from its marker's moment. The markers are published to
- * `handoff` so composition 3 can fly them into its full stop.
+ * At the shared press every play button sinks (with a small ring), and an
+ * accent bar grows from the press line towards each device until that
+ * device's sound actually starts — laptop short, phone longer, TV longest, in
+ * the ratio 40 : 90 : 210, slowed eight times so it can be read while the
+ * camera rises. Each bar's world length is corrected for its distance from the
+ * camera, so on screen the three lengths keep that ratio. Each bar ends in a
+ * marker at its device: that device's own "now". Rings spread from a device
+ * only from its marker's moment. The markers are published to `handoff` so
+ * composition 3 can lift them off the floor and fly them into its full stop;
+ * as it does, the floor sinks and darkens away underneath.
  *
  * s02-echo.js adds only composition 2's line.
  */
@@ -26,20 +33,39 @@ export const PRESS = 1 * BEAT;
 export const LATE = { laptop: 0.32, phone: 0.72, tv: 1.68 };
 /** Floor albedo, tuned by measuring the rendered frame against #0b0e13. */
 export const GROUND = '#1d1d1f';
-/** Metres of bar per second of lateness. */
-const BAR_SPEED = 0.3;
 /** The song's pulse — deliberately not the film's beat. */
 const PULSE = 0.56;
 const RING_LIFE = 1.5;
 /** Visible until composition 3's ground has covered it. */
 export const pad = [0, 4 * BEAT];
 const VISIBLE_UNTIL = 6 * BEAT + 0.5;
+/** Composition 3 takes the markers from here on; the floor sinks away. */
+const LIFT = 6 * BEAT - 0.35;
+const SUNK = 6 * BEAT - 0.03;
 
 const smooth = (k) => k * k * (3 - 2 * k);
 const easeOut = (k) => 1 - (1 - k) ** 3;
 
+/** Half-widths and footprint depths of the models at scale 1 (three-kit.js). */
+const HALF = { laptop: 0.17, phone: 0.045, tv: 0.31 };
+const DEPTH = { laptop: 0.24, phone: 0.06, tv: 0.11 };
+
+/** A radial gradient on a canvas, for the floor's light pool and the contact shadows. */
+function radialTexture(stops) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  for (const [at, colour] of stops) grad.addColorStop(at, colour);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
+}
+
 /** A dim paused player: what a screen shows before anybody presses play. */
-function paintPlayer(screen, { lit = 0, press = 0, glyph = 1 }) {
+function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
   const { ctx, canvas, texture } = screen;
   const w = canvas.width;
   const h = canvas.height;
@@ -60,21 +86,35 @@ function paintPlayer(screen, { lit = 0, press = 0, glyph = 1 }) {
   ctx.fillRect(w * 0.12, h * 0.84, w * 0.76, m * 0.018);
   ctx.fillStyle = '#5aa9ff';
   ctx.fillRect(w * 0.12, h * 0.84, w * 0.76 * lerp(0.0, 0.18, lit), m * 0.018);
-  // The play button: a disc that visibly sinks when pressed.
+  // The play button: a raised disc that visibly sinks when pressed — it
+  // drops, loses its raised edge and darkens — and sends out one ring.
   if (glyph > 0) {
-    const r = m * 0.17 * (1 - 0.22 * press);
+    const r = m * 0.17;
+    const sink = m * 0.045 * press;
     ctx.save();
     ctx.globalAlpha = glyph;
     ctx.translate(w / 2, h / 2);
-    ctx.fillStyle = `rgba(90,169,255,${0.16 + 0.3 * press})`;
+    if (ring > 0 && ring < 1) {
+      ctx.strokeStyle = `rgba(90,169,255,${0.9 * (1 - ring) ** 1.5})`;
+      ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
+      ctx.beginPath();
+      ctx.arc(0, sink, r * 1.35 * (1 + 1.1 * easeOut(ring)), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // The raised edge: a lighter rim under the disc that the press closes.
+    ctx.fillStyle = `rgba(148,163,180,${0.32 * (1 - press)})`;
     ctx.beginPath();
-    ctx.arc(0, 0, r * 1.35, 0, Math.PI * 2);
+    ctx.arc(0, m * 0.045, r * 1.35, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#5aa9ff';
+    ctx.fillStyle = `rgb(${Math.round(lerp(24, 16, press))}, ${Math.round(lerp(46, 34, press))}, ${Math.round(lerp(76, 60, press))})`;
     ctx.beginPath();
-    ctx.moveTo(-r * 0.36, -r * 0.5);
-    ctx.lineTo(r * 0.52, 0);
-    ctx.lineTo(-r * 0.36, r * 0.5);
+    ctx.arc(0, sink, r * 1.35 * (1 - 0.06 * press), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = press > 0 ? `rgb(${Math.round(lerp(90, 160, press))}, ${Math.round(lerp(169, 205, press))}, 255)` : '#5aa9ff';
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.36, sink - r * 0.5);
+    ctx.lineTo(r * 0.52, sink);
+    ctx.lineTo(-r * 0.36, sink + r * 0.5);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
@@ -85,32 +125,122 @@ function paintPlayer(screen, { lit = 0, press = 0, glyph = 1 }) {
 export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const renderer = makeRenderer(W, H);
   el.appendChild(renderer.domElement);
-  const { scene } = makeStage(renderer, { groundTint: GROUND, fogNear: 3.4, fogFar: 9 });
+  const canvasEl = renderer.domElement;
+  const { scene, rim, ground } = makeStage(renderer, { groundTint: GROUND, fogNear: 3.6, fogFar: 8.5 });
+  // A stronger rim, behind and to the right, so every silhouette is drawn off the floor.
+  rim.intensity = 6.5;
+  rim.position.set(4, 4.5, -7);
 
-  // A model's proportions, not a spec sheet's: at true scale the phone would
-  // be a speck beside the TV.
-  const placement = portrait
-    ? { tv: [0.05, -1.3, 1.35], laptop: [-0.05, -0.45, 1.5], phone: [0.0, 0.32, 2.4] }
-    : { laptop: [-0.85, 0.0, 1.6], phone: [0.0, 0.1, 2.5], tv: [0.88, -0.06, 1.3] };
-  // The shared press line the bars grow from: z in landscape, x in portrait.
-  const barStart = portrait ? -0.75 : 0.36;
-  const devices = Object.entries(placement).map(([kind, [x, z, s]]) => {
+  // A studio floor: a soft pool of light under the devices that falls off to
+  // exactly the measured ground colour, so the edge of frame is still the
+  // brand background. The map multiplies a brighter albedo; its rim is the
+  // tuned ground.
+  const POOL = 2.4;
+  /** The pool's rim, darker than 1 to take back what the stronger rim light adds to the floor. */
+  const EDGE = 170;
+  const albedo = new THREE.Color(GROUND);
+  ground.material.color = albedo.clone().multiplyScalar(POOL);
+  const pool = radialTexture([
+    [0, `rgb(255,255,255)`],
+    [0.45, `rgb(${Math.round(255 * 0.62)},${Math.round(255 * 0.62)},${Math.round(255 * 0.62)})`],
+    [1, `rgb(${Math.round(EDGE / POOL)},${Math.round(EDGE / POOL)},${Math.round(EDGE / POOL)})`],
+  ]);
+  // The pool covers ~5 m of the 80 m ground, centred under the devices.
+  const poolSize = portrait ? 4.2 : 4.4;
+  pool.repeat.set(80 / poolSize, 80 / poolSize);
+  pool.offset.set(0.5 - (0.5 * 80) / poolSize, 0.5 - (0.5 * 80) / poolSize);
+  ground.material.map = pool;
+  ground.material.needsUpdate = true;
+
+  // --- the camera: a pure function of t ------------------------------------
+  const CAM = portrait
+    ? {
+        fov: 40,
+        c1: { el: 36, tg: [0.1, 0.2, 0.05], d0: 4.15, d1: 3.8, orb0: 0.08, orb1: 0.0 },
+        c2: { el: 52, tg: [0.04, 0.0, 0.12], d: 4.45, orbDrift: 0.035 },
+      }
+    : {
+        fov: 30,
+        c1: { el: 35, tg: [0.0, 0.27, 0.0], d0: 3.1, d1: 2.8, orb0: 0.52, orb1: 0.42 },
+        c2: { el: 50, tg: [0.2, 0.0, -0.04], d: 4.6, orbDrift: -0.05 },
+      };
+  const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
+
+  /** The camera's pose at time t — a pure function of t. */
+  function poseCamera(cam, t) {
+    const { c1, c2 } = CAM;
+    const intro = easeOut(span(t, 0, 1.9));
+    // The rise starts early, while the bars grow, so they are read from above.
+    const rise = smooth(span(t, 1.05, 2.3));
+    const after = span(t, 2.3, 3.75);
+    const elevation = lerp(c1.el, c2.el, rise) * (Math.PI / 180);
+    const distance = lerp(lerp(c1.d0, c1.d1, intro), c2.d * lerp(1, 0.965, after), rise);
+    const orbit = lerp(lerp(c1.orb0, c1.orb1, intro), c2.orbDrift * after, rise);
+    const target = new THREE.Vector3(lerp(c1.tg[0], c2.tg[0], rise), lerp(c1.tg[1], c2.tg[1], rise), lerp(c1.tg[2], c2.tg[2], rise));
+    cam.position.set(
+      target.x + Math.sin(orbit) * distance * Math.cos(elevation),
+      target.y + distance * Math.sin(elevation),
+      target.z + Math.cos(orbit) * distance * Math.cos(elevation),
+    );
+    cam.lookAt(target);
+    cam.updateMatrixWorld();
+  }
+
+  // --- the devices, one behind another ----------------------------------------
+  const LAYOUT = portrait
+    ? { x0: -0.52, speed: 0.27, gap: 0.06, rows: { laptop: [0, 1.6], phone: [1.0, 2.4], tv: [-1.0, 1.3] }, turn: 0 }
+    : { x0: -0.75, speed: 0.36, gap: 0.06, rows: { laptop: [0, 1.6], phone: [0.74, 2.4], tv: [-0.86, 1.4] }, turn: 0.2 };
+  // Distance from composition 2's camera to each row decides how long a bar
+  // must be in metres to look its true length on screen.
+  const probe = camera.clone();
+  poseCamera(probe, 3.0);
+  const depthOf = (z) => -new THREE.Vector3(LAYOUT.x0, 0, z).applyMatrix4(probe.matrixWorldInverse).z;
+  const refDepth = depthOf(LAYOUT.rows.laptop[0]);
+
+  const devices = Object.entries(LAYOUT.rows).map(([kind, [z, s]]) => {
     const d = MAKE[kind]();
+    const perSecond = LAYOUT.speed * (depthOf(z) / refDepth);
+    const full = LATE[kind] * perSecond;
+    const x = LAYOUT.x0 + full + LAYOUT.gap + HALF[kind] * s;
     d.group.position.set(x, 0, z);
     d.group.scale.setScalar(s);
-    d.group.rotation.y = portrait ? 0 : -x * 0.16;
+    d.group.rotation.y = LAYOUT.turn;
     scene.add(d.group);
-    return { ...d, late: LATE[kind], x, z };
+    return { ...d, kind, late: LATE[kind], perSecond, x, z, s };
   });
 
   const accent = (opacity = 1) =>
     new THREE.MeshBasicMaterial({ color: BRAND.accent, transparent: true, opacity, depthWrite: false, toneMapped: false, fog: false });
 
+  // Contact shadows: a soft dark footprint under each device, so nothing
+  // seems to float even where the key light's shadow falls behind it.
+  const contact = radialTexture([
+    [0, 'rgba(0,0,0,0.85)'],
+    [0.55, 'rgba(0,0,0,0.45)'],
+    [1, 'rgba(0,0,0,0)'],
+  ]);
+  contact.colorSpace = THREE.SRGBColorSpace;
+  for (const d of devices) {
+    const blob = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: contact, transparent: true, depthWrite: false, color: '#000000', opacity: 0.9 }),
+    );
+    blob.rotation.x = -Math.PI / 2;
+    blob.rotation.z = LAYOUT.turn;
+    blob.position.set(d.x, 0.0008, d.z);
+    blob.scale.set(HALF[d.kind] * d.s * 2.8, DEPTH[d.kind] * d.s * 2.6 + 0.08, 1);
+    blob.renderOrder = 1;
+    scene.add(blob);
+  }
+
   // The press line: one line across the floor, the moment all three were pressed.
-  const lineGeo = portrait ? new THREE.PlaneGeometry(0.012, 2.6) : new THREE.PlaneGeometry(2.6, 0.012);
-  const pressLine = new THREE.Mesh(lineGeo, accent(0));
+  const zs = devices.map((d) => d.z);
+  const zMin = Math.min(...zs) - 0.22;
+  const zMax = Math.max(...zs) + 0.22;
+  const pressLine = new THREE.Mesh(new THREE.PlaneGeometry(0.014, zMax - zMin), accent(0));
   pressLine.rotation.x = -Math.PI / 2;
-  pressLine.position.set(portrait ? barStart : 0, 0.002, portrait ? -0.45 : barStart);
+  pressLine.position.set(LAYOUT.x0, 0.002, (zMin + zMax) / 2);
+  pressLine.renderOrder = 3;
   scene.add(pressLine);
 
   for (const d of devices) {
@@ -132,49 +262,31 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     });
   }
 
-  const camera = new THREE.PerspectiveCamera(portrait ? 40 : 27, W / H, 0.05, 50);
-
   el.insertAdjacentHTML(
     'beforeend',
-    `<div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;top:${portrait ? 150 * u : 104 * u}px;
+    `<div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
+     <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;top:${portrait ? 150 * u : 104 * u}px;
        font:700 ${portrait ? 88 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text)">Press play on all three.</div>`,
   );
   const headline = el.querySelector('.headline');
-  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -50 * u, opacity: 0, duration: 0.3, ease: 'power2.in' }, 1.6);
-
-  /** The camera's pose at time t — a pure function of t. */
-  function poseCamera(cam, t) {
-    const target = new THREE.Vector3();
-    const rise = smooth(span(t, 1.45, 2.3));
-    const elevation = lerp(35, 52, rise) * (Math.PI / 180);
-    const ease = easeOut(span(t, 0, 1.9));
-    const distance = lerp(lerp(portrait ? 4.4 : 3.0, portrait ? 4.1 : 2.8, ease), portrait ? 4.3 : 3.35, rise);
-    const orbit = lerp(0, portrait ? 0.03 : -0.08, span(t, 0, 3.75));
-    target.set(0, lerp(0.2, 0.0, rise), portrait ? -0.35 : lerp(-0.12, 0.2, rise));
-    cam.position.set(
-      target.x + Math.sin(orbit) * distance * Math.cos(elevation),
-      target.y + distance * Math.sin(elevation),
-      target.z + Math.cos(orbit) * distance * Math.cos(elevation),
-    );
-    cam.lookAt(target);
-    cam.updateMatrixWorld();
-  }
+  const dim = el.querySelector('.dim');
+  // Never still while it is read: the line drifts with the camera's ease-in.
+  tl.fromTo(headline, { x: 0 }, { x: 14 * u, duration: 1.6, ease: 'sine.out' }, 0);
+  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -50 * u, opacity: 0, duration: 0.3, ease: 'power2.in', immediateRender: false }, 1.6);
 
   /** Where each device's lag marker sits on the floor at time t. */
-  function markerWorld(d, t) {
-    const length = Math.max(0.0001, clamp01((t - PRESS) / d.late) * d.late * BAR_SPEED);
-    return portrait ? new THREE.Vector3(barStart + length, 0.004, d.z + 0.32) : new THREE.Vector3(d.x, 0.004, barStart + length);
-  }
+  const barLength = (d, t) => Math.max(0.0001, clamp01((t - PRESS) / d.late) * d.late * d.perSecond);
+  const markerWorld = (d, t) => new THREE.Vector3(LAYOUT.x0 + barLength(d, t), 0.004, d.z);
 
   // Composition 3 asks where the markers are in the frame at a given time.
   // Computed with a camera of its own, so asking never disturbs this one.
-  const probe = camera.clone();
+  const ask = camera.clone();
   handoff.markersAt = (t) => {
-    poseCamera(probe, t);
+    poseCamera(ask, t);
     return devices.map((d) => {
       const world = markerWorld(d, t);
-      const p = toScreen(world, probe, W, H);
-      const pxPerMetre = H / (2 * Math.tan((probe.fov * Math.PI) / 360) * probe.position.distanceTo(world));
+      const p = toScreen(world, ask, W, H);
+      const pxPerMetre = H / (2 * Math.tan((ask.fov * Math.PI) / 360) * ask.position.distanceTo(world));
       return { x: p.x, y: p.y, d: 0.09 * pxPerMetre };
     });
   };
@@ -185,49 +297,49 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     if (t >= VISIBLE_UNTIL) return;
     poseCamera(camera, t);
 
-    const pressK = clamp01((t - PRESS) / 0.22);
-    const press = t >= PRESS ? Math.sin(Math.PI * pressK) : 0;
+    // The floor sinks and darkens away as composition 3 lifts the markers off it.
+    const sink = smooth(span(t, LIFT, SUNK));
+    canvasEl.style.transform = sink > 0 ? `translateY(${90 * u * sink}px) scale(${1 - 0.05 * sink})` : '';
+    dim.style.opacity = String(sink);
+
+    // The press: down fast, held a moment, up again as the screens come up.
+    const down = easeOut(span(t, PRESS, PRESS + 0.06));
+    const up = smooth(span(t, PRESS + 0.16, PRESS + 0.36));
+    const press = down * (1 - up);
+    const ring = span(t, PRESS, PRESS + 0.45);
     const lit = smooth(span(t, PRESS + 0.08, PRESS + 0.4));
-    const glyph = t < PRESS + 0.1 ? 1 : 1 - smooth(span(t, PRESS + 0.1, PRESS + 0.45));
-    pressLine.material.opacity = 0.55 * smooth(span(t, PRESS, PRESS + 0.15));
+    const glyph = 1 - smooth(span(t, PRESS + 0.3, PRESS + 0.6));
+    pressLine.material.opacity = 0.6 * smooth(span(t, PRESS, PRESS + 0.15));
 
     for (const d of devices) {
-      paintPlayer(d.screen, { lit, press, glyph });
+      paintPlayer(d.screen, { lit, press, ring: t >= PRESS ? ring : 0, glyph });
 
-      // The lag bar: grows from the press until this device's sound starts.
-      const grown = clamp01((t - PRESS) / d.late) * d.late;
-      const length = Math.max(0.0001, grown * BAR_SPEED);
+      // The lag bar: grows from the press line until this device's sound starts.
+      const length = barLength(d, t);
       const width = 0.05;
-      if (portrait) {
-        d.bar.scale.set(length, width, 1);
-        d.bar.position.set(barStart + length / 2, 0.003, d.z + 0.32);
-        d.marker.position.set(barStart + length, 0.004, d.z + 0.32);
-      } else {
-        d.bar.scale.set(width, length, 1);
-        d.bar.position.set(d.x, 0.003, barStart + length / 2);
-        d.marker.position.set(d.x, 0.004, barStart + length);
-      }
+      d.bar.scale.set(length, width, 1);
+      d.bar.position.set(LAYOUT.x0 + length / 2, 0.003, d.z);
+      d.marker.position.copy(markerWorld(d, t));
       d.bar.material.opacity = t >= PRESS ? 0.9 : 0;
-      const arrived = t >= PRESS + d.late;
+      const arrived = t >= PRESS + d.late && t < LIFT;
       d.marker.scale.setScalar(arrived ? 1 + 0.6 * Math.exp(-(t - PRESS - d.late) * 9) : 0.0001);
       d.marker.material.opacity = arrived ? 1 : 0;
 
       // Rings: only from this device's own moment.
       const start = PRESS + d.late;
-      d.rings.forEach((ring, n) => {
+      d.rings.forEach((r, n) => {
         const index = Math.floor((t - start) / PULSE) - n;
         const age = t - (start + index * PULSE);
         if (t < start || index < 0 || age > RING_LIFE) {
-          ring.material.opacity = 0;
+          r.material.opacity = 0;
           return;
         }
         const k = age / RING_LIFE;
-        const r = 0.2 + easeOut(k) * 0.8;
-        ring.geometry.dispose();
-        ring.geometry = new THREE.RingGeometry(r, r + lerp(0.022, 0.006, k), 128);
-        ring.material.opacity = 0.5 * (1 - k) ** 1.6;
+        const radius = 0.16 + easeOut(k) * 0.62 * Math.sqrt(d.s / 1.6);
+        r.geometry.dispose();
+        r.geometry = new THREE.RingGeometry(radius, radius + lerp(0.02, 0.006, k), 128);
+        r.material.opacity = 0.45 * (1 - k) ** 1.6;
       });
-
     }
     renderer.render(scene, camera);
   });
