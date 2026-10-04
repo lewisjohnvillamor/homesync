@@ -40,17 +40,19 @@ const cubicIn = (k) => k * k * k;
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
   const winW = portrait ? 1000 * u : 1680 * u;
-  const winH = portrait ? 520 * u : 560 * u;
+  const winH = portrait ? 640 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
-  const f = portrait ? 32 * u : 48 * u;
-  const padX = portrait ? 40 * u : 72 * u;
+  // In 9:16 the address wraps on to its own line, as it would in a narrow
+  // terminal, so the type can be large enough to fill the frame.
+  const f = portrait ? 50 * u : 48 * u;
+  const padX = portrait ? 48 * u : 72 * u;
   const lineH = f * 1.7;
   const textX = winX + padX;
   const textY = winY + bar + (portrait ? 44 * u : 64 * u);
   // The cursor is about the text's cap height, not a blob beside it.
-  return { W, H, u, portrait, winW, winH, winX, winY, bar, f, padX, lineH, textX, textY, cw: f * CW, d: f * 0.66 };
+  return { W, H, u, portrait, winW, winH, winX, winY, bar, f, padX, lineH, textX, textY, cw: f * CW, d: f * 0.66, outRows: portrait ? 2 : 1 };
 }
 
 /** The window's scale about the frame centre at time t: arrives, pushes, falls away. */
@@ -73,7 +75,7 @@ export function cursorAt(t, g) {
   // one space after it.
   const a = cell(g, 0, 2 + CMD.length + 0.35);
   const b = cell(g, 1, 0);
-  const c = cell(g, 2, 0);
+  const c = cell(g, 1 + g.outRows, 0);
   const k1y = cubicOut(span(tt, ENTER + 0.02, ENTER + 0.14));
   const k1x = cubicOut(span(tt, ENTER + 0.1, ENTER + 0.3));
   const k2 = cubicOut(span(tt, PRINT - 0.12, PRINT + 0.04));
@@ -110,12 +112,12 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     <div class="txt" style="position:absolute;left:0;top:0;font:400 ${g.f}px/${g.lineH}px var(--mono);white-space:pre;color:var(--text)">
       <div class="l0" style="position:absolute;left:${g.textX}px;top:${g.textY}px"><span style="color:var(--text-dim)">$ </span>${CMD}</div>
       <div class="l1" style="position:absolute;left:${g.textX}px;top:${g.textY + g.lineH}px;display:flex;align-items:center;gap:${g.f * 0.55}px">
-        <span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>${
-          // In 9:16 the line needs the full width, so the tag sits under the
-          // end of the address instead of beside it.
+        ${
           portrait
-            ? `<span class="example-tag" style="--tag-size:${tagSize}px;position:absolute;right:0;top:${g.lineH * 1.02}px">example</span>`
-            : `<span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
+            ? `<span><span style="color:var(--text-dim)">${LABEL.trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
+               <span class="example-tag" style="--tag-size:${tagSize}px;position:absolute;left:${(URL.length + 0.8) * g.cw}px;top:${g.lineH * 1.5}px;transform:translateY(-50%)">example</span>`
+            : `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
+               <span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
         }
       </div>
     </div>

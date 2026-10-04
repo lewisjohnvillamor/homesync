@@ -126,7 +126,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
          font:700 ${portrait ? 84 * u : 76 * u}px/1.08 var(--sans);letter-spacing:-0.025em;color:var(--text);${portrait ? `width:${940 * u}px` : 'white-space:nowrap'}">Every device is told one instant…</div>
     <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
       <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
-        <div class="card" style="position:absolute;left:${-6000 * u}px;top:${-6000 * u}px;width:${12000 * u + W}px;height:${6000 * u + L.lanes.tv + 520 * u}px;
+        <div class="card" style="position:absolute;left:${-2600 * u}px;top:${-2600 * u}px;width:${5200 * u + W}px;height:${2600 * u + L.lanes.tv + 520 * u}px;display:none;
              background:linear-gradient(to bottom, var(--bg) calc(100% - ${300 * u}px), transparent)"></div>
         ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
@@ -251,8 +251,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       `translate(${c.px}px, ${c.py}px) rotateX(${c.tilt}deg) rotateZ(${c.rot}deg) scale(${c.s}) translate(${-c.fx}px, ${-c.fy}px)`;
     // The flat ground covers the frame until the plane's own card takes over
     // for the lift; after the lift nothing of this layer is left.
-    ground.style.opacity = t >= ICON_LANDS && t < LIFT_SPAN[0] ? '1' : '0';
-    card.style.opacity = t >= ICON_LANDS ? '1' : '0';
+    ground.style.opacity = t >= ICON_LANDS && t < LIFT_SPAN[0] - 0.02 ? '1' : '0';
+    // Only drawn for the lift (it is large; the flat ground covers the frame before).
+    card.style.display = t >= LIFT_SPAN[0] - 0.05 && t < LIFT_SPAN[1] + 0.02 ? 'block' : 'none';
     perspEl.style.visibility = t < LIFT_SPAN[1] + 0.02 ? 'visible' : 'hidden';
     // While composition 5's phone shrinks into its icon, the lanes draw in
     // behind it: nothing of the diagram is drawn left of the phone's edge.
