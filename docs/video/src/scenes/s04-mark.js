@@ -32,13 +32,13 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   // 16:9: the lockup spans 87 % of the width (margins ≥ 96 px), the word
   // ~1.3× its round-1 size. "HomeSync" at this weight is ~5.43 em wide; the
   // exact width is measured below for centring.
-  const PUSH = 1.04;
+  const PUSH = 1;
   // 16:9: the gap is ~half the word's cap height plus the arcs' breath.
   const GAPK = portrait ? 0.11 : 0.105;
   // 16:9: the lockup spans 90 % of the width (96 px margins) with a larger
   // word; 9:16: the mark ~80 % of the width, the lockup centred vertically.
-  const wordSize = portrait ? 176 * u : 148 * u;
-  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.84 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
+  const wordSize = portrait ? 176 * u : 124 * u;
+  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.885 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
   /** Clear space between the outer arc (at its largest, with the push) and the word. */
   const GAP = portrait ? 0 : GAPK * S;
 
@@ -86,8 +86,8 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   const DRAW = t0 + 0.08; // 6.33: the arcs start drawing, once the dot is on its way in
   const HOME = t0 + 0.5; // 6.75: dot home, mark at full size
   const WORD = HOME + 0.02; // the word only once the mark has stopped growing
-  const LEAVE = t1 - 0.145; // 7.98: held until the cut is near
-  const GONE = t1 - 0.015; // 8.11: nothing of this composition is left before the 8.125 cut
+  const LEAVE = t1 - 0.325; // 7.80
+  const GONE = t1 - 0.205; // 7.92: arcs and word gone before composition 5's code fades in; only the dot stays
 
   // The drop: over the last 0.25 s (15 frames) the dot falls out of the mark
   // and shrinks (ease-in) on to composition 5's dot at the 8.125 cut —
@@ -146,9 +146,10 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       const phase = (t - HOME) * ((2 * Math.PI) / 1.25) - (outer ? 0.9 : 0);
       // One visible breath across the hold, the outer pair swelling most,
       // over the small ripple.
-      const swell = Math.sin(Math.PI * span(t, HOME + 0.1, LEAVE)) * (outer ? 0.05 : 0.04);
-      a.style.transform = `scale(${1 + swell + b * (outer ? 0.025 : 0.02) * Math.sin(phase)})`;
-      a.style.opacity = String(lerp(1, 0.93, b * (0.5 + 0.5 * Math.sin(phase))));
+      // No breath of their own: the lockup moves as one, under one push.
+      a.style.transform = '';
+      a.style.opacity = '1';
+      void phase;
     });
 
     // The word: slides in from beyond the mark (from the right in 16:9, from

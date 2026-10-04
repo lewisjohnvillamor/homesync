@@ -25,8 +25,8 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   // 16:9: two lines across the frame. 9:16: four lines at about twice the
   // size, so the type fills the frame; the full stop always ends the last.
-  const size = portrait ? 172 * u : 184 * u;
-  const texts = portrait ? ['Nothing', 'tells them', 'when', '“now” is'] : ['Nothing tells them', 'when “now” is'];
+  const size = portrait ? 138 * u : 184 * u;
+  const texts = portrait ? ['Nothing tells', 'them when', '“now” is'] : ['Nothing tells them', 'when “now” is'];
   const lineStyle = `position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)`;
   el.innerHTML = `
     <div class="ground" style="position:absolute;inset:0;background:var(--bg)"></div>
@@ -96,7 +96,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
       { x: side(i) * (portrait ? 420 : 520) * u, opacity: 0 },
       { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' },
       // On the beat (3.75 s); every line set by 4.40.
-      t0 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
+      t0 + 0.05 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
     );
   });
   // Then the words rush past the camera; the full stop stays.
@@ -106,7 +106,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = portrait ? 1.06 : 1.05;
+  const PUSH = portrait ? 1.04 : 1.05;
   // In 9:16 the four lines nearly fill the width: no sideways drift there,
   // only the push.
   const DRIFT = (portrait ? 0 : 24) * u;
@@ -158,7 +158,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     const mean = ms.reduce((acc, q) => acc + q.x, 0) / Math.max(1, ms.length);
     const spacing = (portrait ? 150 : 190) * u;
     const lifted = {
-      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (i - 1) * spacing)),
+      // Drifting all the way to the merge, so the markers never stop dead.
+      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (i - 1) * spacing)) + 75 * u * (Math.min(t, MERGED) - LIFT),
       y: rowY() + (i - 1) * 14 * u,
       d: m.d * 1.7,
     };

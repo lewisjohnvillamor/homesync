@@ -163,13 +163,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.17, 0.15, 0.02], d0: 4.55, d1: 4.15, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.21, 0.15, -0.12], d0: 4.2, d1: 3.85, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 38, tg: [0.6, 0.25, -0.08], d0: 4.2, d1: 3.8, orb0: 0.46, orb1: 0.35 },
-        c2: { el: 42, tg: [0.26, 0.0, -0.52], d: 4.8, orbDrift: -0.04 },
+        c1: { el: 36, tg: [0.12, 0.42, -0.2], d0: 4.1, d1: 3.75, orb0: 0.1, orb1: 0.04 },
+        c2: { el: 44, tg: [0.05, 0.0, -0.2], d: 4.25, orbDrift: -0.03 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -197,10 +197,21 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     cam.updateMatrixWorld();
   }
 
-  // --- the devices, one behind another ----------------------------------------
+  // --- the devices and the strip ------------------------------------------------
   const LAYOUT = portrait
     ? { x0: -0.38, speed: 0.17, clear: 0.3, icon: 0.06, dx: { laptop: 0.08, phone: -0.06, tv: 0.04 }, rows: { laptop: [0, 1.45], phone: [0.95, 2.45], tv: [-1.0, 1.2] }, turn: 0 }
-    : { x0: -0.7, speed: 0.42, clear: 0.24, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.24 }, rows: { laptop: [0, 2.05], phone: [0.82, 3.0], tv: [-1.15, 1.95] }, turn: 0.2 };
+    : {
+        // 16:9: the three devices stand side by side at the back; the strip
+        // lies on the same floor directly in front of them, its three lanes
+        // running across the picture from one shared press line. One subject,
+        // one floor; no bar points at or ends at any device.
+        x0: -1.2,
+        speed: 0.6,
+        icon: 0.07,
+        place: { tv: [-0.62, -0.62, 1.9], laptop: [0.55, -0.5, 2.0], phone: [1.25, -0.3, 2.9] },
+        rows: { tv: [0.02, 1.9], laptop: [0.27, 2.0], phone: [0.52, 2.9] },
+        turn: 0.08,
+      };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -214,17 +225,24 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   // away, the TV (longest) no farther than the others, and each marker stops
   // short of its device by a different amount.
   const perSecondOf = (z) => LAYOUT.speed * (depthOf(z) / refDepth);
-  const [tvZ, tvS] = LAYOUT.rows.tv;
-  const column = LAYOUT.x0 + LATE.tv * perSecondOf(tvZ) + LAYOUT.clear + HALF.tv * tvS;
-  const devices = Object.entries(LAYOUT.rows).map(([kind, [z, s]]) => {
+  // 9:16: the devices stand in a column to the right of the strip, each
+  // level with its own lane. 16:9: explicit places behind the strip.
+  const placeOf = (kind) => {
+    if (LAYOUT.place) return LAYOUT.place[kind];
+    const [tvZ, tvS] = LAYOUT.rows.tv;
+    const column = LAYOUT.x0 + LATE.tv * perSecondOf(tvZ) + LAYOUT.clear + HALF.tv * tvS;
+    const [z, s] = LAYOUT.rows[kind];
+    return [column + LAYOUT.dx[kind], z, s];
+  };
+  const devices = Object.keys(LAYOUT.rows).map((kind) => {
     const d = MAKE[kind]();
-    const perSecond = perSecondOf(z);
-    const x = column + LAYOUT.dx[kind];
+    const lane = LAYOUT.rows[kind][0];
+    const [x, z, s] = placeOf(kind);
     d.group.position.set(x, 0, z);
     d.group.scale.setScalar(s);
     d.group.rotation.y = LAYOUT.turn;
     scene.add(d.group);
-    return { ...d, kind, late: LATE[kind], perSecond, x, z, s };
+    return { ...d, kind, late: LATE[kind], perSecond: perSecondOf(lane), x, z, s, lane };
   });
 
   const accent = (opacity = 1) =>
@@ -279,7 +297,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   }
 
   // The press line: one line across the floor, the moment all three were pressed.
-  const zs = devices.map((d) => d.z);
+  const zs = devices.map((d) => d.lane);
   const zMin = Math.min(...zs) - 0.16;
   const zMax = Math.max(...zs) + 0.1;
   const pressLine = new THREE.Mesh(new THREE.PlaneGeometry(0.014, 1), accent(0));
@@ -296,7 +314,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const ticks = devices.map((d) => {
     const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.13), accent(0));
     tick.rotation.x = -Math.PI / 2;
-    tick.position.set(LAYOUT.x0, 0.0025, d.z);
+    tick.position.set(LAYOUT.x0, 0.0025, d.lane);
     tick.renderOrder = 3;
     scene.add(tick);
     return tick;
@@ -351,12 +369,12 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const lblStart = [...el.querySelectorAll('.lbl-start')];
   for (const ic of icons) ic.firstElementChild.style.cssText = 'width:100%;height:100%;display:block';
   // Never still while it is read: the line drifts with the camera's ease-in.
-  tl.fromTo(headline, { x: 0 }, { x: 18 * u, duration: 1.8, ease: 'sine.out' }, 0);
-  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.24, ease: 'power2.in', immediateRender: false }, 1.8);
+  tl.fromTo(headline, { x: 0 }, { x: 18 * u, duration: 1.5, ease: 'sine.out' }, 0);
+  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.2, ease: 'power2.in', immediateRender: false }, 1.5);
 
   /** Where each device's lag marker sits on the floor at time t. */
   const barLength = (d, t) => Math.max(0.0001, clamp01((t - PRESS) / d.late) * d.late * d.perSecond);
-  const markerWorld = (d, t) => new THREE.Vector3(LAYOUT.x0 + barLength(d, t), 0.004, d.z);
+  const markerWorld = (d, t) => new THREE.Vector3(LAYOUT.x0 + barLength(d, t), 0.004, d.lane);
 
   // Composition 3 asks where the markers are in the frame at a given time.
   // Computed with a camera of its own, so asking never disturbs this one.
@@ -386,7 +404,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     // Each row's device icon, just before its start tick: the row is that
     // device's own start time.
     devices.forEach((d, i) => {
-      const p = toScreen(new THREE.Vector3(LAYOUT.x0 - LAYOUT.icon, 0, d.z), camera, W, H);
+      const p = toScreen(new THREE.Vector3(LAYOUT.x0 - LAYOUT.icon, 0, d.lane), camera, W, H);
       const ic = icons[i];
       const w = ic.offsetWidth;
       const h = ic.offsetHeight;
@@ -431,14 +449,15 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       const lit = smooth(span(t, start, start + 0.2));
       // The paused button clears on the frame the marker lands.
       const glyph = t < start ? 1 : 0;
-      const held = t < start ? Math.max(press, 0.6 * down) : press * (1 - lit);
+      // A visible sink-and-return on every button at the press.
+      const held = press;
       paintPlayer(d.screen, { lit, press: held, ring: t >= PRESS ? ring : 0, glyph });
 
       // The lag bar: grows from the press line until this device's sound starts.
       const length = barLength(d, t);
       const width = 0.05;
       d.bar.scale.set(length, width, 1);
-      d.bar.position.set(LAYOUT.x0 + length / 2, 0.003, d.z);
+      d.bar.position.set(LAYOUT.x0 + length / 2, 0.003, d.lane);
       d.marker.position.copy(markerWorld(d, t));
       d.bar.material.opacity = t >= PRESS ? 0.9 : 0;
       const arrived = t >= PRESS + d.late && t < LIFT;

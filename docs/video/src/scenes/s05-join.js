@@ -25,6 +25,7 @@ export const pad = [0.18, 0.3];
 
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
+const easeIn = (k) => k * k * k;
 
 /** Times, on beats where an action happens. */
 const REVEAL = 8.125; // beat 13: composition 4 has left; the code's screen opens on the beat
@@ -127,7 +128,7 @@ export function joinTrack(W, H, u, portrait) {
   /** The laptop makes room for the phone after the scan. */
   const laptopShift = (t) => {
     const k = easeInOut(span(t, 8.72, 9.25));
-    return portrait ? { x: 0, y: -40 * u * k } : { x: -140 * u * k, y: 0 };
+    return portrait ? { x: 0, y: -40 * u * k } : { x: -20 * u * k, y: 0 };
   };
 
   const rest = portrait ? { x: W / 2 - phoneW / 2, y: 520 * u } : { x: 1480 * u - phoneW / 2, y: (H - phoneH) / 2 + 20 * u };
@@ -166,10 +167,11 @@ export function joinTrack(W, H, u, portrait) {
   // 16:9 pushes less than before, so the phone reads as a phone (both edges and
   // ground around it), centred in frame; its words are set larger to stay ≥ 48 px.
   const PUSH = portrait ? 1.06 : 1.45;
-  const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
+  // Pushed in by 9.3, held still over the press (so the button's sink reads), then creeping in.
+  const push = (t) => lerp(1, PUSH, easeInOut(span(t, 8.95, 9.3))) * lerp(1, 1.04, easeIn(span(t, PRESS + 0.2, SHRINK[0])));
   // 16:9: pushed in, the phone is centred near x 1000 with its rounded
   // bottom end in frame (so it reads as a phone), the code half off the left.
-  const target = { x: 1330 * u, y: 30 * u + (phoneH * PUSH) / 2 };
+  const target = { x: 1450 * u, y: 30 * u + (phoneH * PUSH) / 2 };
   const O = portrait
     ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
     : {
@@ -290,6 +292,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const D = 36 * u;
   const dotAt = (t) => {
     const catchK = easeInOut(span(t, HOST[0], SCAN[0] + 0.02));
+    // 9:16: across first, then down slowly beside the phone (right of the viewfinder's code).
+    const catchX = portrait ? easeOut(span(t, HOST[0], 8.45)) : catchK;
+    const catchY = portrait ? easeInOut(span(t, 8.2, 8.75)) : catchK;
     const onPhone = (() => {
       const toFace = easeInOut(span(t, PRESS - 0.24, PRESS - 0.02));
       const toList = easeInOut(span(t, PRESS + 0.3, JOINED));
@@ -302,8 +307,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     })();
     const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
     return {
-      x: lerp(P0.x, onPhone.x, catchK),
-      y: lerp(P0.y, onPhone.y, catchK) + sink * 3 * u * onPhone.s,
+      x: lerp(P0.x, onPhone.x, catchX),
+      y: lerp(P0.y, onPhone.y, catchY) + sink * 3 * u * onPhone.s,
       d: D * (1 - 0.15 * sink) * lerp(1, 1.1, span(t, JOINED - 0.1, JOINED + 0.1)),
       glow: 0.25 + 0.4 * sink,
     };
