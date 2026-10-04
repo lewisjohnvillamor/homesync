@@ -163,13 +163,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.13, 0.15, 0.2], d0: 4.2, d1: 3.8, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.17, 0.15, 0.02], d0: 4.55, d1: 4.15, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 38, tg: [0.5, 0.25, 0.15], d0: 4.35, d1: 3.9, orb0: 0.46, orb1: 0.35 },
-        c2: { el: 42, tg: [0.2, 0.0, -0.26], d: 4.8, orbDrift: -0.04 },
+        c1: { el: 38, tg: [0.6, 0.25, -0.08], d0: 4.2, d1: 3.8, orb0: 0.46, orb1: 0.35 },
+        c2: { el: 42, tg: [0.26, 0.0, -0.52], d: 4.8, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -200,7 +200,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
     ? { x0: -0.38, speed: 0.17, clear: 0.3, icon: 0.06, dx: { laptop: 0.08, phone: -0.06, tv: 0.04 }, rows: { laptop: [0, 1.45], phone: [0.95, 2.45], tv: [-1.0, 1.2] }, turn: 0 }
-    : { x0: -0.7, speed: 0.42, clear: 0.3, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.24 }, rows: { laptop: [0, 2.05], phone: [0.82, 3.0], tv: [-1.15, 1.95] }, turn: 0.2 };
+    : { x0: -0.7, speed: 0.42, clear: 0.24, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.24 }, rows: { laptop: [0, 2.05], phone: [0.82, 3.0], tv: [-1.15, 1.95] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -351,8 +351,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const lblStart = [...el.querySelectorAll('.lbl-start')];
   for (const ic of icons) ic.firstElementChild.style.cssText = 'width:100%;height:100%;display:block';
   // Never still while it is read: the line drifts with the camera's ease-in.
-  tl.fromTo(headline, { x: 0 }, { x: 14 * u, duration: 1.4, ease: 'sine.out' }, 0);
-  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.24, ease: 'power2.in', immediateRender: false }, 1.38);
+  tl.fromTo(headline, { x: 0 }, { x: 18 * u, duration: 1.8, ease: 'sine.out' }, 0);
+  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.24, ease: 'power2.in', immediateRender: false }, 1.8);
 
   /** Where each device's lag marker sits on the floor at time t. */
   const barLength = (d, t) => Math.max(0.0001, clamp01((t - PRESS) / d.late) * d.late * d.perSecond);

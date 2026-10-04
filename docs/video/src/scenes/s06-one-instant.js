@@ -31,6 +31,7 @@ import { span, lerp } from '../shared/beats.js';
 import { laptopSvg, tvSvg } from '../shared/devices.js';
 import { DELAY_MS } from '../shared/diagram.js';
 import { HOUSE_VIEW, HOUSE_VIEW_PORTRAIT } from '../shared/house-view.js';
+import { handoff } from '../shared/handoff.js';
 import { phoneHtml, roomHtml, laneLayout, joinTrack, ICON_LANDS } from './s05-join.js';
 
 /** Up through composition 8 and the lift that reveals the house. */
@@ -204,7 +205,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const camA = (t) => {
     const k = sine(span(t, ICON_LANDS, C7));
     // 9:16 drifts up, not left, so the icons keep their margin.
-    return { s: lerp(1, portrait ? 1.025 : 1.05, k), fx: W / 2, fy: H * 0.55, px: W / 2 - (portrait ? 0 : 30) * u * k, py: H * 0.55 - (portrait ? 30 : 14) * u * k, tilt: 0, rot: 0 };
+    return { s: lerp(1, portrait ? 1.025 : 1.08, k), fx: W / 2, fy: H * 0.55, px: W / 2 - (portrait ? 0 : 30) * u * k, py: H * 0.55 - (portrait ? 30 : 14) * u * k, tilt: 0, rot: 0 };
   };
   const camB = (t) => ({
     s: (portrait ? 520 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
@@ -219,15 +220,19 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
       // 9:16 pushes harder through the hold (5 %), so it never reads as paused.
-      s: (portrait ? 0.84 : 1.2) * lerp(1, portrait ? 1.05 : 1.04, k),
+      s: (portrait ? 0.74 : 1.2) * lerp(1, portrait ? 1.05 : 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
-      px: W / 2 + (portrait ? 40 * u : 10 * u) + (portrait ? 0 : 30) * u * k,
+      px: W / 2 + (portrait ? -10 * u : 10 * u) + (portrait ? 0 : 30) * u * k,
       py: (portrait ? H * 0.41 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
-      rot: VIEW.azimuth,
+      // 9:16: the house's turn (−70°) would stand the lanes on end, so the plane
+      // is held at −30° (lanes within ~25° of horizontal) and turns to the
+      // house's angle just before the lift (17.5–17.8).
+      rot: portrait ? lerp(PORTRAIT_ROT, VIEW.azimuth, easeInOut(span(t, 17.5, LIFT_SPAN[0]))) : VIEW.azimuth,
     };
   };
+  const PORTRAIT_ROT = -30;
   const mix = (a, b, k) => {
     const out = {};
     for (const key of Object.keys(a)) out[key] = key === 's' ? a.s * (b.s / a.s) ** k : lerp(a[key], b[key], k);
@@ -335,7 +340,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit + (portrait ? 0.08 : 0.16) * ack})`;
       // The other lanes' names step aside during the close-up, so no word is ever cut by the frame edge.
       const aside = kind === 'phone' ? 0 : span(rush, 0.1, 0.55) * (1 - span(back, 0.3, 0.7));
-      l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside) * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
+      l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside) * (1 - span(t, 17.32, 17.5)));
       l.rule.style.opacity = String(0.7 * (1 - aside));
       // 9:16, tilted: the lanes stop just past T, so nothing runs to the frame's edge.
       const trimTo = (L.tX + 16 * u - L.laneStart) / (L.laneEnd - L.laneStart);
@@ -378,7 +383,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       // Tags grow in composition 8, where they are seen small and tilted.
       l.ms.style.setProperty('--tag', String(lerp(1, 1.45, back)));
       // Tilted, the labels foreshorten; they grow so they read at ≥ 24 px.
-      l.ms.style.transform = `translate(${-24 * u * back}px, ${-22 * u * back}px) scale(${lerp(1, 1.5, back)})`;
+      // 9:16 labels are counter-turned so they read screen-horizontal on the turned plane.
+      l.ms.style.transform = `translate(${-24 * u * back}px, ${-22 * u * back}px) scale(${lerp(1, 1.5, back)})${portrait ? ` rotate(${-c.rot}deg)` : ''}`;
       // Gone before the plane lifts, so no label is ever seen over the house.
       l.ms.style.opacity = String(msOn * (1 - span(t, LIFT_SPAN[0] - 0.22, LIFT_SPAN[0] - 0.04)));
 
@@ -408,6 +414,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         const ns = portrait ? 1.6 : 1.45;
         pin(l.name, c, c6, NAME_X, nameY('phone'), sx - 50 * u * ns, iy + iconScreenH / 2 + 8 * u, ns, wPin);
       }
+      if (portrait && back > 0) l.name.style.transform = `${l.name.style.transform} rotate(${-c.rot}deg)`;
       void i;
     });
     // 9:16, tilted: T's line ends just below the TV lane.
@@ -421,12 +428,23 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const keepY = Math.max(topY, (portrait ? 130 : 90) * u);
     const dy = ((keepY - topY) / c.s) * flat;
     anchor.style.transform = `translateY(${dy}px)`;
+    // Through the tilt the flat estimate above is not exact: measure, and pull
+    // T (and its label) down until it is ≥ 70 px inside the top edge.
+    let dy2 = 0;
+    if (back > 0) {
+      const top = anchor.getBoundingClientRect();
+      const need = 70 * u - (top.top + top.height / 2);
+      if (need > 0) {
+        dy2 = need / (c.s * Math.max(0.3, Math.cos((c.tilt * Math.PI) / 180)));
+        anchor.style.transform = `translateY(${dy + dy2}px)`;
+      }
+    }
     const tk7 = lerp(1, 1.25 / c.s, rush * flat);
-    tlabel.style.opacity = String(span(t, 11.05, 11.3) * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
-    tlabel.style.transform = `translateY(${dy}px) scale(${Math.max(tk7, 1 / c.s * 0.9)})`;
+    tlabel.style.opacity = String(span(t, 11.05, 11.3) * (1 - span(t, 17.32, 17.5)));
+    tlabel.style.transform = `translateY(${dy + dy2}px) scale(${Math.max(tk7, 1 / c.s * 0.9)})${portrait ? ` rotate(${-c.rot}deg)` : ''}`;
     // T flashes when a pulse arrives on it: the phone's in 7, all three together in 8.
     const flash = (at) => (t >= at ? Math.exp(-(t - at) * 4) : 0);
-    const home = Math.max(1.4 * flash(FIRE7 + RUN7), flash(ARRIVE8), 0.35 * span(t, GROW8.tv[1], GROW8.tv[1] + 0.2));
+    const home = Math.max(1.4 * flash(FIRE7 + RUN7), flash(ARRIVE8), 0.9 * flash(GROW8.tv[1]), 0.35 * span(t, GROW8.tv[1], GROW8.tv[1] + 0.2));
     tline.style.boxShadow = `0 0 ${home * 34 * u}px ${home * 6 * u}px #5aa9ffaa`;
 
     // Read where T is before the lift moves the plane; from LIFT_SPAN[0] on
@@ -446,18 +464,20 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
 
   // The dot is the instant T: it lands at the top of the T line and rides the
   // camera exactly, because its place is read from an element in the diagram.
-  hostDot(11.0, DOT_RELEASE, (t) => {
+  const dotAt = (t) => {
     const r = restDot;
-    const pulse = Math.max(t >= FIRE7 + RUN7 ? Math.exp(-(t - FIRE7 - RUN7) * 5) : 0, t >= ARRIVE8 ? Math.exp(-(t - ARRIVE8) * 5) : 0);
+    const ex = (at) => (t >= at ? Math.exp(-(t - at) * 5) : 0);
+    const pulse = Math.max(ex(FIRE7 + RUN7), ex(ARRIVE8), 0.6 * ex(GROW8.tv[1]));
     // As the plane lifts away the dot starts to sink, so the house's drop continues one motion.
     const sinkY = 60 * u * easeIn(span(t, LIFT_SPAN[0], DOT_RELEASE));
-    if (portrait) {
-      // 9:16: T sits at the plane's top-left but the house's dot starts right of
-      // centre (measured at 17.92 s: about (756, 800)); the dot glides there
-      // while the plane drops away, so the hand-over is one movement, not a jump.
-      const g = easeInOut(span(t, 17.66, DOT_RELEASE + 0.02));
-      return { x: lerp(r.x, 756 * u, g), y: lerp(r.y, 800 * u, g), d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
-    }
     return { x: r.x, y: r.y + sinkY, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
-  });
+  };
+  hostDot(11.0, DOT_RELEASE, dotAt);
+  // Composition 9 starts its dot from exactly here. From LIFT_SPAN[0] the
+  // camera is frozen, so `restDot` (read this frame) is the same point it was
+  // at the release; clamped so any t ≥ the release gives the release value.
+  handoff.liftDotAt = (t) => {
+    const p = dotAt(Math.min(t, DOT_RELEASE));
+    return { x: p.x, y: p.y, d: p.d };
+  };
 }

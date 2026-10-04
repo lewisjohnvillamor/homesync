@@ -150,7 +150,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   /** A marker's path at t: lift towards the camera, sweep, merge. */
   const markerAt = (m, i, t) => {
     // Quick enough to be in the row below before the words arrive over it.
-    const lift = easeOut(span(t, LIFT, LIFT + 0.24));
+    const lift = easeOut(span(t, LIFT, SWEEP));
     // Lifted: larger, lower, a little closer together, inside the margins.
     // Spread evenly about where they were, laptop to the left, TV to the
     // right, so no two ever overlap.

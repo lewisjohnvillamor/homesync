@@ -25,7 +25,6 @@ export const pad = [0.15, 0];
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
 const expoOut = (k) => (k >= 1 ? 1 : 1 - 2 ** (-10 * k));
-const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 
 export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor }) {
   // The outer arcs reach 0.51 S either side of the centre and ±0.34 S above
@@ -34,7 +33,8 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   // ~1.3× its round-1 size. "HomeSync" at this weight is ~5.43 em wide; the
   // exact width is measured below for centring.
   const PUSH = 1.04;
-  const GAPK = portrait ? 0.11 : 0.05;
+  // 16:9: the gap is ~half the word's cap height plus the arcs' breath.
+  const GAPK = portrait ? 0.11 : 0.105;
   // 16:9: the lockup spans 90 % of the width (96 px margins) with a larger
   // word; 9:16: the mark ~80 % of the width, the lockup centred vertically.
   const wordSize = portrait ? 176 * u : 148 * u;
@@ -89,12 +89,14 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   const LEAVE = t1 - 0.145; // 7.98: held until the cut is near
   const GONE = t1 - 0.015; // 8.11: nothing of this composition is left before the 8.125 cut
 
-  // The drop: from 7.76 s the dot leaves the mark's centre, shrinking (ease-in,
-  // 13 frames) and falling to where composition 5 picks it up at 7.98 s —
-  // s05's dot at its first frame: (700u, 830u) in 16:9, (W/2, 980u) in 9:16,
-  // 36u across. If s05 moves it, the film's flight bridges the last frame.
-  const DROP = [7.9, t1];
+  // The drop: over the last 0.25 s (15 frames) the dot falls out of the mark
+  // and shrinks (ease-in) on to composition 5's dot at the 8.125 cut —
+  // position and size from handoff.joinDotAt(t1); if that is not published,
+  // the old pickup ((700u, 830u) in 16:9, (W/2, 980u) in 9:16, 36u across).
+  const DROP = [t1 - 0.25, t1];
   const PICKUP = portrait ? { x: W / 2, y: 980 * u, d: 36 * u, glow: 0.25 } : { x: 700 * u, y: 830 * u, d: 36 * u, glow: 0.25 };
+  /** Where composition 5's dot is at the cut; the old pickup if it publishes nothing. */
+  const pick = () => handoff.joinDotAt?.(t1) ?? PICKUP;
   const from = () => handoff.stopAt?.(START) ?? { x: W * 0.7, y: H * 0.6, d: 30 * u };
   const dotFull = S * MARK_DOT_RATIO;
 
@@ -117,7 +119,8 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     const f = from();
     // Moves inward first, then grows: the mark is never born at the frame's edge.
     const grow = lerp(f.d / dotFull, 1, easeInOut(span(t, START + 0.2, HOME)));
-    return grow * lerp(1, PUSH, span(t, HOME, LEAVE)) * lockAt(t);
+    // During the hold only the lockup's push scales it, so mark and word move as one.
+    return grow * lockAt(t);
   };
   /** Breathing during the hold, ramped in so it never fights the arrival. */
   const breathe = (t) => clamp01((t - HOME) / 0.3);
@@ -152,7 +155,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     // below in 9:16), moving away from the arcs, never towards them past its
     // resting place; then drifts slowly outward while it holds.
     const w = expoOut(span(t, WORD, WORD + 0.5));
-    const drift = sineInOut(span(t, WORD + 0.3, LEAVE)) * 18 * u;
+    const drift = 0;
     const wx = geo.wx + (portrait ? 0 : (1 - w) * 160 * u + drift);
     // Arcs and word leave the same way: up and out.
     const wy = geo.wy + (portrait ? (1 - w) * 120 * u + drift : 0) - liftBy;
@@ -186,11 +189,11 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     const fall = easeInOut(k);
     // Straight down out of the mark first, then across: it never crosses an arc.
     return {
-      x: lerp(h.x, PICKUP.x, fall * fall),
-      y: lerp(h.y, PICKUP.y, fall),
+      x: lerp(h.x, pick().x, fall * fall),
+      y: lerp(h.y, pick().y, fall),
       // Ease-in: it lets go of the mark slowly, then shrinks to its new size.
-      d: lerp(h.d, PICKUP.d, k * k),
-      glow: lerp(h.glow, PICKUP.glow, k),
+      d: lerp(h.d, pick().d, k * k),
+      glow: lerp(h.glow, pick().glow ?? PICKUP.glow, k),
     };
   });
 }

@@ -18,9 +18,10 @@
 
 import { span, lerp, BEAT } from '../shared/beats.js';
 import { diagramLayout } from '../shared/diagram.js';
+import { handoff } from '../shared/handoff.js';
 
 /** Visible from 7.98 s (composition 4's mark is gone by then) until the phone is the lane icon. */
-export const pad = [0.19, 0.3];
+export const pad = [0.18, 0.3];
 
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
@@ -168,7 +169,7 @@ export function joinTrack(W, H, u, portrait) {
   const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
   // 16:9: pushed in, the phone is centred near x 1000 with its rounded
   // bottom end in frame (so it reads as a phone), the code half off the left.
-  const target = { x: 1250 * u, y: 30 * u + (phoneH * PUSH) / 2 };
+  const target = { x: 1330 * u, y: 30 * u + (phoneH * PUSH) / 2 };
   const O = portrait
     ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
     : {
@@ -284,7 +285,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   // it arrives, rides in below where the button will be, presses the button's
   // face, then becomes this device's indicator in the list; as the phone
   // shrinks away it rises to become T.
-  const HOST = [8.0, SHRINK[0] + 0.05];
+  const HOST = [REVEAL, SHRINK[0] + 0.05];
   const P0 = portrait ? { x: W / 2, y: 980 * u } : { x: 700 * u, y: 830 * u };
   const D = 36 * u;
   const dotAt = (t) => {
@@ -294,7 +295,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const toList = easeInOut(span(t, PRESS + 0.3, JOINED));
       const fy = lerp(lerp(wait.fy, face.fy, toFace), indicator.fy, toList);
       const fx = lerp(lerp(wait.fx, face.fx, toFace), indicator.fx, toList);
-      return onGlass(t, fx, fy);
+      // Until the phone has settled over the code, aim at where its waiting
+      // spot will be, so the dot makes one eased arc there and the phone
+      // arrives around it (it never chases the moving phone).
+      return onGlass(Math.max(t, SCAN[0]), fx, fy);
     })();
     const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
     return {
@@ -305,14 +309,17 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     };
   };
   hostDot(HOST[0], HOST[1], dotAt);
+  // Composition 4's dot lands exactly here at the cut.
+  handoff.joinDotAt = (t) => dotAt(Math.max(t, HOST[0]));
   // The laptop's screen opens from the code's centre — so the code is never a
   // fragment — with a wide feathered edge, as composition 4 finishes leaving.
   const irisC = qrC0;
-  const FEATHER = 0.5; // fully opaque out to half the radius, fading to nothing at the edge
-  const irisR = Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - irisC.x, y - irisC.y))) / FEATHER;
+
 
   onFrame((t) => {
-    el.style.opacity = t < REVEAL ? '0' : '1';
+    // The laptop and code are already there, dim, under composition 4's leaving
+    // mark from 7.95; on the beat they come up and settle from 85 % scale.
+    el.style.opacity = t < 7.95 ? '0' : '1';
     const r = phoneRect(t);
     wrap.style.transform = `translate(${r.x}px, ${r.y}px) scale(${r.s})`;
 
@@ -320,16 +327,17 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const sh = laptopShift(t);
     const s = push(t);
     const out = span(t, 10.3, 10.55);
+    const up = easeOut(span(t, REVEAL, 8.45));
+    const enterS = lerp(0.85, 1, up);
     world.style.transform =
+      `translate(${irisC.x}px, ${irisC.y}px) scale(${enterS}) translate(${-irisC.x}px, ${-irisC.y}px) ` +
       `translate(${O.x}px, ${O.y}px) scale(${s}) translate(${-O.x}px, ${-O.y}px) translate(${sh.x - out * out * 300 * u}px, ${sh.y}px)`;
-    // Once the phone has the code, the laptop steps back (dimmed) so the phone leads.
-    world.style.opacity = String((1 - out) * lerp(1, 0.38, easeInOut(span(t, 8.95, 9.5))));
-    // A soft-edged reveal over 0.32 s; the phone is inside it, so nothing appears outside the opening.
-    const ik = span(t, REVEAL, 8.42);
-    const ir = irisR * (1 - (1 - ik) ** 2.2) + 1;
-    const mask = ik < 1 ? `radial-gradient(circle at ${irisC.x}px ${irisC.y}px, #000 ${ir * FEATHER}px, transparent ${ir}px)` : 'none';
-    el.style.maskImage = mask;
-    el.style.webkitMaskImage = mask;
+    // Dim (25 %) under the leaving mark, up to full on the beat; once the phone
+    // has the code, the laptop steps back (dimmed) so the phone leads.
+    const preDim = lerp(0, 0.25, easeOut(span(t, 7.95, 8.1)));
+    world.style.opacity = String((1 - out) * lerp(preDim, 1, up) * lerp(1, 0.38, easeInOut(span(t, 8.95, 9.5))));
+    el.style.maskImage = 'none';
+    el.style.webkitMaskImage = 'none';
 
     // The viewfinder sees the code where it is relative to the phone: it
     // slides into the brackets as the phone arrives over it, and out as the
@@ -358,9 +366,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // The press: the dot (solid throughout) shrinks a little, the button sinks
     // 3 px and darkens to its pressed state — its label turning light so it
     // stays readable — then the button goes, before the room's card comes in.
-    const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
+    const sink = t < PRESS ? easeOut(span(t, PRESS - 0.08, PRESS)) : 1 - easeInOut(span(t, PRESS + 0.04, PRESS + 0.19));
     const gone = easeInOut(span(t, PRESS + 0.25, PRESS + 0.45));
-    btn.style.transform = `translateY(${sink * 3 * u}px) scale(${(1 - 0.03 * sink) * (1 - 0.06 * gone)})`;
+    btn.style.transform = `translateY(${sink * 4 * u}px) scale(${(1 - 0.03 * sink) * (1 - 0.06 * gone)})`;
     btn.style.opacity = String(1 - gone);
     const down = span(t, PRESS - 0.1, PRESS - 0.04);
     // The button's own colour darkens (not an overlay, which would dim its label too).
