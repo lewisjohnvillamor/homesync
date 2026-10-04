@@ -26,6 +26,7 @@ export const pad = [0.2, 2 * 2.5 + 0.1];
 
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
+const easeIn = (k) => k * k * k;
 const expoOut = (k) => (k >= 1 ? 1 : 1 - 2 ** (-10 * k));
 
 // Composition boundaries (seconds).
@@ -154,8 +155,16 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     world.style.transform =
       `translate3d(${tx}px, ${ty - c.lift * 260 * u}px, ${c.lift * 900 * u}px) ` +
       `translate(${c.fx * c.s}px, ${c.fy * c.s}px) rotateX(${c.tiltX}deg) rotateZ(${c.rotZ}deg) translate(${-c.fx * c.s}px, ${-c.fy * c.s}px) scale(${c.s})`;
-    persp.style.opacity = String(1 - span(t, LIFT + 0.05, C9 + 0.1));
-    ground.style.opacity = String(1 - easeInOut(span(t, LIFT, C9 + 0.02)));
+    // The lanes and their labels fly at the camera and are gone before any of
+    // the house shows, so nothing is ever double-exposed over the model; then
+    // the plain ground opens from the centre, an iris on to the house.
+    persp.style.opacity = String(1 - span(t, LIFT, LIFT + 0.14));
+    const iris = easeIn(span(t, LIFT + 0.1, C9 + 0.14)) * Math.hypot(W, H) * 0.62;
+    const soft = 140 * u;
+    const hole = iris > 0 ? `radial-gradient(circle at 50% 52%, transparent ${iris}px, #000 ${iris + soft}px)` : 'none';
+    ground.style.maskImage = hole;
+    ground.style.webkitMaskImage = hole;
+    ground.style.opacity = '1';
 
     // Composition 6's line: set by 11.30 s, drifting, gone before the rush.
     const in6 = expoOut(span(t, t0 + 0.1, t0 + 0.6));

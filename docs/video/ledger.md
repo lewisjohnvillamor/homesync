@@ -91,3 +91,26 @@ Critic verdict: **one more pass** (3 blockers, 10 build-time). Of 51 prior findi
 | 4–13 | Build-time: dot's path through comp 5; physically possible scan with a real QR (repo URL); label times in 5; dim ms labels in 8; comp 2 line time; "Your files." crossing the dot; "(a few minutes later)" as a caption not output, README padding; 9:16 comps 4/12 differ; abstract player UI only; comp 6 as a true plan view. | Written into v6; checked at component stage. |
 
 **Decision:** after five storyboard rounds the blockers are fixed in the plan and the remaining items are build-time, so building starts on v6. The component critics are told nothing about this list and check the built work for themselves.
+
+## Component round 1 — full render r0 (16:9)
+
+Four fresh critics, one per range, each given only `work/critic-component.md`. Full findings: `work/round1/a.md`–`d.md` (A and B saved for the builders; C and D summarised here). All four: **one more pass**. Honesty passed in every range; every settled line ≥ 4.5:1 (most ≥ 7:1).
+
+**Frozen-time measure.** The plain adjacent-frame test reports ~20 s frozen per 30 s; at 60 fps a slow drift moves a fraction of a pixel per frame, so it cannot see it. A `--window 0.25` mode was added to the kit (each frame against the one 0.25 s earlier): 0.58 s per 30 s, longest 0.30 s. Critics were told to run both and judge by eye where they disagree. They agreed the windowed test is right about drift but named the holds that still *feel* paused — those are findings below, not passes.
+
+| Range | Top findings | Fixed by |
+| --- | --- | --- |
+| A 0–8.1 | Comp 4→5 one-frame pop with "omeSync" left behind; comp 2 closes on a hard slit cutting the caption; wordmark fades in over the arcs; dead dot frame at 6.25; opening shot floats in a void; markers overshoot and bounce; holds feel paused; press doesn't sink; bars leave the safe area; bar lengths not comparable. | Builder A (s01–s04) |
+| B 8.1–18.1 | Phone vanishes at 10.41 instead of becoming the lane icon; lines cut through "instant." at 15.75; 8→9 double exposure with ms labels over the house; comp 5 entry over the wordmark; diagram holds feel paused; comps 6–8 same layout; no phone on the comp 7 lane; comp 6 sparse; band cuts T; half-empty scan frame; press reads as a bump. | Builder B (s05–s08); the lift's iris by the lead |
+| C 18.1–21.9 | Exit: "Your LAN" over the fading house; entry: double exposure; climax doesn't read (floating stubs on hairlines, no ms values, payoff on screen 0.2–0.35 s); 18.55–19.40 feels paused; T plane reads as a lid; flat light; base cropped at the bottom. | Lead |
+| D 21.9–30 | Cursor dot crosses "--release" on Enter and covers the "O" of the output; "Your machine" ghosts over the terminal; house leaves by dissolve; end-card arcs show stray round caps and build off-centre; terminal doesn't fill the frame and the cursor is a blob; end card near-still 2.6 s; "a few minutes later" 0.35 s at 34 px; three dissolves in a row. | Lead |
+
+**Lead's changes (C, D):**
+- `HOUSE_TOUCH` 21.25 → **20.625** (beat 33) and the score's chime with it: the bars now start at 18.945 (TV), 19.905, 20.305, filling the 18.55–19.40 pause, and the payoff holds ~0.7 s before the dot rises (21.3).
+- Bars stand on **solid dim stems** from their devices; each carries its **ms value** (F8) with one EXAMPLE tag; a **ring** crosses the plane at the touch; the plane is a faint fill with a glowing edge; T label 30 → 44 px; stronger rim light.
+- Framing: 16:9 base clear of the bottom edge; 9:16 pulled back so the model fits the width.
+- Exit is a **push-through** (camera rushes in, layer gone by 21.86) and "Your LAN" waits until it is gone; the headline leaves at 21.2 (was 21.6) so the rising dot never crosses it — a 0.4 s deviation from the storyboard's "held to 21.60", taken for the collision rule.
+- Comp 8→9: the lanes fly off first and the ground opens as an iris; no double exposure. (Tilt match left to builder B.)
+- Terminal: window sized to its content (740 → 560 px), stronger push, cursor at cap height one character after the text, **down-then-left** on Enter, drops before the output prints, blinks on the beat while waiting; caption 34 → 48 px, below the output, held from Enter to the collapse (~1.6 s); exit is a 1.6× push-through.
+- End card: the dot reaches the centre line before the mark and name build; arcs drawn as one centred dash (no stray caps); breathing 2.2 % → 5 % with the outer arcs' opacity breathing; push 3.5 → 6 %.
+- Comp 10: "Your files" reaches its baseline sooner; "Your machine" clears in 0.08 s before the terminal text; stronger push; the full stop pulses on each beat.

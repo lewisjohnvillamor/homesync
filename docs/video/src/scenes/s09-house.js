@@ -137,13 +137,16 @@ function planeTexture() {
   const h = canvas.height;
   const grad = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
   // three.js reads an alpha map from its green channel: grey on black.
-  grad.addColorStop(0, 'rgb(150,150,150)');
-  grad.addColorStop(1, 'rgb(70,70,70)');
+  grad.addColorStop(0, 'rgb(90,90,90)');
+  grad.addColorStop(1, 'rgb(30,30,30)');
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
-  g.strokeStyle = 'rgb(255,255,255)';
-  g.lineWidth = 4;
-  g.strokeRect(2, 2, w - 4, h - 4);
+  // A glowing edge: a soft halo inside a bright line.
+  for (let i = 0; i < 14; i += 1) {
+    g.strokeStyle = `rgba(255,255,255,${0.06 + (i === 13 ? 0.9 : 0)})`;
+    g.lineWidth = i === 13 ? 5 : 30 - i * 2;
+    g.strokeRect(0, 0, w, h);
+  }
   return new THREE.CanvasTexture(canvas);
 }
 
@@ -152,7 +155,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
   el.appendChild(renderer.domElement);
-  const { scene, ground, key } = makeStage(renderer);
+  const { scene, ground, key, rim } = makeStage(renderer);
+  // A stronger, warmer-edged rim than the device shots: it draws the walls'
+  // top edges off the dark ground like a lit architectural model.
+  rim.intensity = 5.2;
+  rim.position.set(-2.5, 6, -7);
   // No fog: the model sits in a seamless brand-coloured room. The floor only
   // takes the plinth's shadow, so everything around the model is exactly the
   // background colour.
@@ -280,6 +287,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   plane.renderOrder = 5;
   scene.add(plane);
 
+  const ringMat = accent(0);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 96), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(0, T_Y + 0.004, 0);
+  ring.renderOrder = 9;
+  scene.add(ring);
+
   for (const d of devices) {
     const length = d.late * RISE;
     d.start = HOUSE_TOUCH - d.late;
@@ -304,30 +318,31 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.contact.position.set(ax, T_Y + 0.003, az);
     d.contact.renderOrder = 8;
     scene.add(d.contact);
-    // A faint dashed guide from the device up to its disc, so each start reads as that device's.
-    const from = ay + 0.05;
+    // A solid, dim stem from the device up to its disc, so each bar plainly
+    // stands on its own device rather than floating.
+    const from = ay + 0.03;
+    const stemGeo = new THREE.CylinderGeometry(0.018, 0.018, 1, 16);
+    stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
-    const dash = 0.045;
-    for (let y = from; y + dash < d.baseY - 0.06; y += dash * 2) {
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, dash, 8), accent(0.5));
-      seg.position.set(ax, y + dash / 2, az);
-      d.guide.add(seg);
-    }
+    const stem = new THREE.Mesh(stemGeo, accent(0.3));
+    stem.position.set(ax, from, az);
+    stem.scale.set(1, Math.max(0.0001, d.baseY - from), 1);
+    d.guide.add(stem);
     scene.add(d.guide);
   }
 
   // --- camera --------------------------------------------------------------------
   const camera = new THREE.PerspectiveCamera(HOUSE_VIEW.fov, W / H, 0.1, 80);
   const frame = portrait
-    ? { distance: 19.2, elevation: 54, target: new THREE.Vector3(-0.06, 1.85, -0.02) }
-    : { distance: 10.1, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.14, 1.3, -0.2) };
+    ? { distance: 24, elevation: 54, target: new THREE.Vector3(0.1, 0.3, -0.02) }
+    : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.2, 0.62, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
     const k = (t - t0) / (t1 - t0);
     const azimuth = (HOUSE_VIEW.azimuth + 6 * k) * DEG;
     const elevation = frame.elevation * DEG;
-    const distance = frame.distance * (1 - 0.045 * k - 0.05 * easeIn(span(t, 21.4, t1 + 0.1)));
+    const distance = frame.distance * (1 - 0.06 * k - 0.6 * span(t, 21.4, t1) ** 2);
     const tg = frame.target;
     cam.position.set(
       tg.x + Math.sin(azimuth) * distance * Math.cos(elevation),
@@ -353,8 +368,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // Hover: a slow, small breath so it is never still.
     p.y += 0.025 * Math.sin((t - SETTLE) * 2.4) * smooth(span(t, SETTLE, SETTLE + 0.4));
     // Leave: up and towards the camera, accelerating.
-    // After the pulse at HOUSE_TOUCH; still under way when composition 10 takes it.
-    const rise = span(t, HOUSE_TOUCH + 0.1, HOST[1] + 0.1) ** 2;
+    // After the payoff has been held (~0.7 s past HOUSE_TOUCH); still under way when composition 10 takes it.
+    const rise = span(t, 21.3, HOST[1] + 0.1) ** 2;
     if (rise > 0) {
       const toCam = cam.position.clone().sub(p).normalize();
       p.addScaledVector(toCam, 4.0 * rise);
@@ -387,12 +402,25 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   el.insertAdjacentHTML(
     'beforeend',
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
-        background:rgba(11,14,19,0.82);font:500 ${30 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
+        background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
      <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1]}px;
         overflow:hidden;background:rgba(11,14,19,0.88)">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
+  const msSize = portrait ? 36 * u : 32 * u;
+  const MS = { laptop: 40, phone: 90, tv: 210 };
+  for (const d of devices) {
+    el.insertAdjacentHTML(
+      'beforeend',
+      `<div class="ms ms-${d.kind}" style="position:absolute;left:0;top:0;opacity:0;display:flex;align-items:center;gap:${10 * u}px;
+          padding:${6 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.86);
+          font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">${MS[d.kind]} ms${
+            d.kind === 'tv' ? `<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span>` : ''
+          }</div>`,
+    );
+    d.label = el.querySelector(`.ms-${d.kind}`);
+  }
   const label = el.querySelector('.t-label');
   const band = el.querySelector('.band');
   const lineEls = [...el.querySelectorAll('.ln')];
@@ -405,9 +433,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     tl.fromTo(ln, { x: from * 220 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, 18.22 + i * 0.03);
   });
   // Held, never still: a slow push on the whole band.
-  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.6 - 18.45, ease: 'none', immediateRender: false }, 18.45);
+  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.2 - 18.45, ease: 'none', immediateRender: false }, 18.45);
   // Leaves fast.
-  tl.to(band, { y: -50 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.6);
+  tl.to(band, { y: -50 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.2);
 
   // --- every frame -------------------------------------------------------------------
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
@@ -420,7 +448,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The plane fades in under the settling dot; brightens briefly at the touch.
     const touch = Math.exp(-Math.max(0, t - HOUSE_TOUCH) * 5) * (t >= HOUSE_TOUCH ? 1 : 0);
-    planeMat.opacity = 0.36 * smooth(span(t, 18.3, 18.75)) + 0.3 * touch;
+    planeMat.opacity = 0.5 * smooth(span(t, 18.3, 18.75)) + 0.4 * touch;
+    const kr = span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.7);
+    ring.visible = kr > 0 && kr < 1;
+    ring.scale.setScalar(0.2 + 1.55 * easeOut(kr));
+    ringMat.opacity = 0.9 * (1 - kr);
 
     for (const d of devices) {
       const grown = clamp01((t - d.start) / d.late);
@@ -428,11 +460,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.bar.visible = on && grown > 0.002;
       d.bar.scale.set(1, Math.max(0.0001, grown * d.late * RISE), 1);
       d.disc.visible = t >= d.start - 0.12;
-      d.guide.visible = d.disc.visible;
+      d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? 1 + 0.9 * Math.exp(-(t - HOUSE_TOUCH) * 10) : 0.0001);
-      for (const seg of d.guide.children) seg.material.opacity = 0.45 * smooth(span(t, d.start - 0.12, d.start + 0.2));
+      for (const seg of d.guide.children) seg.material.opacity = 0.32 * smooth(span(t, d.start - 0.3, d.start));
       const pop = smooth(span(t, d.start - 0.12, d.start));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -442,9 +474,30 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const p = dotWorld(t, probe);
     const s = toScreen(p, probe, W, H);
     const dd = DOT_D * (refDistance / probe.position.distanceTo(p));
-    const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, HOUSE_TOUCH + 0.1, HOUSE_TOUCH + 0.25)));
+    const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, 21.15, 21.3)));
     label.style.opacity = String(show);
     label.style.transform = `translate(${s.x + dd / 2 + 14 * u}px, ${s.y - 22 * u}px)`;
+
+    // The push-through: the whole model rushes past the camera and the layer
+    // is gone before composition 10 sets any type.
+    el.style.opacity = String(1 - smooth(span(t, 21.58, t1 - 0.02)));
+
+    // Each bar's delay, by its start disc: the example values of F8.
+    for (const d of devices) {
+      const sp = toScreen(new THREE.Vector3(d.anchor.x, d.baseY, d.anchor.z), camera, W, H);
+      const o = smooth(span(t, d.start - 0.1, d.start + 0.15)) * (1 - smooth(span(t, 21.4, 21.55)));
+      d.label.style.opacity = String(o);
+      // Right of its disc; the TV's (leftmost, beside the T label) to the
+      // left, or under its disc where the left would leave the frame.
+      const lw = d.label.offsetWidth;
+      let lx = sp.x + 22 * u;
+      let ly = sp.y - msSize * 0.62;
+      if (d.kind === 'tv') {
+        if (sp.x - 22 * u - lw >= 40 * u) lx = sp.x - 22 * u - lw;
+        else { lx = Math.max(40 * u, sp.x - lw / 2); ly = sp.y + 26 * u; }
+      }
+      d.label.style.transform = `translate(${lx}px, ${ly}px)`;
+    }
 
     renderer.render(scene, camera);
   });

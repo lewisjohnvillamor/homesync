@@ -81,12 +81,12 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       // letter has passed left of the dot.
       const kx = span(t, IN[i], IN[i] + 0.5);
       x = travel * (1 - expoOut(kx));
-      y = drop * (1 - cubicOut(span(t, IN[i] + 0.32, IN[i] + 0.64)));
+      y = drop * (1 - cubicOut(span(t, IN[i] + 0.26, IN[i] + 0.52)));
       o = clamp01((t - IN[i]) / 0.14);
     } else {
       x = -travel * (1 - expoOut(kIn));
       // The first line waits for the ground to cover composition 9.
-      o = clamp01((t - IN[i] - (i === 0 ? 0.05 : 0.03)) / 0.12);
+      o = clamp01((t - IN[i] - (i === 0 ? 0.08 : 0.03)) / 0.12);
     }
     if (i < 2) {
       // Eased up and out by the next line.
@@ -95,15 +95,15 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       o *= 1 - clamp01((t - OUT[i]) / 0.22);
     } else {
       // The last line clears to the left, fast.
-      const k = cubicIn(span(t, LEAVE, LEAVE + 0.2));
+      const k = span(t, LEAVE - 0.04, LEAVE + 0.14) ** 2;
       x -= W * 0.55 * k;
-      o *= 1 - clamp01((t - LEAVE - 0.05) / 0.15);
+      o *= 1 - clamp01((t - LEAVE) / 0.08);
     }
     if (t < IN[i]) o = 0;
     return { x, y, o };
   };
 
-  const pushAt = (t) => lerp(1, portrait ? 1.025 : 1.045, span(t, ...PUSH));
+  const pushAt = (t) => lerp(1, portrait ? 1.05 : 1.08, span(t, ...PUSH));
 
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {
@@ -122,7 +122,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       l.style.visibility = p.o > 0.001 ? 'visible' : 'hidden';
     });
     // The ground thins as the words clear, revealing the terminal.
-    ground.style.opacity = String(clamp01(t < t0 + 0.07 ? (t - t0) / 0.07 : 1 - (t - LEAVE - 0.02) / 0.14));
+    ground.style.opacity = String(clamp01(t < t0 + 0.07 ? (t - t0) / 0.07 : 1 - (t - LEAVE - 0.06) / 0.12));
   });
 
   // Hosts the dot from the start of the composition to just after the words
@@ -135,7 +135,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return {
       x: st.x + drift,
       y: st.y,
-      d: st.d * lerp(1.9, 1, k),
+      d: st.d * lerp(1.9, 1, k) * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
       glow: lerp(0.45, 0.08, k) + 0.3 * span(t, LEAVE - 0.05, LEAVE + 0.075),
     };
   });

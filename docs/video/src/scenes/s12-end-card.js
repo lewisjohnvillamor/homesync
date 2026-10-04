@@ -72,7 +72,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   const HOLD = t0;
   const ARRIVE = t0 + 0.5; // 27.375
   const PUSH0 = ARRIVE;
-  const pushAt = (t) => lerp(1, 1.035, span(t, PUSH0, t1));
+  const pushAt = (t) => lerp(1, 1.06, span(t, PUSH0, t1));
 
   // Where composition 11 leaves the cursor.
   const tg = terminalGeo(W, H, u, portrait);
@@ -81,14 +81,14 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
 
   /** The mark's centre (unpushed) at time t. */
   const centre = (t) => {
-    const k = easeInOut(span(t, HOLD, ARRIVE));
+    const k = easeInOut(span(t, HOLD, HOLD + 0.32));
     return { x: lerp(from.x, geo.cx, k), y: lerp(from.y, geo.cy, k) };
   };
   /** The mark's own scale: grows from the size of the cursor it was. */
   const markScale = (t) => lerp(startScale, 1, expoOut(span(t, HOLD + 0.02, ARRIVE + 0.3)));
 
   // Text: rises in, slowing; each line on its own moment, all set by 27.60.
-  const IN = [t0 + 0.2, t0 + 0.3, t0 + 0.38, 28.1];
+  const IN = [t0 + 0.3, t0 + 0.38, t0 + 0.46, 28.1];
   const DUR = [0.55, 0.5, 0.42, 0.6];
 
   onFrame((t) => {
@@ -103,17 +103,18 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     // as they draw; then breathing.
     arcs.forEach((a, i) => {
       const outer = i >= 2;
-      const start = HOLD + 0.1 + (outer ? 0.13 : 0);
+      const start = HOLD + 0.26 + (outer ? 0.12 : 0);
       const k = expoOut(span(t, start, start + 0.6));
       const len = lens[i];
       const vis = len * k;
-      a.style.strokeDasharray = `0 ${(len - vis) / 2} ${vis} ${len}`;
-      a.style.visibility = k > 0.001 ? 'visible' : 'hidden';
+      a.style.strokeDasharray = `${vis} ${len * 2}`;
+      a.style.strokeDashoffset = String(-(len - vis) / 2);
+      a.style.visibility = vis > len * 0.04 ? 'visible' : 'hidden';
       const grow = lerp(0.45, 1, k);
-      const breathe = 1 + 0.022 * Math.sin(((t - ARRIVE) / 1.25) * Math.PI * 2 - (outer ? 0.9 : 0)) * span(t, ARRIVE, ARRIVE + 0.5);
+      const breathe = 1 + 0.05 * Math.sin(((t - ARRIVE) / 1.25) * Math.PI * 2 - (outer ? 0.9 : 0)) * span(t, ARRIVE, ARRIVE + 0.5);
       const s = grow * breathe;
       a.setAttribute('transform', `translate(12 12) scale(${s}) translate(-12 -12)`);
-      a.style.opacity = String(outer ? lerp(1, 0.86, 0.5 + 0.5 * Math.sin(((t - ARRIVE) / 1.25) * Math.PI * 2 - 2.2)) : 1);
+      a.style.opacity = String(outer ? lerp(1, 0.68, 0.5 + 0.5 * Math.sin(((t - ARRIVE) / 1.25) * Math.PI * 2 - 2.2)) : 1);
     });
 
     parts.forEach((node, i) => {
@@ -130,7 +131,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     const p = pushAt(t);
     const ms = markScale(t);
     // The dot breathes with the inner arcs, a touch less.
-    const breathe = 1 + 0.012 * Math.sin(((t - ARRIVE) / 1.25) * Math.PI * 2) * span(t, ARRIVE, ARRIVE + 0.5);
+    const breathe = 1 + 0.035 * Math.sin(((t - ARRIVE) / 1.25) * Math.PI * 2) * span(t, ARRIVE, ARRIVE + 0.5);
     return {
       x: W / 2 + (c.x - W / 2) * p,
       y: H / 2 + (c.y - H / 2) * p,
