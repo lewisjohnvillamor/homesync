@@ -451,6 +451,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const pulse = Math.max(t >= FIRE7 + RUN7 ? Math.exp(-(t - FIRE7 - RUN7) * 5) : 0, t >= ARRIVE8 ? Math.exp(-(t - ARRIVE8) * 5) : 0);
     // As the plane lifts away the dot starts to sink, so the house's drop continues one motion.
     const sinkY = 60 * u * easeIn(span(t, LIFT_SPAN[0], DOT_RELEASE));
+    if (portrait) {
+      // 9:16: T sits at the plane's top-left but the house's dot starts right of
+      // centre (measured at 17.92 s: about (756, 800)); the dot glides there
+      // while the plane drops away, so the hand-over is one movement, not a jump.
+      const g = easeInOut(span(t, 17.66, DOT_RELEASE + 0.02));
+      return { x: lerp(r.x, 756 * u, g), y: lerp(r.y, 800 * u, g), d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
+    }
     return { x: r.x, y: r.y + sinkY, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
   });
 }
