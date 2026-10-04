@@ -155,7 +155,7 @@ function planeTexture() {
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   /** Where the dot hovers on T, in plan: over open floor (16:9: the kitchen's
    * front corner; 9:16: the doorway), never over furniture. */
-  const DOT_XZ = [0.55, -0.85];
+  const DOT_XZ = [0.6, -0.45];
   // Underneath composition 6's diagram, which lifts away to reveal the house.
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
