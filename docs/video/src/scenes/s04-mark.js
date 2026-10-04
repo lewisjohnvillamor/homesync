@@ -192,7 +192,9 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       x: lerp(h.x, pick().x, fall * fall),
       y: lerp(h.y, pick().y, fall),
       // Ease-in: it lets go of the mark slowly, then shrinks to its new size.
-      d: lerp(h.d, pick().d, k * k),
+      // Smooth at both ends, so the last frames before the cut shrink gently
+      // into composition 5's size rather than in one step.
+      d: lerp(h.d, pick().d, easeInOut(k)),
       glow: lerp(h.glow, pick().glow ?? PICKUP.glow, k),
     };
   });

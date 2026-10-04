@@ -223,7 +223,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       s: (portrait ? 0.74 : 1.2) * lerp(1, portrait ? 1.05 : 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
-      px: W / 2 + (portrait ? -10 * u : 10 * u) + (portrait ? 0 : 30) * u * k,
+      px: W / 2 + (portrait ? 2 * u : 10 * u) + (portrait ? 0 : 30) * u * k,
       py: (portrait ? H * 0.41 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
       // 9:16: the house's turn (−70°) would stand the lanes on end, so the plane
@@ -386,7 +386,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       // 9:16 labels are counter-turned so they read screen-horizontal on the turned plane.
       l.ms.style.transform = `translate(${-24 * u * back}px, ${-22 * u * back}px) scale(${lerp(1, 1.5, back)})${portrait ? ` rotate(${-c.rot}deg)` : ''}`;
       // Gone before the plane lifts, so no label is ever seen over the house.
-      l.ms.style.opacity = String(msOn * (1 - span(t, LIFT_SPAN[0] - 0.22, LIFT_SPAN[0] - 0.04)));
+      l.ms.style.opacity = String(msOn * (1 - span(t, 17.32, 17.5)));
 
       // The start fires, and the bar fills from the device's start to T —
       // the bar itself lighting up, never a separate object travelling.
@@ -432,15 +432,20 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // T (and its label) down until it is ≥ 70 px inside the top edge.
     let dy2 = 0;
     if (back > 0) {
-      const top = anchor.getBoundingClientRect();
-      const need = 70 * u - (top.top + top.height / 2);
-      if (need > 0) {
-        dy2 = need / (c.s * Math.max(0.3, Math.cos((c.tilt * Math.PI) / 180)));
+      // Two passes: the first estimate ignores perspective, the second corrects it.
+      for (let pass = 0; pass < 2; pass += 1) {
+        const top = anchor.getBoundingClientRect();
+        const need = 125 * u - (top.top + top.height / 2);
+        if (need <= 0) break;
+        dy2 += need / (c.s * Math.max(0.3, Math.cos((c.tilt * Math.PI) / 180)));
         anchor.style.transform = `translateY(${dy + dy2}px)`;
       }
     }
     const tk7 = lerp(1, 1.25 / c.s, rush * flat);
     tlabel.style.opacity = String(span(t, 11.05, 11.3) * (1 - span(t, 17.32, 17.5)));
+    // The T line starts at the (held) dot, so nothing of it runs above T.
+    const shift = dy + dy2;
+    tline.style.transform = `translateY(${shift}px) scaleY(${Math.max(0, fallK(t) * tTrim - shift / tLen)})`;
     tlabel.style.transform = `translateY(${dy + dy2}px) scale(${Math.max(tk7, 1 / c.s * 0.9)})${portrait ? ` rotate(${-c.rot}deg)` : ''}`;
     // T flashes when a pulse arrives on it: the phone's in 7, all three together in 8.
     const flash = (at) => (t >= at ? Math.exp(-(t - at) * 4) : 0);
