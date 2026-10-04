@@ -164,7 +164,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   );
   /** When the falling T line crosses each lane. */
   const tLen = L.lanes.tv + 70 * u - L.tTop;
-  const fallK = (t) => easeInOut(span(t, ...FALL));
+  const fallK = (t) => easeOut(span(t, ...FALL));
   const REACH = Object.fromEntries(order.map((kind) => {
     const target = (L.lanes[kind] - L.tTop) / tLen;
     let lo = FALL[0];
@@ -308,7 +308,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const fl7 = kind === 'phone' ? span(t, FIRE7 + RUN7, FIRE7 + RUN7 + 0.5) : 0;
       if (fl7 > 0 && fl7 < 1) {
         l.flash.style.opacity = String(1 - fl7);
-        l.flash.style.transform = `scale(${0.6 + 2.6 * easeOut(fl7)})`;
+        // Sized for the close-up: ≤ ~170 px across on screen, clear of the label above.
+        l.flash.style.transform = `scale(${0.25 + 0.55 * easeOut(fl7)})`;
       } else {
         l.flash.style.opacity = String(fl > 0 && fl < 1 ? 0.9 * (1 - fl) : 0);
         l.flash.style.transform = `scale(${0.4 + 1.4 * easeOut(fl)})`;

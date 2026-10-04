@@ -21,7 +21,6 @@ export const pad = [0.35, 0];
 
 const easeOut = (k) => 1 - (1 - k) ** 3;
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
-const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
 
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   const size = portrait ? 100 * u : 184 * u;
@@ -86,12 +85,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = portrait ? 1.025 : 1.05;
-  const DRIFT = (portrait ? 10 : 24) * u;
+  const PUSH = portrait ? 1.03 : 1.05;
+  const DRIFT = (portrait ? 14 : 24) * u;
   // The push starts just before the dot lands (the dot follows it exactly);
   // the lines only start drifting once it has landed.
-  const pushAt = (t) => lerp(1, PUSH, sineInOut(span(t, MERGED - 0.3, EXIT)));
-  const driftAt = (t) => sineInOut(span(t, MERGED, EXIT)) * DRIFT;
+  // A steady push (linear, as a slow push may be): no stretch of it is still.
+  const pushAt = (t) => lerp(1, PUSH, span(t, MERGED - 0.3, EXIT));
+  const driftAt = (t) => span(t, MERGED, EXIT) * DRIFT;
 
   /**
    * Where the full stop is at time t. The hold's push is about the
