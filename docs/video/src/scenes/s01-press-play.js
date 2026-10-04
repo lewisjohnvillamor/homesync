@@ -85,7 +85,7 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
     ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * (1 - ring) ** 1.5})`;
     ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
     ctx.beginPath();
-    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.35 * easeOut(ring)), 0, Math.PI * 2);
+    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.15 * easeOut(ring)), 0, Math.PI * 2);
     ctx.stroke();
   }
   // Title line and progress line: the shape of a player, not words.
@@ -166,7 +166,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       }
     : {
         fov: 30,
-        c1: { el: 38, tg: [0.25, 0.25, 0.0], d0: 4.05, d1: 3.75, orb0: 0.42, orb1: 0.35 },
+        c1: { el: 38, tx0: 0.62, tg: [0.25, 0.25, 0.0], d0: 3.95, d1: 3.75, orb0: 0.42, orb1: 0.35 },
         c2: { el: 42, tg: [0.1, 0.0, -0.2], d: 4.6, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
@@ -181,7 +181,10 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     const elevation = lerp(c1.el, c2.el, rise) * (Math.PI / 180);
     const distance = lerp(lerp(c1.d0, c1.d1, intro), c2.d * lerp(1, 0.965, after), rise);
     const orbit = lerp(lerp(c1.orb0, c1.orb1, intro), c2.orbDrift * after, rise);
-    const target = new THREE.Vector3(lerp(c1.tg[0], c2.tg[0], rise), lerp(c1.tg[1], c2.tg[1], rise), lerp(c1.tg[2], c2.tg[2], rise));
+    // Frame one is framed on the devices; the camera drifts across to take in
+    // the floor where the press line will be drawn, arriving as it is.
+    const tx1 = lerp(c1.tx0 ?? c1.tg[0], c1.tg[0], smooth(span(t, 0, 0.56)));
+    const target = new THREE.Vector3(lerp(tx1, c2.tg[0], rise), lerp(c1.tg[1], c2.tg[1], rise), lerp(c1.tg[2], c2.tg[2], rise));
     cam.position.set(
       target.x + Math.sin(orbit) * distance * Math.cos(elevation),
       target.y + distance * Math.sin(elevation),
@@ -244,6 +247,30 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     blob.scale.set(HALF[d.kind] * d.s * 2.25, DEPTH[d.kind] * d.s * 2.1 + 0.05, 1);
     blob.renderOrder = 1;
     scene.add(blob);
+  }
+  // And a tight, dark contact line right under the laptop's base and the
+  // phone's stand: a softened rectangle exactly the footprint's size.
+  const tightCanvas = document.createElement('canvas');
+  tightCanvas.width = tightCanvas.height = 256;
+  const tc = tightCanvas.getContext('2d');
+  tc.filter = 'blur(9px)';
+  tc.fillStyle = 'rgba(0,0,0,0.95)';
+  tc.fillRect(22, 22, 212, 212);
+  const tight = new THREE.CanvasTexture(tightCanvas);
+  tight.colorSpace = THREE.SRGBColorSpace;
+  const FOOT = { laptop: [0.34, 0.235], phone: [0.09, 0.06], tv: [0.5, 0.11] };
+  for (const d of devices) {
+    const [fw, fd] = FOOT[d.kind];
+    const line = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: tight, transparent: true, depthWrite: false, color: '#000000' }),
+    );
+    line.rotation.x = -Math.PI / 2;
+    line.rotation.z = LAYOUT.turn;
+    line.position.set(d.x, 0.001, d.z);
+    line.scale.set(fw * d.s * 1.12, fd * d.s * 1.18, 1);
+    line.renderOrder = 1;
+    scene.add(line);
   }
 
   // The press line: one line across the floor, the moment all three were pressed.

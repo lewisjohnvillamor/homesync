@@ -7,7 +7,7 @@
 
 export function build({ el, tl, u, portrait, t0, t1 }) {
   el.innerHTML = `
-    <div class="line" style="position:absolute;left:${portrait ? 70 * u : 104 * u}px;top:${portrait ? 1060 * u : 846 * u}px;
+    <div class="line" style="position:absolute;left:${portrait ? 70 * u : 104 * u}px;top:${portrait ? 1290 * u : 846 * u}px;
          font:700 ${portrait ? 88 * u : 84 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);
          ${portrait ? `width:${800 * u}px` : 'white-space:nowrap'}">…and works out how early to start.</div>`;
   const line = el.querySelector('.line');

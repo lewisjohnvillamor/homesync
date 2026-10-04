@@ -53,7 +53,7 @@ const C9 = 18.125;
  * diagram is ever seen through or over the house; it only moves off it.
  */
 const LIFT = 17.85;
-const LIFT_SPAN = [17.74, 18.14];
+const LIFT_SPAN = [17.74, 18.08];
 /**
  * The dot stays where T was as the plane drops away beneath it (everything of
  * the diagram moves away from it, nothing crosses it), then is let go and the
@@ -194,10 +194,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return { s: lerp(1, 1.05, k), fx: W / 2, fy: H * 0.55, px: W / 2 - 30 * u * k, py: H * 0.55 - 14 * u * k, tilt: 0, rot: 0 };
   };
   const camB = (t) => ({
-    s: (portrait ? 590 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
+    s: (portrait ? 520 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
     fx: L.tX,
     fy: L.lanes.phone,
-    px: (portrait ? W - 150 * u : 1650 * u) - 24 * u * sine(span(t, C7 + 0.6, C8)),
+    px: (portrait ? W - 120 * u : 1650 * u) - 24 * u * sine(span(t, C7 + 0.6, C8)),
     py: portrait ? 900 * u : 420 * u,
     tilt: 0,
     rot: 0,
@@ -393,7 +393,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     restDot = { x: ar.left + ar.width / 2, y: ar.top + ar.height / 2, d: Math.min(46 * u, Math.max(24 * u, (ar.width + ar.height) / 2)) };
     const lift = span(t, ...LIFT_SPAN);
     if (lift > 0) {
-      const e = lift ** 1.6;
+      const e = lift ** 1.25;
       const g = 1 + 1.1 * e;
       const fall = 1.25 * H * e;
       perspEl.style.transformOrigin = '0 0';

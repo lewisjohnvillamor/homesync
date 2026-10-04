@@ -26,7 +26,7 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
 
 /** Times, on beats where an action happens. */
-const REVEAL = 7.94; // the reveal opens as composition 4's arcs and wordmark finish leaving (gone by 7.98)
+const REVEAL = 7.935; // the reveal opens as composition 4's arcs and wordmark finish leaving (gone by 7.98)
 /** The phone comes in once the reveal has opened most of the frame. */
 const ENTER = 8.12;
 const SCAN = [8.4, 8.75]; // the scan completes on beat 14
@@ -103,7 +103,8 @@ export function roomHtml(pw, text = true, textScale = 1) {
  */
 export function joinTrack(W, H, u, portrait) {
   // --- geometry ------------------------------------------------------------
-  const phoneH = portrait ? 1380 * u : 1000 * u;
+  // 9:16: about 76 % of the frame width, cropped by the bottom edge.
+  const phoneH = portrait ? 1700 * u : 1000 * u;
   const phoneW = phoneH * 0.485;
   const inset = phoneW * 0.035;
   const glassW = phoneW - 2 * inset;
@@ -116,19 +117,23 @@ export function joinTrack(W, H, u, portrait) {
   /** The laptop makes room for the phone after the scan. */
   const laptopShift = (t) => {
     const k = easeInOut(span(t, 8.72, 9.25));
-    return portrait ? { x: 0, y: -40 * u * k } : { x: -60 * u * k, y: 0 };
+    return portrait ? { x: 0, y: -40 * u * k } : { x: -140 * u * k, y: 0 };
   };
 
-  const rest = portrait ? { x: W / 2 - phoneW / 2, y: H * 0.38 } : { x: 1480 * u - phoneW / 2, y: (H - phoneH) / 2 + 20 * u };
+  const rest = portrait ? { x: W / 2 - phoneW / 2, y: 520 * u } : { x: 1480 * u - phoneW / 2, y: (H - phoneH) / 2 + 20 * u };
+  // 9:16: the phone is held low, below the code, its camera looking up at it.
   const over = portrait
-    ? { x: W / 2 - phoneW / 2, y: qrC0.y - (inset + 0.3 * glassH + 0.38 * phoneW) }
+    ? { x: W / 2 - phoneW / 2, y: 610 * u }
     : { x: qrC0.x - phoneW / 2, y: rest.y };
+  /** The viewfinder's centre with the phone at `over`: the code shows centred in the brackets there. */
+  const vfOver = { x: over.x + inset + 0.5 * glassW, y: over.y + inset + 0.3 * glassH + 0.38 * phoneW };
+  const vfOffset = { x: qrC0.x - vfOver.x, y: qrC0.y - vfOver.y };
   const enter = portrait ? { x: over.x, y: H + 60 * u } : { x: W + 60 * u, y: rest.y };
 
   // Screen coordinates within the phone (fractions of the glass).
   const button = { x: 0.03, y: 0.65, w: 0.94, h: 0.11 };
   const face = { fx: 0.895, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
-  const wait = { fx: 0.895, fy: 0.84 }; // where it rides in, below where the button will be
+  const wait = { fx: 0.895, fy: portrait ? 0.72 : 0.84 }; // where it rides in, below where the button will be
   const indicator = { fx: 0.83, fy: 0.585 };
   const fs = phoneW * 0.088;
 
@@ -149,11 +154,17 @@ export function joinTrack(W, H, u, portrait) {
   // shrinks. It pushes about a fixed point low on the phone.
   // 16:9 pushes less than before, so the phone reads as a phone (both edges and
   // ground around it), centred in frame; its words are set larger to stay ≥ 48 px.
-  const PUSH = portrait ? 1.17 : 1.45;
+  const PUSH = portrait ? 1.06 : 1.45;
   const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
+  // 16:9: pushed in, the phone is centred near x 1000 with its rounded
+  // bottom end in frame (so it reads as a phone), the code half off the left.
+  const target = { x: 1000 * u, y: 1040 * u - (phoneH * PUSH) / 2 };
   const O = portrait
     ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
-    : { x: (1060 * u - PUSH * (rest.x + phoneW / 2)) / (1 - PUSH), y: rest.y + phoneH * 0.62 };
+    : {
+        x: (PUSH * (rest.x + phoneW / 2) - target.x) / (PUSH - 1),
+        y: (PUSH * (rest.y + phoneH / 2) - target.y) / (PUSH - 1),
+      };
   const L = laneLayout(W, H, u, portrait);
   const icon = L.phoneIcon;
 
@@ -181,16 +192,16 @@ export function joinTrack(W, H, u, portrait) {
     return { x: r.x + (inset + fx * glassW) * r.s, y: r.y + (inset + fy * glassH) * r.s, s: r.s };
   };
 
-  return { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phonePose, phoneRect, onGlass };
+  return { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phonePose, phoneRect, onGlass, vfOffset };
 }
 
 export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
-  const { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phoneRect, onGlass } = joinTrack(W, H, u, portrait);
+  const { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phoneRect, onGlass, vfOffset } = joinTrack(W, H, u, portrait);
   /** 16:9 sets the interface words larger (its push-in is smaller). */
   const tScale = 1;
   const roomScale = portrait ? 1 : 1.12;
   /** The press ring's circle: around the dot, inside the button's free right end. */
-  const well = button.h * glassH * 0.75;
+  const well = button.h * glassH * 0.62;
 
   // --- the laptop ----------------------------------------------------------
   const lid = 14 * u;
@@ -232,7 +243,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
                border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.035}px;
                display:flex;align-items:center;font:600 ${fs * 0.92 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
-          <div class="socket" style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
+          <div class="pressed" style="position:absolute;inset:0;background:var(--accent-ink);opacity:0"></div>
+          <div class="socket" style="display:none;position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
                border-radius:50%;background:var(--accent-ink);opacity:0"></div>
           <div style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${well}px;height:${well}px;margin:${-well / 2}px 0 0 ${-well / 2}px;
                border-radius:50%;overflow:hidden">
@@ -252,7 +264,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const join = el.querySelector('.join');
   const btn = el.querySelector('.btn');
   const ripple = el.querySelector('.ripple');
-  const socket = el.querySelector('.socket');
+  const pressed = el.querySelector('.pressed');
   const room = el.querySelector('.room');
   const meText = el.querySelector('.me-text');
 
@@ -277,15 +289,16 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return {
       x: lerp(P0.x, onPhone.x, catchK),
       y: lerp(P0.y, onPhone.y, catchK) + sink * 3 * u * onPhone.s,
-      d: D * (1 - 0.12 * sink) * lerp(1, 1.1, span(t, JOINED - 0.1, JOINED + 0.1)),
+      d: D * (1 - 0.15 * sink) * lerp(1, 1.1, span(t, JOINED - 0.1, JOINED + 0.1)),
       glow: 0.25 + 0.4 * sink,
     };
   };
   hostDot(HOST[0], HOST[1], dotAt);
-  // The laptop's screen opens from where the dot lands, after composition 4 has cleared.
-  const irisC = dotAt(HOST[0]);
-  // Just far enough to clear the farthest corner, so the opening is seen growing for its whole 0.32 s.
-  const irisR = Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - irisC.x, y - irisC.y))) + 260 * u;
+  // The laptop's screen opens from the code's centre — so the code is never a
+  // fragment — with a wide feathered edge, as composition 4 finishes leaving.
+  const irisC = qrC0;
+  const FEATHER = 0.5; // fully opaque out to half the radius, fading to nothing at the edge
+  const irisR = Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - irisC.x, y - irisC.y))) / FEATHER;
 
   onFrame((t) => {
     el.style.opacity = t < REVEAL ? '0' : '1';
@@ -301,10 +314,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // Once the phone has the code, the laptop steps back (dimmed) so the phone leads.
     world.style.opacity = String((1 - out) * lerp(1, 0.38, easeInOut(span(t, 8.95, 9.5))));
     // A soft-edged reveal over 0.32 s; the phone is inside it, so nothing appears outside the opening.
-    const ik = span(t, REVEAL, 8.3);
-    const ir = lerp(80 * u, irisR, 1 - (1 - ik) ** 2);
-    const soft = 260 * u;
-    const mask = ik < 1 ? `radial-gradient(circle at ${irisC.x}px ${irisC.y}px, #000 ${Math.max(0, ir - soft)}px, transparent ${ir + 1}px)` : 'none';
+    const ik = span(t, REVEAL, 8.25);
+    const ir = irisR * (1 - (1 - ik) ** 2.2) + 1;
+    const mask = ik < 1 ? `radial-gradient(circle at ${irisC.x}px ${irisC.y}px, #000 ${ir * FEATHER}px, transparent ${ir}px)` : 'none';
     el.style.maskImage = mask;
     el.style.webkitMaskImage = mask;
 
@@ -315,7 +327,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const qrC = { x: qrC0.x + sh.x, y: qrC0.y + sh.y };
     const k = 0.9 / r.s;
     vfQr.style.transform =
-      `translate(${(qrC.x - vf.x) * k + Math.sin(t * 5) * 4 * u}px, ${(qrC.y - vf.y) * k + Math.cos(t * 4) * 3 * u}px) rotate(${Math.sin(t * 3) * 1.2}deg)`;
+      `translate(${(qrC.x - vf.x - vfOffset.x) * k + Math.sin(t * 5) * 4 * u}px, ${(qrC.y - vf.y - vfOffset.y) * k + Math.cos(t * 4) * 3 * u}px) rotate(${Math.sin(t * 3) * 1.2}deg)`;
     const scanK = easeInOut(span(t, ...SCAN));
     scanline.style.top = `${lerp(31, 29 + (phoneW * 0.76 * 100) / glassH, scanK)}%`;
     scanline.style.opacity = String(t > SCAN[0] - 0.04 && t < SCAN[1] + 0.03 ? 1 : 0);
@@ -331,10 +343,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // The press: the button sinks 3 px and a ripple spreads from the dot.
     const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
     btn.style.transform = `translateY(${sink * 3 * u}px) scale(${1 - 0.012 * sink})`;
-    // Where the dot lands on the button a dark well opens, so the accent dot reads on the accent button.
-    const well = span(t, PRESS - 0.16, PRESS - 0.04) * (1 - span(t, PRESS + 0.3, PRESS + 0.45));
-    socket.style.opacity = String(well);
-    socket.style.transform = `scale(${0.6 + 0.4 * easeOut(well)})`;
+    // Pressed, the button darkens (so the solid dot reads on it), until the dot has lifted off it.
+    const down = span(t, PRESS - 0.12, PRESS - 0.02) * (1 - span(t, PRESS + 0.42, PRESS + 0.6));
+    pressed.style.opacity = String(0.5 * down);
     const rip = span(t, PRESS, PRESS + 0.45);
     ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.7 * (1 - rip) : 0);
     // The ring stays inside a circle around the dot, at the button's free end, never over the words.

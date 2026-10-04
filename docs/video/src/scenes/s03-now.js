@@ -23,12 +23,17 @@ const easeOut = (k) => 1 - (1 - k) ** 3;
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
-  const size = portrait ? 100 * u : 184 * u;
+  // 16:9: two lines across the frame. 9:16: four lines at about twice the
+  // size, so the type fills the frame; the full stop always ends the last.
+  const size = portrait ? 176 * u : 184 * u;
+  const texts = portrait ? ['Nothing', 'tells them', 'when “now”', 'is'] : ['Nothing tells them', 'when “now” is'];
+  const lineStyle = `position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)`;
   el.innerHTML = `
     <div class="ground" style="position:absolute;inset:0;background:var(--bg)"></div>
     <div class="words" style="position:absolute;inset:0"><div class="push" style="position:absolute;inset:0">
-      <div class="l1" style="position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)">Nothing tells them</div>
-      <div class="l2" style="position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)">when “now” is<span class="bl" style="display:inline-block;width:0;height:0"></span></div>
+      ${texts
+        .map((txt, i) => `<div class="ln" style="${lineStyle}">${txt}${i === texts.length - 1 ? '<span class="bl" style="display:inline-block;width:0;height:0"></span>' : ''}</div>`)
+        .join('')}
     </div></div>
     <i class="m m1" style="position:absolute;left:0;top:0;border-radius:50%;background:var(--accent)"></i>
     <i class="m m2" style="position:absolute;left:0;top:0;border-radius:50%;background:var(--accent)"></i>`;
@@ -37,29 +42,37 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   const words = el.querySelector('.words');
   const pushEl = el.querySelector('.push');
   const bl = el.querySelector('.bl');
-  const l1 = el.querySelector('.l1');
-  const l2 = el.querySelector('.l2');
+  const lines = [...el.querySelectorAll('.ln')];
+  const last = lines[lines.length - 1];
+  /** First half of the lines arrive from the left and drift left; the rest from the right. */
+  const side = (i) => (i < lines.length / 2 ? -1 : 1);
   const extras = [el.querySelector('.m1'), el.querySelector('.m2')];
 
   // Layout, once the font is in: a centred two-line block whose second line
   // ends in the dot. The full stop is a circle the size of the font's own.
   const geo = { stop: { x: W * 0.7, y: H * 0.6 }, d: size * 0.19, bottom: H * 0.65 };
   const layout = () => {
-    const w1 = l1.getBoundingClientRect().width;
-    const w2 = l2.getBoundingClientRect().width;
+    const ws = lines.map((l) => l.getBoundingClientRect().width);
+    const wl = ws[ws.length - 1];
     const gap = size * 0.05;
-    const block = Math.max(w1, w2 + gap + geo.d);
+    const block = Math.max(...ws.slice(0, -1), wl + gap + geo.d);
     const left = (W - block) / 2;
-    const lineH = size * 1.08;
-    const top = H / 2 - lineH + (portrait ? 0 : -size * 0.04);
-    l1.style.left = `${left}px`;
-    l1.style.top = `${top}px`;
-    l2.style.left = `${left + block - (w2 + gap + geo.d)}px`;
-    l2.style.top = `${top + lineH}px`;
+    const lineH = size * (portrait ? 1.02 : 1.08);
+    const n = lines.length;
+    const top = H / 2 - (n * lineH) / 2 + (portrait ? 0 : size * 0.04);
+    lines.forEach((l, i) => {
+      // 16:9: the last line is set flush right, ending in the stop; 9:16:
+      // every line flush left.
+      const x = !portrait && i === n - 1 ? left + block - (wl + gap + geo.d) : left;
+      l.style.left = `${x}px`;
+      l.style.top = `${top + i * lineH}px`;
+    });
     // The baseline, measured: a zero-height inline box sits on it.
-    const baseline = top + lineH + bl.offsetTop;
-    geo.stop = { x: left + block - geo.d / 2, y: baseline - geo.d / 2 };
-    geo.bottom = top + lineH + size;
+    const lastTop = top + (n - 1) * lineH;
+    const baseline = lastTop + bl.offsetTop;
+    const lastLeft = !portrait ? left + block - (wl + gap + geo.d) : left;
+    geo.stop = { x: lastLeft + wl + gap + geo.d / 2, y: baseline - geo.d / 2 };
+    geo.bottom = lastTop + size;
   };
   layout();
   waitFor(document.fonts.ready.then(layout));
@@ -67,17 +80,24 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   // Times.
   const LIFT = t0 - 0.35; // 3.40: the markers lift off the floor
   const SWEEP = t0; // 3.75: they sweep under the sentence…
-  const MERGED = t0 + 0.65; // 4.40: …and merge into the full stop, once both lines have stopped
+  const MERGED = t0 + 0.65; // 4.40: …and merge into the full stop, once every line has stopped
   const EXIT = 5.9;
 
   // Plain ground arrives under the sinking floor; it is fully there before
   // the first word is.
   tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.inOut' }, LIFT);
   // The lines from opposite sides, slowing as they land; set by 4.40 s.
-  const enter = portrait ? { y: -260 * u } : { x: -520 * u };
-  const enter2 = portrait ? { y: 230 * u } : { x: 520 * u };
-  tl.fromTo(l1, { ...enter, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: 'expo.out' }, t0 - 0.17);
-  tl.fromTo(l2, { ...enter2, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.55, ease: 'expo.out' }, t0 - 0.07);
+  // (in 9:16 too they come from the sides, so nothing crosses the markers'
+  // row below the sentence)
+  lines.forEach((l, i) => {
+    const late = i >= lines.length / 2;
+    tl.fromTo(
+      l,
+      { x: side(i) * (portrait ? 420 : 520) * u, opacity: 0 },
+      { x: 0, opacity: 1, duration: late ? 0.55 : 0.6, ease: 'expo.out' },
+      t0 - 0.17 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
+    );
+  });
   // Then the words rush past the camera; the full stop stays.
   const EXIT_DUR = 0.32;
   tl.to(words, { scale: 2.6, opacity: 0, filter: 'blur(14px)', duration: EXIT_DUR, ease: 'power3.in' }, EXIT);
@@ -121,12 +141,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   const markers = () => (handoff.markersAt ? handoff.markersAt(LIFT) : []);
 
   /** The row below the sentence the markers lift into. */
-  const rowY = () => geo.bottom + (portrait ? 400 : 120) * u;
+  const rowY = () => geo.bottom + (portrait ? 170 : 120) * u;
   const margin = 110 * u;
 
   /** A marker's path at t: lift towards the camera, sweep, merge. */
   const markerAt = (m, i, t) => {
-    const lift = easeOut(span(t, LIFT, SWEEP));
+    // Quick enough to be in the row below before the words arrive over it.
+    const lift = easeOut(span(t, LIFT, LIFT + 0.24));
     // Lifted: larger, lower, a little closer together, inside the margins.
     // Spread evenly about where they were, laptop to the left, TV to the
     // right, so no two ever overlap.
@@ -158,8 +179,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   onFrame((t) => {
     if (t < LIFT || t >= t1) return;
-    l1.style.translate = `${-driftAt(t)}px 0`;
-    l2.style.translate = `${driftAt(t)}px 0`;
+    lines.forEach((l, i) => {
+      l.style.translate = `${side(i) * driftAt(t)}px 0`;
+    });
     pushEl.style.scale = String(pushAt(Math.min(t, EXIT)));
     const o = stopAt(EXIT);
     words.style.transformOrigin = `${o.x}px ${o.y}px`;

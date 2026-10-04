@@ -38,7 +38,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   // 16:9: the lockup spans 90 % of the width (96 px margins) with a larger
   // word; 9:16: the mark ~80 % of the width, the lockup centred vertically.
   const wordSize = portrait ? 176 * u : 205 * u;
-  const S = portrait ? (0.8 * W) / (1.02 * PUSH) : (0.9 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
+  const S = portrait ? (0.78 * W) / (1.02 * PUSH) : (0.88 * W - 5.43 * wordSize) / (1.02 * PUSH + GAPK);
   /** Clear space between the outer arc (at its largest, with the push) and the word. */
   const GAP = portrait ? 0 : GAPK * S;
 
@@ -98,8 +98,13 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
   const from = () => handoff.stopAt?.(START) ?? { x: W * 0.7, y: H * 0.6, d: 30 * u };
   const dotFull = S * MARK_DOT_RATIO;
 
+  /** The whole lockup's push through the hold: 3 %, about the frame's centre. */
+  const LOCK = 1.03;
+  const lockAt = (t) => lerp(1, LOCK, span(t, HOME, LEAVE));
+  const pushed = (p, t) => ({ x: W / 2 + (p.x - W / 2) * lockAt(t), y: H / 2 + (p.y - H / 2) * lockAt(t) });
   /** The dot's path and size: glides home while it grows into the mark's centre. */
-  const centre = (t) => {
+  const centre = (t) => pushed(centreRaw(t), t);
+  const centreRaw = (t) => {
     const f = from();
     const k = easeInOut(span(t, START, HOME));
     // A gentle arc, never a straight cursor-like line: the dot dips under the
@@ -112,7 +117,7 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     const f = from();
     // Moves inward first, then grows: the mark is never born at the frame's edge.
     const grow = lerp(f.d / dotFull, 1, easeInOut(span(t, START + 0.2, HOME)));
-    return grow * lerp(1, PUSH, span(t, HOME, LEAVE));
+    return grow * lerp(1, PUSH, span(t, HOME, LEAVE)) * lockAt(t);
   };
   /** Breathing during the hold, ramped in so it never fights the arrival. */
   const breathe = (t) => clamp01((t - HOME) / 0.3);
@@ -149,7 +154,9 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     // Arcs and word leave the same way: up and out.
     const wy = geo.wy + (portrait ? (1 - w) * 120 * u + drift : 0) - liftBy;
     word.style.visibility = gone || t < WORD ? 'hidden' : 'visible';
-    word.style.transform = `translate(${wx}px, ${wy}px)`;
+    const wp = pushed({ x: wx, y: wy + liftBy }, t);
+    word.style.transformOrigin = '0 0';
+    word.style.transform = `translate(${wp.x}px, ${wp.y - liftBy}px) scale(${lockAt(t)})`;
     // In 9:16 the word, under the mark, rises through where the dot falls:
     // it is gone (3 frames) before it gets there.
     const out = portrait ? easeOut(span(t, LEAVE, LEAVE + 0.045)) : lift;
