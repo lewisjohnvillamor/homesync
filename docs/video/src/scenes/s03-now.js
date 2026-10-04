@@ -25,7 +25,7 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   // 16:9: two lines across the frame. 9:16: four lines at about twice the
   // size, so the type fills the frame; the full stop always ends the last.
-  const size = portrait ? 176 * u : 184 * u;
+  const size = portrait ? 150 * u : 184 * u;
   const texts = portrait ? ['Nothing', 'tells them', 'when “now”', 'is'] : ['Nothing tells them', 'when “now” is'];
   const lineStyle = `position:absolute;white-space:nowrap;font:800 ${size}px/1 var(--sans);letter-spacing:-0.035em;color:var(--text)`;
   el.innerHTML = `
@@ -105,8 +105,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = portrait ? 1.03 : 1.05;
-  const DRIFT = (portrait ? 14 : 24) * u;
+  const PUSH = portrait ? 1.035 : 1.05;
+  // In 9:16 the four lines nearly fill the width: no sideways drift there,
+  // only the push.
+  const DRIFT = (portrait ? 0 : 24) * u;
   // The push starts just before the dot lands (the dot follows it exactly);
   // the lines only start drifting once it has landed.
   // A steady push (linear, as a slow push may be): no stretch of it is still.
