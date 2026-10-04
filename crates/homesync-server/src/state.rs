@@ -322,6 +322,51 @@ impl App {
         restored
     }
 
+    /// Puts each room's queue back where the previous run left it.
+    ///
+    /// Returns how many rooms got a queue back. Run after
+    /// [`Self::restore_saved_rooms`], and after the catalogue has been scanned,
+    /// because a remembered queue is checked against it: a track whose file has
+    /// since been deleted or moved off a drive that is no longer mounted must
+    /// not come back, since a queue entry nothing can serve stops the room
+    /// waiting for a device that will never be ready.
+    ///
+    /// Everything comes back paused. The queue, the place in it, shuffle and
+    /// repeat are restored; the transport is not, because a house that starts
+    /// playing on its own because a coordinator was restarted is a worse
+    /// surprise than having to press Play.
+    pub fn restore_saved_queues(&self) -> usize {
+        // Rooms before media. Every other path that holds both — building a
+        // snapshot, which reaches for the manifest while the room table is
+        // locked — takes them in that order, and taking them the other way
+        // round here would be a deadlock waiting for the one run where this is
+        // not the only thing happening.
+        let mut rooms = self.rooms();
+        let media = self.media.read().unwrap_or_else(|e| e.into_inner());
+        let mut restored = 0;
+        for room in rooms.values_mut() {
+            let Some(saved) = self.profiles.room_playback(&room.code) else { continue };
+            if !room.queue.is_empty() {
+                continue;
+            }
+            let playable: Vec<String> = saved.queue.into_iter().filter(|id| media.contains(id)).collect();
+            if playable.is_empty() {
+                continue;
+            }
+            let dropped = saved.queue_index;
+            room.restore_queue(playable, saved.queue_index, saved.shuffle, saved.repeat);
+            tracing::info!(
+                room = %room.code,
+                tracks = room.queue.len(),
+                at = room.queue_index,
+                was_at = dropped,
+                "restored the queue from the previous run"
+            );
+            restored += 1;
+        }
+        restored
+    }
+
     /// Drops rooms that nobody is in and nobody has been in for a while.
     ///
     /// Without this the room table grows for the life of the process: every

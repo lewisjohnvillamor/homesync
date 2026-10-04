@@ -15,8 +15,8 @@
 
 use futures_util::{SinkExt, StreamExt};
 use homesync_protocol::{
-    Envelope, Hello, JoinRoom, Payload, Role, RoomSnapshot, SelectSource, Skip, SleepTimer, SourceMode,
-    PROTOCOL_VERSION,
+    Envelope, Hello, JoinRoom, Payload, PlaybackModes, RepeatMode, Role, RoomSnapshot, SelectSource, Skip, SleepTimer,
+    SourceMode, TransportState, PROTOCOL_VERSION,
 };
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,7 +25,10 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
-const PORT: u16 = 18163;
+/// A port per test. These run in parallel in one binary, so a shared port
+/// means the second coordinator cannot bind and both tests fail together.
+const PORT_SKIP: u16 = 18163;
+const PORT_RESTART: u16 = 18164;
 const ROOM: &str = "SKIPLS";
 const SECRET: &str = "skip-secret";
 
@@ -41,9 +44,12 @@ impl Drop for Coordinator {
 }
 
 /// Three short WAVs, so the queue has something real to skip through.
-fn media() -> (PathBuf, Vec<String>) {
+///
+/// `tag` keeps each test's library its own: two tests sharing a directory
+/// means the one that finishes first deletes the other's files.
+fn media(tag: &str) -> (PathBuf, Vec<String>) {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("homesync-skip-{}", std::process::id()));
+    dir.push(format!("homesync-skip-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("media dir");
 
@@ -72,13 +78,13 @@ fn media() -> (PathBuf, Vec<String>) {
     (dir, ids)
 }
 
-async fn start_coordinator(media_dir: &Path, state_file: &Path) -> Coordinator {
+async fn start_coordinator(port: u16, media_dir: &Path, state_file: &Path) -> Coordinator {
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_homesync"))
         .args([
             "--bind",
             "127.0.0.1",
             "--port",
-            &PORT.to_string(),
+            &port.to_string(),
             "--room-code",
             ROOM,
             "--room-secret",
@@ -97,7 +103,7 @@ async fn start_coordinator(media_dir: &Path, state_file: &Path) -> Coordinator {
     let coordinator = Coordinator(child);
 
     for _ in 0..100 {
-        if TcpStream::connect(("127.0.0.1", PORT)).await.is_ok() {
+        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
             return coordinator;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -110,8 +116,8 @@ fn frame(payload: Payload) -> Message {
     Message::Text(serde_json::to_string(&envelope).expect("serialise").into())
 }
 
-async fn join(name: &str, role: Role) -> Socket {
-    let (mut socket, _) = connect_async(format!("ws://127.0.0.1:{PORT}/ws")).await.expect("connect");
+async fn join(port: u16, name: &str, role: Role) -> Socket {
+    let (mut socket, _) = connect_async(format!("ws://127.0.0.1:{port}/ws")).await.expect("connect");
     socket
         .send(frame(Payload::Hello(Hello {
             client_version: "skip-test".into(),
@@ -151,13 +157,13 @@ async fn snapshot_where(socket: &mut Socket, wanted: impl Fn(&RoomSnapshot) -> b
 
 #[tokio::test(flavor = "multi_thread")]
 async fn skipping_moves_the_whole_room_and_the_sleep_timer_reaches_every_device() {
-    let (dir, ids) = media();
+    let (dir, ids) = media("skip");
     let mut state_file = dir.clone();
     state_file.push("state.json");
-    let _coordinator = start_coordinator(&dir, &state_file).await;
+    let _coordinator = start_coordinator(PORT_SKIP, &dir, &state_file).await;
 
-    let mut controller = join("Phone", Role::Controller).await;
-    let mut speaker = join("Kitchen", Role::Speaker).await;
+    let mut controller = join(PORT_SKIP, "Phone", Role::Controller).await;
+    let mut speaker = join(PORT_SKIP, "Kitchen", Role::Speaker).await;
 
     controller
         .send(frame(Payload::SelectSource(SelectSource {
@@ -207,6 +213,58 @@ async fn skipping_moves_the_whole_room_and_the_sleep_timer_reaches_every_device(
         capped - armed < 12 * 60 * 60 * 1_000_000_000,
         "and no longer than the twelve-hour cap: {capped} against {armed}"
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The queue comes back after the coordinator is restarted.
+///
+/// A room used to remember only its code, secret and name, so a restart left
+/// every device looking at an empty queue — the one thing that makes a restart
+/// feel like data loss rather than a restart. Saving the queue as a *playlist*
+/// was the only way to keep it, which is a thing to remember to do.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rooms_queue_survives_a_restart() {
+    let (dir, ids) = media("restart");
+    let mut state_file = dir.clone();
+    state_file.push("queue-state.json");
+    let coordinator = start_coordinator(PORT_RESTART, &dir, &state_file).await;
+
+    let mut controller = join(PORT_RESTART, "Phone", Role::Controller).await;
+    controller
+        .send(frame(Payload::SelectSource(SelectSource {
+            mode: SourceMode::ControlledAudio,
+            queue: ids.clone(),
+            ..Default::default()
+        })))
+        .await
+        .expect("queue");
+    snapshot_where(&mut controller, |s| s.queue.len() == 3).await;
+
+    // Move off the first track, so what comes back has to be the position as
+    // well as the list.
+    controller.send(frame(Payload::Skip(Skip { delta: 1 }))).await.expect("skip");
+    snapshot_where(&mut controller, |s| s.queue_index == 1).await;
+
+    controller
+        .send(frame(Payload::PlaybackModes(PlaybackModes { shuffle: false, repeat: RepeatMode::All })))
+        .await
+        .expect("modes");
+    snapshot_where(&mut controller, |s| s.repeat == RepeatMode::All).await;
+
+    // A different process, reading the same state file.
+    drop(coordinator);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let _restarted = start_coordinator(PORT_RESTART, &dir, &state_file).await;
+
+    let mut rejoined = join(PORT_RESTART, "Phone", Role::Controller).await;
+    let seen = snapshot_where(&mut rejoined, |s| !s.queue.is_empty()).await;
+    assert_eq!(seen.queue, ids, "the queue should come back in the order it was left");
+    assert_eq!(seen.queue_index, 1, "and on the track it had reached");
+    assert_eq!(seen.repeat, RepeatMode::All, "with the modes it was set to");
+    assert_eq!(seen.transport.media_id.as_ref(), Some(&ids[1]), "so Play resumes the right track");
+    // Paused, not playing. Nobody asked for the house to start up again.
+    assert_ne!(seen.transport.state, TransportState::Playing);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

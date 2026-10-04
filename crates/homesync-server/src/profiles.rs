@@ -10,7 +10,7 @@
 //! coordinator restarts. They are not keyed by client id, which changes with
 //! every socket.
 
-use homesync_protocol::Role;
+use homesync_protocol::{RepeatMode, Role};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -69,6 +69,32 @@ pub struct Playlist {
     pub media_ids: Vec<String>,
 }
 
+/// What a room was playing, so a restart does not forget it.
+///
+/// Separate from [`RoomIdentity`] on purpose: that is who the room *is*, and is
+/// written once when the room is created. This is what it was doing, and
+/// changes every time somebody touches the queue.
+///
+/// The transport state is deliberately **not** here. A room comes back with its
+/// queue and its place in it, and paused — a house that starts playing by
+/// itself because the coordinator was restarted is a worse surprise than
+/// having to press Play.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoomPlayback {
+    /// Which room this belongs to.
+    pub code: String,
+    /// Media ids, in the order they were queued.
+    #[serde(default)]
+    pub queue: Vec<String>,
+    /// Index into `queue` the room had reached.
+    #[serde(default)]
+    pub queue_index: usize,
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default)]
+    pub repeat: RepeatMode,
+}
+
 /// On-disk shape. Versioned so a future format change can be recognised
 /// rather than silently misread.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,11 +117,22 @@ struct StoredProfiles {
     /// which is why it defaults rather than being required.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     playlists: Vec<Playlist>,
+    /// What each room was playing. Absent in files written before this was
+    /// remembered, which is why it defaults rather than being required.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    room_playback: Vec<RoomPlayback>,
 }
 
 impl Default for StoredProfiles {
     fn default() -> Self {
-        Self { version: 1, devices: HashMap::new(), room: None, rooms: Vec::new(), playlists: Vec::new() }
+        Self {
+            version: 1,
+            devices: HashMap::new(),
+            room: None,
+            rooms: Vec::new(),
+            playlists: Vec::new(),
+            room_playback: Vec::new(),
+        }
     }
 }
 
@@ -113,6 +150,8 @@ pub struct ProfileStore {
     /// Saved queues, kept sorted by name so the list does not reorder itself
     /// between snapshots.
     playlists: Mutex<Vec<Playlist>>,
+    /// What each room was playing when it was last touched.
+    room_playback: Mutex<Vec<RoomPlayback>>,
 }
 
 impl ProfileStore {
@@ -128,11 +167,13 @@ impl ProfileStore {
                 profiles: Mutex::new(HashMap::new()),
                 rooms: Mutex::new(Vec::new()),
                 playlists: Mutex::new(Vec::new()),
+                room_playback: Mutex::new(Vec::new()),
             };
         };
 
         let mut rooms = Vec::new();
         let mut playlists = Vec::new();
+        let mut room_playback = Vec::new();
         let profiles = match std::fs::read_to_string(&path) {
             Ok(text) => match serde_json::from_str::<StoredProfiles>(&text) {
                 Ok(stored) if stored.version == FORMAT_VERSION => {
@@ -141,6 +182,7 @@ impl ProfileStore {
                     // before multiple rooms existed carries instead.
                     rooms = if stored.rooms.is_empty() { stored.room.into_iter().collect() } else { stored.rooms };
                     playlists = stored.playlists;
+                    room_playback = stored.room_playback;
                     stored.devices
                 }
                 Ok(stored) => {
@@ -168,6 +210,7 @@ impl ProfileStore {
             profiles: Mutex::new(profiles),
             rooms: Mutex::new(rooms),
             playlists: Mutex::new(playlists),
+            room_playback: Mutex::new(room_playback),
         }
     }
 
@@ -216,6 +259,10 @@ impl ProfileStore {
             }
             rooms.retain(|room| room.code != code);
         }
+        // The queue goes with the room. Leaving it behind would accumulate
+        // playback for codes that can never be joined again, and a reissued
+        // code would inherit a stranger's queue.
+        self.room_playback.lock().unwrap_or_else(|e| e.into_inner()).retain(|playback| playback.code != code);
         self.save();
     }
 
@@ -251,6 +298,7 @@ impl ProfileStore {
         self.profiles.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.rooms.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.playlists.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.room_playback.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.save();
     }
 
@@ -277,6 +325,30 @@ impl ProfileStore {
                 None => playlists.push(Playlist { name, media_ids }),
             }
             playlists.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        self.save();
+    }
+
+    /// What a room was playing when it was last touched, if it is remembered.
+    pub fn room_playback(&self, code: &str) -> Option<RoomPlayback> {
+        let playback = self.room_playback.lock().unwrap_or_else(|e| e.into_inner());
+        playback.iter().find(|entry| entry.code == code).cloned()
+    }
+
+    /// Remembers what a room is playing.
+    ///
+    /// Writes nothing when it matches what is already stored, which matters
+    /// because this is called from the tick that advances the queue as well as
+    /// from the commands people issue: without the comparison a paused room
+    /// would rewrite the file twice a second for ever.
+    pub fn remember_room_playback(&self, playback: RoomPlayback) {
+        {
+            let mut stored = self.room_playback.lock().unwrap_or_else(|e| e.into_inner());
+            match stored.iter_mut().find(|entry| entry.code == playback.code) {
+                Some(existing) if *existing == playback => return,
+                Some(existing) => *existing = playback,
+                None => stored.push(playback),
+            }
         }
         self.save();
     }
@@ -312,6 +384,7 @@ impl ProfileStore {
             room: rooms.first().cloned(),
             rooms: rooms.clone(),
             playlists: self.playlists.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            room_playback: self.room_playback.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         };
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             tracing::error!("could not serialise device profiles");
@@ -384,6 +457,87 @@ mod tests {
         assert_eq!(profile.acoustic_offset_ms, -100.0);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn what_a_room_was_playing_survives_a_restart() {
+        let path = temp_path("playback");
+        let store = ProfileStore::load(Some(path.clone()));
+        assert!(store.room_playback("ABC123").is_none());
+
+        store.remember_room_playback(RoomPlayback {
+            code: "ABC123".into(),
+            queue: vec!["one".into(), "two".into(), "three".into()],
+            queue_index: 2,
+            shuffle: true,
+            repeat: RepeatMode::All,
+        });
+
+        let reloaded = ProfileStore::load(Some(path.clone()));
+        let playback = reloaded.room_playback("ABC123").expect("playback survived");
+        assert_eq!(playback.queue, vec!["one".to_string(), "two".into(), "three".into()]);
+        assert_eq!(playback.queue_index, 2);
+        assert!(playback.shuffle);
+        assert_eq!(playback.repeat, RepeatMode::All);
+        // Another room's queue is its own.
+        assert!(reloaded.room_playback("OTHER1").is_none());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn remembering_the_same_playback_twice_does_not_rewrite_the_file() {
+        // This is called from the tick that builds snapshots, which runs twice
+        // a second for every occupied room. Without the comparison, an idle
+        // room would rewrite the profile file for ever.
+        let path = temp_path("playback-idempotent");
+        let store = ProfileStore::load(Some(path.clone()));
+        let playback =
+            RoomPlayback { code: "ABC123".into(), queue: vec!["one".into()], queue_index: 0, ..playback_default() };
+
+        store.remember_room_playback(playback.clone());
+        assert!(std::fs::read_to_string(&path).expect("written").contains("ABC123"));
+
+        // A sentinel rather than a timestamp: file modification times have a
+        // granularity coarse enough that a rewrite inside the same tick would
+        // look identical, which would make this test pass for the wrong
+        // reason. If the store writes, the sentinel is gone.
+        std::fs::write(&path, "sentinel").expect("sentinel");
+        store.remember_room_playback(playback);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("still there"),
+            "sentinel",
+            "an unchanged queue must not touch the file"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn forgetting_a_room_forgets_what_it_was_playing() {
+        // A code that can never be joined again must not keep a queue, and a
+        // reissued code must not inherit a stranger's.
+        let path = temp_path("playback-forget");
+        let store = ProfileStore::load(Some(path.clone()));
+        store.set_room_identity(RoomIdentity { code: "DEFALT".into(), secret: "s".into(), name: None });
+        store.add_room_identity(RoomIdentity { code: "KITCHN".into(), secret: "s2".into(), name: None });
+        store.remember_room_playback(RoomPlayback {
+            code: "KITCHN".into(),
+            queue: vec!["one".into()],
+            queue_index: 0,
+            ..playback_default()
+        });
+
+        store.forget_room("KITCHN");
+        assert!(store.room_playback("KITCHN").is_none());
+        assert!(ProfileStore::load(Some(path.clone())).room_playback("KITCHN").is_none());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Shuffle off, repeat off — the fields these tests are not about.
+    fn playback_default() -> RoomPlayback {
+        RoomPlayback { code: String::new(), queue: Vec::new(), queue_index: 0, shuffle: false, repeat: RepeatMode::Off }
     }
 
     #[test]

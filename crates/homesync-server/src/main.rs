@@ -96,6 +96,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if restored > 0 {
         tracing::info!(count = restored, "restored rooms from the previous run");
     }
+    // Queues after rooms, and after the catalogue is scanned: a remembered
+    // queue is filtered against the library, because a track whose file has
+    // gone would hold the room waiting for a device that can never be ready.
+    let queues = app.restore_saved_queues();
+    if queues > 0 {
+        tracing::info!(count = queues, "restored queues from the previous run");
+    }
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;

@@ -12,6 +12,26 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ### Added
 
+- **A room's queue survives a restart.** A room remembered only its code,
+  secret and name, so restarting the coordinator left every device looking at
+  an empty queue — the one thing that makes a restart feel like data loss. The
+  queue, the place in it, shuffle and repeat now come back.
+
+  Three deliberate limits. The queue is checked against the library on the way
+  back in, so a track whose file has gone — deleted, renamed, on a drive that
+  is no longer mounted — is dropped rather than left to hold the room waiting
+  for a device that can never be ready. The saved position is clamped, because
+  that filtering can shorten the queue underneath it. And the room comes back
+  **paused**: a house that starts playing by itself because a coordinator was
+  restarted is a worse surprise than having to press Play.
+
+  The state is written from the one function every queue change passes through,
+  and the store compares before writing — otherwise the twice-a-second snapshot
+  tick would rewrite the file for ever on an idle room. There is a test that
+  holds it to that, using a sentinel rather than a timestamp, because file
+  modification times are coarse enough that a rewrite in the same tick would
+  have looked identical.
+
 - **Next and previous track.** The queue was a list you could only enter by
   clicking a row: there was no way to say "not this one". Both are coordinator
   commands rather than something the pressing device works out, because under

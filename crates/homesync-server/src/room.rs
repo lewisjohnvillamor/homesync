@@ -639,6 +639,37 @@ impl Room {
         true
     }
 
+    /// Puts a queue back as a previous run left it, without starting anything.
+    ///
+    /// Distinct from [`Self::set_queue`], which is a person choosing what to
+    /// play and therefore selects a source and moves the transport. This is a
+    /// restart putting the furniture back: the media id is placed on the
+    /// transport so Play resumes the right track, and nothing else moves.
+    ///
+    /// `index` is clamped rather than trusted. It comes off disk, where a file
+    /// hand-edited or written by a different version could name a position the
+    /// queue no longer has — and tracks whose files have gone are filtered out
+    /// before this is called, which shortens the queue under the saved index.
+    pub fn restore_queue(&mut self, media_ids: Vec<String>, index: usize, shuffle: bool, repeat: RepeatMode) {
+        if media_ids.is_empty() {
+            return;
+        }
+        self.queue_index = index.min(media_ids.len() - 1);
+        self.queue = media_ids;
+        self.repeat = repeat;
+        // After the queue and index are in place: the shuffled order is built
+        // around the current track, so it has to know which one that is.
+        self.shuffle = shuffle;
+        if shuffle {
+            self.reshuffle();
+        }
+        self.transport.mode = SourceMode::ControlledAudio;
+        self.transport.media_id = self.queue.get(self.queue_index).cloned();
+        self.transport.anchor_media_ns = 0;
+        self.transport.state = TransportState::Idle;
+        self.dirty = true;
+    }
+
     /// Replaces the queue.
     ///
     /// Editing a queue while it plays — appending a track, removing one further
@@ -2049,6 +2080,55 @@ mod tests {
         room.set_sleep_timer(Some(u32::MAX), u64::MAX / 2);
         let deadline = room.sleep_at_ns.expect("armed");
         assert_eq!(deadline, u64::MAX / 2 + u64::from(MAX_SLEEP_MINUTES) * 60 * 1_000_000_000);
+    }
+
+    #[test]
+    fn a_restored_queue_comes_back_paused_on_the_track_it_left_off() {
+        let mut room = room();
+        room.restore_queue(vec!["one".into(), "two".into(), "three".into()], 1, false, RepeatMode::All);
+
+        assert_eq!(room.queue.len(), 3);
+        assert_eq!(room.queue_index, 1);
+        assert_eq!(room.repeat, RepeatMode::All);
+        // The track is on the transport so Play resumes the right one...
+        assert_eq!(room.transport.media_id.as_deref(), Some("two"));
+        assert_eq!(room.transport.mode, SourceMode::ControlledAudio);
+        // ...but nothing is playing. A house that starts up on its own because
+        // the coordinator was restarted is worse than having to press Play.
+        assert_ne!(room.transport.state, TransportState::Playing);
+        assert_eq!(room.transport.anchor_media_ns, 0);
+    }
+
+    #[test]
+    fn a_restored_index_past_the_end_of_the_queue_is_clamped() {
+        // The index comes off disk, and the queue is filtered against the
+        // library before it gets here — so a saved position can legitimately
+        // name a track the shortened queue no longer has.
+        let mut room = room();
+        room.restore_queue(vec!["one".into(), "two".into()], 9, false, RepeatMode::Off);
+        assert_eq!(room.queue_index, 1);
+        assert_eq!(room.transport.media_id.as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn a_restored_shuffled_queue_gets_an_order_built_around_its_current_track() {
+        // The shuffled order keeps the current track first. Restoring shuffle
+        // before the index was in place would build the order around track
+        // zero and then skip somewhere nobody expected.
+        let mut room = room();
+        room.restore_queue(vec!["one".into(), "two".into(), "three".into()], 2, true, RepeatMode::Off);
+        assert!(room.shuffle);
+        assert_eq!(room.play_order().len(), 3);
+        assert_eq!(room.play_order().first(), Some(&2), "the restored track stays first in the order");
+    }
+
+    #[test]
+    fn restoring_an_empty_queue_changes_nothing() {
+        let mut room = room();
+        room.select_source(SourceMode::Youtube, None, Some("abc".into()), 0);
+        room.restore_queue(Vec::new(), 0, false, RepeatMode::Off);
+        assert!(room.queue.is_empty());
+        assert_eq!(room.transport.mode, SourceMode::Youtube, "an empty restore must not seize the transport");
     }
 
     #[test]

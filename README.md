@@ -282,9 +282,15 @@ presses the button is usually setting a room up for other devices, and being
 yanked out of what you are listening to is not what that button looks like it
 does.
 
-Rooms survive a restart. Empty ones are dropped after half an hour, so a house
-does not accumulate abandoned rooms; the room printed in the startup banner is
-never dropped.
+Rooms survive a restart, and so does what each one was playing: the queue, the
+place in it, and whether shuffle and repeat were on. A track whose file has
+gone since — deleted, or on a drive that is no longer mounted — is quietly left
+out rather than holding the room waiting for it. Everything comes back paused,
+because a house that starts playing on its own because a coordinator restarted
+is a worse surprise than pressing Play.
+
+Empty rooms are dropped after half an hour, so a house does not accumulate
+abandoned rooms; the room printed in the startup banner is never dropped.
 
 ### Getting them in time
 
@@ -567,7 +573,7 @@ belong — including the failures.
 Formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **284 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+- **291 Rust unit tests.** Clock estimation against synthetic latency, jitter,
   drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and skew; the room state machine;
@@ -579,7 +585,7 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   `correcting_a_device_does_not_move_the_room_timeline` is the bug that made
   every device restart every few seconds, and it is a test rather than a
   changelog entry because that is the only form that stays true.
-- **Nine integration tests** drive the real binary over a socket with fake
+- **Ten integration tests** drive the real binary over a socket with fake
   devices: the calibration loop against known ground truth, a live stream
   holding its timeline across 400 frames, diagnostics access control, the join
   limiter — including that a device rejoining *correctly* thirty times is never

@@ -764,7 +764,26 @@ pub(crate) fn snapshot_now(app: &App, room: &mut crate::room::Room) -> homesync_
     if carried {
         room.manifest_sent(version);
     }
+    remember_playback(app, room);
     snapshot
+}
+
+/// Records what the room is playing, so a restart can put it back.
+///
+/// Called from here rather than from each command because every path that
+/// changes a room's queue — a selection, a skip, a mode change, a playlist
+/// load, the tick that advances to the next track — ends up building a
+/// snapshot. One call site covers all of them, and the store writes nothing
+/// when the state matches what is already on disk, so the twice-a-second
+/// snapshot of an idle room costs a comparison rather than a file write.
+fn remember_playback(app: &App, room: &crate::room::Room) {
+    app.profiles.remember_room_playback(crate::profiles::RoomPlayback {
+        code: room.code.clone(),
+        queue: room.queue.clone(),
+        queue_index: room.queue_index,
+        shuffle: room.shuffle,
+        repeat: room.repeat,
+    });
 }
 
 fn broadcast_transport_and_snapshot(app: &App, room: &mut crate::room::Room, now_ns: u64) {
