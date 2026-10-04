@@ -10,6 +10,54 @@ listed as such rather than as done — see [Status](README.md#status).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two to two and a half seconds of silence between every pair of tracks.**
+  The queue advanced on the first tick after a track ended, then scheduled the
+  next one a full start lead into the future. Measured over the real protocol:
+  **2.45 s** between the end of one track and the start of the next.
+
+  It is now **zero**. When every receiver already holds the next track decoded,
+  the coordinator publishes it shortly before the current one ends, anchored at
+  the exact instant that one runs out, and each device lets its running source
+  play right up to that instant before the next takes over — stopped *at* the
+  handover rather than now, so the last moments of a track are not cut and the
+  two cannot overlap. A device that has not finished decoding falls back to the
+  old path rather than missing a handover the rest of the room makes.
+
+  Fixing that exposed two bugs underneath it, either of which would have made
+  the fix do nothing:
+
+  - **Preloading saved nothing.** On every change of track the client called
+    `clearMedia()`, which threw away the track it had decoded ahead of time and
+    then downloaded and decoded the same file again. The decode-ahead existed
+    for exactly this moment and was discarded at exactly this moment.
+  - **Under shuffle, the wrong track was preloaded.** The client guessed the
+    next track as `queue_index + 1`, which under shuffle is somewhere else
+    entirely. The coordinator always knew the right answer; it now sends it as
+    `next_in_queue` in every snapshot.
+
+  Verified: a wire-level test asserts the next anchor is the previous anchor
+  plus the track's length, to the nanosecond — and fails with the 2.45 s gap
+  when the handover is disabled. The browser hand-over is unit-tested against
+  a fake audio context (stopped at the instant, not now; a skip still cuts
+  immediately; a seek landing on the end is not mistaken for a handover), and a
+  real browser is checked to play the next track from its preload rather than
+  decoding it again. **Not verified: whether the join is inaudible on a real
+  speaker.** That needs ears.
+
+- **The browser checks could test the wrong binary.** Both scripts stopped
+  `cargo` rather than the coordinator it had started, so the server stayed
+  listening — and the next run, finding the port answering, ran every check
+  against that older build while reporting on the current one. They now stop
+  the whole process group and refuse to start if the port is already serving.
+  They also wrote into the developer's real `homesync-devices.json`, which with
+  queues now persisted meant each run inherited the last one's queue, and would
+  have overwritten a real user's saved devices; each now uses its own state
+  file. And `check.sh` builds the release binary before them, so a run after any
+  source change no longer fails with "coordinator did not start" while LTO is
+  still linking.
+
 ### Added
 
 - **The library reads the file's tags.** Every track was listed by its

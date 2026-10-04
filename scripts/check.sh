@@ -38,6 +38,14 @@ if command -v node >/dev/null 2>&1; then
   echo "==> browser unit tests"
   node --test 'web/test/*.test.mjs'
 
+  # The browser scripts start the coordinator with `cargo run --release` and
+  # give it two minutes to listen. A release build links with LTO and can take
+  # longer than that from cold, so it is built here first rather than inside
+  # their start-up budget — otherwise a run after any source change failed
+  # with "coordinator did not start", a fault in the harness, not the code.
+  echo "==> release build for the browser checks"
+  cargo build --release --quiet
+
   echo "==> browser end-to-end (skipped without Playwright)"
   node web/test/e2e.mjs
 

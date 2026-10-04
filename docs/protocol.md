@@ -124,6 +124,15 @@ under shuffle follows the same permutation an automatic advance would:
 - `repeat: one` is ignored by `skip`. It describes what happens when a track
   *ends*, not a request to be held on it.
 
+Every snapshot names the track that will follow as `next_in_queue`, and
+receivers decode that one ahead of time. When every audio-rendering receiver
+has reported it ready, the coordinator advances the queue up to 600 ms before
+the current track ends, with `anchor_server_ns` set to the exact instant it
+runs out. A receiver recognises that as a handover — a start at media offset
+zero that lands within half a second of where its running source ends — and
+stops the outgoing source at that instant rather than immediately. Otherwise the
+queue advances once the track has finished, a start lead later.
+
 `sleep_timer` carries `minutes`, or omits it to cancel. The snapshot reports
 `sleep_at_ns` — an instant on the coordinator's clock, not a remaining
 duration, so a client can count down smoothly between the snapshots it

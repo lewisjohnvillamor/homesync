@@ -446,6 +446,13 @@ A short version of the rest; the full design is in
 - **A readiness barrier.** Nothing plays until every receiver holds the verified
   file and a stable clock, with an explicit override for when you would rather
   not wait.
+- **No gap between tracks.** Every receiver decodes the next track while the
+  current one plays — the coordinator says which, because under shuffle only it
+  knows. When every receiver holds it, the next track is anchored at the instant
+  the current one runs out, and each device lets its running source play right
+  up to that instant instead of cutting it. A device that has not finished
+  decoding falls back to the old way, a start lead later, rather than missing a
+  handover the rest of the room makes.
 - **Nothing charged for a feature you are not using.** The five-band equaliser
   is out of the signal path entirely while it is flat, rather than filtering
   every sample for no audible change; a device that looks short of memory or
@@ -532,6 +539,13 @@ below, and ears, can do that.
   `x86_64-pc-windows-msvc` on every run of `scripts/check.sh`, which catches API
   misuse and proves nothing about real hardware. This is why live system audio
   has no button in the interface.
+- **The gap between tracks has never been listened to.** The next track is
+  anchored at the exact instant the current one ends — a wire-level test holds
+  that to the nanosecond, and with the handover disabled the same test measures
+  2.45 s of silence — and the browser hands one source to the next at that
+  instant, stopping the outgoing one *at* the handover rather than now. What no
+  headless test can say is whether the join is inaudible on a real speaker,
+  where a few milliseconds of mismatch is a click.
 - **Drift correction has never corrected real drift.** The control law is
   tested as a closed loop and the browser is confirmed to accept the rate
   changes, but headless Chromium's audio clock does not meaningfully drift
@@ -581,7 +595,7 @@ belong — including the failures.
 Formatting, clippy, the Rust suite, the browser unit tests, a
 two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
 
-- **310 Rust unit tests.** Clock estimation against synthetic latency, jitter,
+- **317 Rust unit tests.** Clock estimation against synthetic latency, jitter,
   drift and step discontinuities; calibration DSP against noise, reflections and
   differing sample rates; frame codec against every malformed input; playout
   buffer against loss, reordering, duplication and skew; the room state machine;
@@ -601,7 +615,7 @@ two-headless-browser end-to-end run, and the checkpoint-1 clock simulation.
   settings checked by watching what a *second* device is told, and SHA-256
   against published vectors, because that digest is every media id and every
   integrity check a browser performs.
-- **98 browser tests**, including the drift-correction control law run as a
+- **106 browser tests**, including the drift-correction control law run as a
   closed loop against a simulated drifting clock — the trim changes the device's
   speed, the speed changes the drift, the next tick sees it. A control law that
   looks sensible one call at a time and oscillates forever in a loop passes the

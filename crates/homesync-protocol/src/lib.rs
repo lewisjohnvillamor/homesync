@@ -892,6 +892,17 @@ pub struct RoomSnapshot {
     /// Index into `queue` of the track currently on the transport.
     #[serde(default)]
     pub queue_index: usize,
+    /// Media id of the track that will follow the current one.
+    ///
+    /// The coordinator's answer rather than the client's guess, because under
+    /// shuffle the next track is a position in a permutation only the
+    /// coordinator holds. A receiver that guessed "the next index in the list"
+    /// decoded the wrong track ahead of time, which cost it the gapless
+    /// handover and the memory both.
+    ///
+    /// `None` at the end of a queue that is not repeating.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_in_queue: Option<String>,
     /// Gain every receiver in this room is scaled by, in `0.0..=1.0`.
     ///
     /// One control for the whole house, multiplied by each device's own volume

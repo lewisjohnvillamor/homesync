@@ -16,6 +16,18 @@ import { sha256Hex } from './sha256.js';
 export const MIN_SCHEDULE_LEAD_S = 0.06;
 
 /**
+ * How close a scheduled start must be to the end of what is playing to be
+ * treated as the queue handing over, in seconds.
+ *
+ * Generous on purpose. A source being rate-trimmed for drift reaches the end of
+ * its buffer up to 0.2% away from where the room thinks it does, which on a
+ * long track is a third of a second. A skip anchors a full start lead away — two
+ * seconds by default — so there is no overlap between the two cases even at
+ * this width.
+ */
+export const HANDOVER_TOLERANCE_S = 0.5;
+
+/**
  * Codec queries that give a straight answer, by container family.
  *
  * Asking about a container is not enough and is actively misleading: an
@@ -243,6 +255,16 @@ export class Player {
     this.nextMediaId = null;
     /** @type {AudioBufferSourceNode|null} */
     this.source = null;
+    /**
+     * Audio-clock time the running source reaches the end of its buffer.
+     *
+     * Kept so a new transport can be recognised as a handover from the end of
+     * what is playing rather than as an interruption of it. `null` whenever
+     * nothing is scheduled.
+     *
+     * @type {number|null}
+     */
+    this.sourceEndAudioTime = null;
 
     /** Manual compensation in ms. Positive means "this device is late". */
     this.manualOffsetMs = 0;
@@ -506,15 +528,20 @@ export class Player {
     if (transport.media_id !== this.bufferMediaId) return;
 
     this.scheduledEpoch = transport.epoch;
-    this.stopSource();
 
     if (transport.state !== 'playing') {
+      this.stopSource();
       this.playing = false;
       this.scheduledStartServerNs = null;
       return;
     }
 
     this.#refreshLatency();
+
+    // Decided before the late-start clamp below. A handover the device is a
+    // few milliseconds late for is still a handover — clamped to the earliest
+    // instant it can manage — rather than an interruption.
+    const handover = this.isHandover(transport);
 
     let startAudioTime = this.audioTimeForServerNs(transport.anchor_server_ns) - this.compensationSeconds();
     let mediaOffsetNs = transport.anchor_media_ns;
@@ -532,11 +559,24 @@ export class Player {
       this.scheduleShiftMs = 0;
     }
 
+    // Letting the old source play right up to the new one's start is the
+    // difference between an album and a list of songs with two seconds of
+    // silence between them.
+    if (!handover) this.stopSource();
+
     const offsetSeconds = mediaOffsetNs / 1e9;
     if (offsetSeconds >= this.buffer.duration) {
       this.#log('transport is past the end of this media; nothing scheduled');
+      this.stopSource();
       this.playing = false;
       return;
+    }
+
+    if (handover) {
+      // Stopped *at* the handover rather than now, so it plays its last
+      // moments instead of being cut short, and cannot overlap the next track
+      // if its buffer turns out to run longer than the length the room has.
+      this.#retireSource(startAudioTime);
     }
 
     const source = this.ctx.createBufferSource();
@@ -548,6 +588,7 @@ export class Player {
     source.start(startAudioTime, Math.max(0, offsetSeconds));
 
     this.source = source;
+    this.sourceEndAudioTime = startAudioTime + Math.max(0, this.buffer.duration - offsetSeconds);
     this.startAudioTime = startAudioTime;
     this.startMediaOffsetNs = mediaOffsetNs;
     // A fresh schedule starts at normal speed: the new anchor is exact, so
@@ -558,6 +599,44 @@ export class Player {
     this.rateAnchorMediaNs = mediaOffsetNs;
     this.scheduledStartServerNs = transport.anchor_server_ns;
     this.playing = true;
+  }
+
+  /**
+   * Lets the running source play until `atAudioTime`, then drops it.
+   *
+   * The node is kept connected until it ends — stopping it is a schedule, not
+   * an immediate silence — and disconnected from its own `onended` so the
+   * graph does not accumulate a retired source per track change.
+   */
+  #retireSource(atAudioTime) {
+    const retiring = this.source;
+    if (!retiring) return;
+    try {
+      retiring.stop(atAudioTime);
+    } catch {
+      // Already stopped. The handover still stands.
+    }
+    retiring.onended = () => retiring.disconnect();
+    this.source = null;
+  }
+
+  /**
+   * Whether `transport` starts a track exactly where the running one runs out.
+   *
+   * That is the queue moving on, and the running source should be left to
+   * finish rather than cut. Recognised from the timing rather than from a
+   * flag, because the timing is what has to be true for it to work: a skip
+   * anchors a start lead away and misses by seconds, and a resume or a seek
+   * carries a non-zero media offset and is excluded outright.
+   *
+   * One function, called by both the client's transport handler and
+   * `applyTransport`, so the two cannot disagree about whether to stop.
+   */
+  isHandover(transport) {
+    if (!this.ctx || !this.source || !this.playing || this.sourceEndAudioTime === null) return false;
+    if (transport.state !== 'playing' || transport.anchor_media_ns !== 0) return false;
+    const startAudioTime = this.audioTimeForServerNs(transport.anchor_server_ns) - this.compensationSeconds();
+    return Math.abs(startAudioTime - this.sourceEndAudioTime) <= HANDOVER_TOLERANCE_S;
   }
 
   /** Stops any scheduled or running source without touching the decoded buffer. */
@@ -572,6 +651,7 @@ export class Player {
       this.source.disconnect();
       this.source = null;
     }
+    this.sourceEndAudioTime = null;
     this.playing = false;
   }
 

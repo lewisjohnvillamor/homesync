@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ClockEstimator } from '../src/clock.js';
-import { Player, LatencyMode, MIN_SCHEDULE_LEAD_S, positionAtServerNs, clampDb, EQ_BANDS, EQ_LIMIT_DB, deviceLooksConstrained } from '../src/player.js';
+import { Player, LatencyMode, MIN_SCHEDULE_LEAD_S, HANDOVER_TOLERANCE_S, positionAtServerNs, clampDb, EQ_BANDS, EQ_LIMIT_DB, deviceLooksConstrained } from '../src/player.js';
 
 const NOW_MS = 1000;
 
@@ -30,8 +30,10 @@ class FakeSource {
   start(when, offset) {
     this.started = { when, offset };
   }
-  stop() {
+  /** `when` is recorded so a test can tell "stop now" from "stop at the handover". */
+  stop(when) {
     this.stopped = true;
+    this.stoppedAt = when;
   }
 }
 
@@ -519,4 +521,84 @@ test('a playing source is reconnected when the equaliser comes and goes', () => 
 
   player.setEqGainsDb([0, 0, 0, 0, 0]);
   assert.equal(source.connectedTo, player.gain, 'should be back to the plain output');
+});
+
+// --- gapless handover -------------------------------------------------------
+
+/**
+ * A player two seconds from starting a three-second track, `m1`, whose next
+ * track has just been promoted into its buffer the way `load()` does it.
+ */
+function playerMidHandover(nextMediaId = 'm2') {
+  const ctx = new FakeContext({ currentTime: 10, outputTimestamp: { contextTime: 9.9, performanceTime: NOW_MS } });
+  const player = makePlayer(ctx, 5e6, 3);
+  player.applyTransport(playing(serverNsIn(2), 0, 1));
+  const end = player.sourceEndAudioTime;
+  // `load()` swaps the buffer and leaves the running source alone.
+  player.buffer = { duration: 60 };
+  player.bufferMediaId = nextMediaId;
+  return { ctx, player, end };
+}
+
+function next(anchorServerNs, anchorMediaNs = 0, mediaId = 'm2') {
+  return { ...playing(anchorServerNs, anchorMediaNs, 2), media_id: mediaId };
+}
+
+test('the next track starts where the current one runs out, without cutting it', () => {
+  const { ctx, player, end } = playerMidHandover();
+  // The coordinator anchors the next track at the end: 2 s to the start,
+  // plus the 3 s the first track lasts.
+  const transport = next(serverNsIn(5));
+  assert.equal(player.isHandover(transport), true);
+
+  player.applyTransport(transport);
+
+  assert.equal(ctx.sources.length, 2);
+  const [first, second] = ctx.sources;
+  assert.ok(Math.abs(second.started.when - end) < 1e-6, `next starts at ${second.started.when}, end ${end}`);
+  assert.equal(second.started.offset, 0);
+  // Stopped *at* the handover, not now. Stopping now would cut the last
+  // moments of the track; not stopping at all could overlap the next one.
+  assert.ok(first.stoppedAt !== undefined, 'the outgoing source must have a scheduled stop');
+  assert.ok(Math.abs(first.stoppedAt - second.started.when) < 1e-6, 'and it must be the handover instant');
+  assert.equal(player.playing, true);
+});
+
+test('a skip interrupts straight away instead of letting the track finish', () => {
+  const { ctx, player } = playerMidHandover();
+  // A skip anchors a start lead from now — nowhere near the end.
+  const transport = next(serverNsIn(0.5));
+  assert.equal(player.isHandover(transport), false);
+
+  player.applyTransport(transport);
+
+  assert.equal(ctx.sources[0].stopped, true);
+  assert.equal(ctx.sources[0].stoppedAt, undefined, 'stopped immediately, with no time given');
+});
+
+test('a seek that happens to land on the end is not mistaken for a handover', () => {
+  const { player } = playerMidHandover('m1');
+  // Same instant, but partway into the media: a seek or a resume.
+  assert.equal(player.isHandover(next(serverNsIn(5), 1e9, 'm1')), false);
+});
+
+test('a start just outside the tolerance is an interruption', () => {
+  const { player } = playerMidHandover();
+  assert.equal(player.isHandover(next(serverNsIn(5 + HANDOVER_TOLERANCE_S + 0.05))), false);
+  assert.equal(player.isHandover(next(serverNsIn(5 + HANDOVER_TOLERANCE_S - 0.05))), true);
+});
+
+test('repeat-one hands over to itself without a gap', () => {
+  const { ctx, player, end } = playerMidHandover('m1');
+  player.buffer = { duration: 3 };
+  player.applyTransport({ ...playing(serverNsIn(5), 0, 2) });
+  assert.equal(ctx.sources.length, 2);
+  assert.ok(Math.abs(ctx.sources[1].started.when - end) < 1e-6);
+  assert.ok(ctx.sources[0].stoppedAt !== undefined);
+});
+
+test('nothing playing means nothing to hand over from', () => {
+  const ctx = new FakeContext({ currentTime: 10, outputTimestamp: { contextTime: 9.9, performanceTime: NOW_MS } });
+  const player = makePlayer(ctx);
+  assert.equal(player.isHandover(playing(serverNsIn(2))), false);
 });

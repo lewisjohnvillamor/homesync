@@ -132,14 +132,38 @@ NAMES.forEach((name, index) => {
 
 // --- coordinator ------------------------------------------------------------
 
+// Refuse to run against a coordinator that is already listening. Whatever it
+// is, it is not the build under test, and every check below would pass or fail
+// on its behalf.
+try {
+  await fetch(`${BASE}/health`);
+  console.error(`FAIL  something is already listening on port ${PORT}; stop it first.`);
+  process.exit(1);
+} catch {
+  // Nothing there, which is what we want.
+}
+
 const server = spawn(
   'cargo',
   ['run', '--quiet', '--release', '--', '--bind', '127.0.0.1', '--port', String(PORT),
-    '--room-code', ROOM, '--room-secret', SECRET, '--media-dir', mediaDir, '--mdns', 'false'],
-  { stdio: ['ignore', 'ignore', 'inherit'] },
+    '--room-code', ROOM, '--room-secret', SECRET, '--media-dir', mediaDir, '--mdns', 'false',
+    // Its own state file. The default is `homesync-devices.json` beside the
+    // checkout — the developer's real one — and rooms remember their queues,
+    // so a shared file both clobbers real profiles and hands this run the
+    // last run's queue.
+    '--state-file', join(mediaDir, 'state.json')],
+  // Its own process group, so stopping it stops the coordinator `cargo run`
+  // spawned rather than only `cargo`. Killing `cargo` alone left the real
+  // server listening, and the next run then tested *that* — an older binary —
+  // while reporting on the current one.
+  { stdio: ['ignore', 'ignore', 'inherit'], detached: true },
 );
 const cleanUp = () => {
-  server.kill('SIGTERM');
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    // Already gone.
+  }
   rmSync(mediaDir, { recursive: true, force: true });
 };
 process.on('exit', cleanUp);
@@ -175,10 +199,10 @@ page.on('console', (message) => {
   errors.push(`console: ${message.text()}`);
 });
 
-async function waitFor(predicate, what, timeout = 30000) {
+async function waitFor(predicate, what, timeout = 30000, arg = undefined) {
   const start = Date.now();
   for (;;) {
-    if (await page.evaluate(predicate)) return;
+    if (await page.evaluate(predicate, arg)) return;
     if (Date.now() - start > timeout) {
       const log = await page.evaluate(() => document.getElementById('log').textContent.slice(0, 900));
       throw new Error(`timeout waiting for ${what}\n--- log ---\n${log}`);
@@ -372,6 +396,44 @@ try {
     }
     ok(`the operating system was told "${session.title}" by "${session.artist}"`);
   }
+
+  // --- a track change uses the track decoded ahead of time ---------------
+  // The client used to discard its preloaded buffer on every change of track,
+  // so the next track was downloaded and decoded a second time and preloading
+  // saved nothing on the only path it existed for. A re-download logs its
+  // stages ("downloading…", "decoding…"); a promoted preload logs only "ready".
+  const nextTitle = await page.evaluate(() => document.querySelectorAll('#queue .queue-title')[1]?.textContent);
+  await page.evaluate(() => document.querySelectorAll('#queue .queue-play')[0].click());
+  await waitFor(() => document.querySelectorAll('#queue li')[0]?.classList.contains('current'), 'the first entry');
+  await waitFor(
+    (title) => document.getElementById('log').textContent.includes(`${title}: preloaded, ready to follow on.`),
+    'the next track to be preloaded',
+    30000,
+    nextTitle,
+  );
+  const decodesBefore = await page.evaluate(
+    (title) => document.getElementById('log').textContent.split(`${title}: decoding`).length - 1,
+    nextTitle,
+  );
+
+  // Forced, because what is under test is the track change rather than the
+  // readiness barrier. The box lives in a collapsed panel, so it is set
+  // directly — the Play handler only reads `.checked`.
+  await page.evaluate(() => {
+    document.getElementById('force').checked = true;
+  });
+  await page.click('#play');
+  await waitFor(() => document.querySelectorAll('#queue li')[1]?.classList.contains('current'), 'the queue to move on', 30000);
+  await sleep(1500);
+  const decodesAfter = await page.evaluate(
+    (title) => document.getElementById('log').textContent.split(`${title}: decoding`).length - 1,
+    nextTitle,
+  );
+  if (decodesAfter !== decodesBefore) {
+    throw new Error(`"${nextTitle}" was decoded again on the track change, though it had been preloaded`);
+  }
+  ok(`the track change played "${nextTitle}" from its preload rather than downloading it again`);
+  await page.click('#pause');
 
   if (errors.length) throw new Error(`JavaScript errors in the page:\n${errors.join('\n')}`);
   console.log('\nAll control checks passed.');

@@ -18,6 +18,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const PORT = Number(process.env.HOMESYNC_E2E_PORT || 18090);
@@ -58,13 +61,38 @@ if (!playwright) {
 
 // --- coordinator ------------------------------------------------------------
 
+// Its own state file, not the default one beside the checkout: that is the
+// developer's real file, and rooms now remember their queues across runs.
+const stateDir = mkdtempSync(join(tmpdir(), 'homesync-e2e-'));
+// Refuse to run against a coordinator that is already listening. Whatever it
+// is, it is not the build under test, and every check below would pass or fail
+// on its behalf.
+try {
+  await fetch(`${BASE}/health`);
+  console.error(`FAIL  something is already listening on port ${PORT}; stop it first.`);
+  process.exit(1);
+} catch {
+  // Nothing there, which is what we want.
+}
+
 const server = spawn(
   'cargo',
   ['run', '--quiet', '--release', '--', '--bind', '127.0.0.1', '--port', String(PORT),
-    '--room-code', ROOM, '--room-secret', SECRET],
-  { stdio: ['ignore', 'ignore', 'inherit'] },
+    '--room-code', ROOM, '--room-secret', SECRET, '--state-file', join(stateDir, 'state.json')],
+  // Its own process group, so stopping it stops the coordinator `cargo run`
+  // spawned rather than only `cargo`. Killing `cargo` alone left the real
+  // server listening, and the next run then tested *that* — an older binary —
+  // while reporting on the current one.
+  { stdio: ['ignore', 'ignore', 'inherit'], detached: true },
 );
-const stopServer = () => server.kill('SIGTERM');
+const stopServer = () => {
+  try {
+    process.kill(-server.pid, 'SIGTERM');
+  } catch {
+    // Already gone.
+  }
+  rmSync(stateDir, { recursive: true, force: true });
+};
 process.on('exit', stopServer);
 
 async function waitForServer() {

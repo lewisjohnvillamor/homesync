@@ -355,7 +355,15 @@ function onTransport(transport) {
   if (!player || !player.ctx) return;
 
   if (previous && previous.media_id !== transport.media_id) {
-    player.clearMedia();
+    // Not `clearMedia()`. That discarded the track decoded ahead of time —
+    // the one thing that makes a track change instant — so every change of
+    // track re-downloaded and re-decoded a file this device already held,
+    // and preloading saved nothing on the only path it existed for.
+    //
+    // The running source is stopped here only when this is not the queue
+    // handing over. A skip silences the room straight away; the end of a
+    // track lets it finish into the next one.
+    if (!player.isHandover(transport)) player.stopSource();
   }
   if (!transport.media_id) return;
 
@@ -914,7 +922,10 @@ async function preloadNext() {
   // does not have. There the gap between tracks is the lesser cost.
   if (!player.preloadEnabled) return;
 
-  const nextId = snapshot.queue?.[(snapshot.queue_index ?? 0) + 1];
+  // The coordinator's answer, not `queue_index + 1`. Under shuffle the next
+  // track is a position in a permutation only the coordinator holds, and a
+  // guess decoded the wrong track — costing the memory and the handover both.
+  const nextId = snapshot.next_in_queue;
   if (!nextId || player.nextMediaId === nextId || state.preloading === nextId) return;
   const item = snapshot.media.items.find((m) => m.id === nextId);
   if (!item) return;

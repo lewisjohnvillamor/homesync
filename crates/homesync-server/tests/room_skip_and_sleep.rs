@@ -15,8 +15,9 @@
 
 use futures_util::{SinkExt, StreamExt};
 use homesync_protocol::{
-    Envelope, Hello, JoinRoom, Payload, PlaybackModes, RepeatMode, Role, RoomSnapshot, SelectSource, Skip, SleepTimer,
-    SourceMode, TransportState, PROTOCOL_VERSION,
+    ClockQuality, ClockReport, Envelope, Hello, JoinRoom, Payload, PlayCommand, PlaybackModes, ReceiverReady,
+    RepeatMode, Role, RoomSnapshot, SelectSource, Skip, SleepTimer, SourceMode, Transport, TransportState,
+    PROTOCOL_VERSION,
 };
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -29,6 +30,7 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 /// means the second coordinator cannot bind and both tests fail together.
 const PORT_SKIP: u16 = 18163;
 const PORT_RESTART: u16 = 18164;
+const PORT_GAPLESS: u16 = 18165;
 const ROOM: &str = "SKIPLS";
 const SECRET: &str = "skip-secret";
 
@@ -265,6 +267,122 @@ async fn a_rooms_queue_survives_a_restart() {
     assert_eq!(seen.transport.media_id.as_ref(), Some(&ids[1]), "so Play resumes the right track");
     // Paused, not playing. Nobody asked for the house to start up again.
     assert_ne!(seen.transport.state, TransportState::Playing);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Waits for a transport message that satisfies `wanted`.
+async fn transport_where(socket: &mut Socket, wanted: impl Fn(&Transport) -> bool) -> Transport {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while let Ok(Some(Ok(message))) = tokio::time::timeout_at(deadline, socket.next()).await {
+        if let Message::Text(text) = message {
+            if let Ok(envelope) = serde_json::from_str::<Envelope>(&text) {
+                if let Payload::Transport(transport) = envelope.payload {
+                    if wanted(&transport) {
+                        return transport;
+                    }
+                }
+            }
+        }
+    }
+    panic!("no transport matched before the deadline");
+}
+
+/// Three WAVs of `seconds` each — long enough, unlike `media`'s, for the tick
+/// that advances the queue to land inside the handover window before the end.
+fn long_media(tag: &str, seconds: u32) -> (PathBuf, Vec<String>, u64) {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("homesync-skip-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("media dir");
+
+    let frames = 48_000 * seconds as usize;
+    let data_len = frames * 4;
+    let mut ids = Vec::new();
+    for (index, name) in ["one.wav", "two.wav", "three.wav"].iter().enumerate() {
+        let mut bytes = Vec::with_capacity(44 + data_len);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&((data_len + 36) as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&48_000u32.to_le_bytes());
+        bytes.extend_from_slice(&192_000u32.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data_len as u32).to_le_bytes());
+        bytes.resize(44 + data_len, index as u8 + 1);
+        std::fs::File::create(dir.join(name)).expect("create").write_all(&bytes).expect("write");
+        ids.push(homesync_media::sha256_hex(&bytes)[..16].to_string());
+    }
+    (dir, ids, u64::from(seconds) * 1_000_000_000)
+}
+
+fn ready(media_id: &str, duration_ns: u64) -> Message {
+    frame(Payload::ReceiverReady(ReceiverReady {
+        media_id: media_id.into(),
+        hash_verified: true,
+        duration_ns,
+        sample_rate: 48_000,
+        audio_context_state: "running".into(),
+        output_latency_ms: 0.0,
+    }))
+}
+
+/// A track change with the next track preloaded leaves no gap.
+///
+/// The coordinator used to advance on the first tick after a track ended and
+/// schedule the next a full start lead later — two to two and a half seconds
+/// of silence between every pair of tracks. With every receiver holding the
+/// next track decoded, it is now anchored at the instant the current one runs
+/// out. This asserts that exactly: the next anchor is the previous anchor plus
+/// the previous track's length, to the nanosecond.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_track_change_with_the_next_track_preloaded_leaves_no_gap() {
+    let (dir, ids, duration_ns) = long_media("gapless", 3);
+    let mut state_file = dir.clone();
+    state_file.push("state.json");
+    let _coordinator = start_coordinator(PORT_GAPLESS, &dir, &state_file).await;
+
+    let mut speaker = join(PORT_GAPLESS, "Kitchen", Role::Speaker).await;
+    speaker
+        .send(frame(Payload::ClockReport(ClockReport {
+            quality: ClockQuality::Stable,
+            samples: 20,
+            ..ClockReport::default()
+        })))
+        .await
+        .expect("clock");
+    speaker
+        .send(frame(Payload::SelectSource(SelectSource {
+            mode: SourceMode::ControlledAudio,
+            queue: ids.clone(),
+            ..Default::default()
+        })))
+        .await
+        .expect("queue");
+    let seen = snapshot_where(&mut speaker, |s| s.queue.len() == 3).await;
+    assert_eq!(seen.next_in_queue.as_ref(), Some(&ids[1]), "the snapshot names what to preload");
+
+    // The current track decoded, and the next one decoded ahead of time.
+    speaker.send(ready(&ids[0], duration_ns)).await.expect("ready");
+    speaker.send(ready(&ids[1], duration_ns)).await.expect("preload");
+    speaker.send(frame(Payload::Play(PlayCommand { force: false }))).await.expect("play");
+
+    let first =
+        transport_where(&mut speaker, |t| t.state == TransportState::Playing && t.media_id.as_ref() == Some(&ids[0]))
+            .await;
+    let second = transport_where(&mut speaker, |t| t.media_id.as_ref() == Some(&ids[1])).await;
+
+    assert_eq!(second.state, TransportState::Playing);
+    assert_eq!(second.anchor_media_ns, 0);
+    assert_eq!(
+        second.anchor_server_ns,
+        first.anchor_server_ns + duration_ns,
+        "the next track must begin exactly where the first runs out — a difference here is silence"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

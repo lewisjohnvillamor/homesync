@@ -56,6 +56,14 @@ pub const YOUTUBE_RESYNC_COOLDOWN_NS: u64 = 10_000_000_000;
 /// and the button stops being a way out of a track you did not want.
 const PREVIOUS_RESTARTS_AFTER_NS: u64 = 3_000_000_000;
 
+/// How far ahead of a track's end the next one is published.
+///
+/// Must be longer than the snapshot tick that calls `advance_queue`, or the
+/// window can fall between two ticks and be missed entirely — 600 ms against
+/// that tick's 500 ms. It leaves a receiver between 100 and 600 ms to promote a
+/// buffer it has already decoded and schedule it, where the browser needs 60.
+const GAPLESS_LEAD_NS: u64 = 600_000_000;
+
 /// Longest sleep timer that can be armed, in minutes.
 ///
 /// Twelve hours. Partly so the deadline arithmetic cannot overflow on a
@@ -495,6 +503,48 @@ impl Room {
         Some(self.transport.position_at(now_ns) >= duration)
     }
 
+    /// The instant the current track ends, when the next one can take over from
+    /// it without a gap.
+    ///
+    /// `None` means no handover: either there is nothing to hand over from, or
+    /// the end is not close enough yet, or a receiver would not make it. The
+    /// caller then falls back to advancing once the track has actually
+    /// finished, which costs a start lead of silence but cannot fail.
+    ///
+    /// The whole point is the anchor. An ordinary advance fires on the first
+    /// tick at or after the end and schedules a start lead into the future,
+    /// which is two to two and a half seconds of silence between every pair of
+    /// tracks. Anchoring the next track at the instant the current one runs out
+    /// means a receiver that already holds it can schedule it to begin exactly
+    /// there.
+    fn gapless_handover(&self, now_ns: u64, next: &str) -> Option<u64> {
+        if self.transport.state != TransportState::Playing || self.transport.mode != SourceMode::ControlledAudio {
+            return None;
+        }
+        let media_id = self.transport.media_id.as_deref()?;
+        let duration = *self.durations_ns.get(media_id)?;
+        let remaining = duration.checked_sub(self.transport.anchor_media_ns)?;
+        let end = self.transport.anchor_server_ns.checked_add(remaining)?;
+
+        // Already past the end, so there is nothing still sounding to hand over
+        // from; or not close enough yet, and a later tick will catch it.
+        if end <= now_ns || end > now_ns.checked_add(GAPLESS_LEAD_NS)? {
+            return None;
+        }
+
+        // Only when every device that renders audio already holds the next
+        // track. One that would have to fetch and decode it cannot start on
+        // time, and a handover a device misses is worse than the gap it saves:
+        // the room would be sounding on some devices and silent on others.
+        // Preloading is what makes this the common case rather than the rare
+        // one.
+        Some(end).filter(|_| {
+            self.clients.values().filter(|client| client.info.role.renders_audio()).all(|client| {
+                client.preloaded_media_id.as_deref() == Some(next) || client.ready_media_id.as_deref() == Some(next)
+            })
+        })
+    }
+
     /// Moves to the next queued track when the current one ends.
     ///
     /// Returns the media id started, so the caller can tell the room. The new
@@ -503,15 +553,21 @@ impl Room {
     /// the current one is still playing: by the time this fires they already
     /// hold the decoded buffer and can schedule against the same instant.
     pub fn advance_queue(&mut self, now_ns: u64) -> Option<String> {
-        if self.track_finished(now_ns) != Some(true) {
-            return None;
-        }
         let next_index = self.next_index()?;
         let next = self.queue.get(next_index)?.to_string();
+
+        // Either the current track is about to run out and every receiver can
+        // make the handover, or it has already run out and the next one starts
+        // from rest a start lead later.
+        let handover = self.gapless_handover(now_ns, &next);
+        if handover.is_none() && self.track_finished(now_ns) != Some(true) {
+            return None;
+        }
+
         self.queue_index = next_index;
         self.transport.media_id = Some(next.clone());
         self.transport.anchor_media_ns = 0;
-        self.transport.anchor_server_ns = now_ns + self.start_lead_ns;
+        self.transport.anchor_server_ns = handover.unwrap_or(now_ns + self.start_lead_ns);
         self.transport.epoch += 1;
         // Readiness belonged to the previous track. A receiver that preloaded
         // this one carries straight over; one that did not is simply late, and
@@ -1215,6 +1271,7 @@ impl Room {
             start_lead_ms: self.start_lead_ns as f64 / 1e6,
             queue: self.queue.clone(),
             queue_index: self.queue_index,
+            next_in_queue: self.next_in_queue().map(str::to_string),
             media_version,
             room_volume: self.volume,
             shuffle: self.shuffle,
@@ -2129,6 +2186,99 @@ mod tests {
         room.restore_queue(Vec::new(), 0, false, RepeatMode::Off);
         assert!(room.queue.is_empty());
         assert_eq!(room.transport.mode, SourceMode::Youtube, "an empty restore must not seize the transport");
+    }
+
+    /// A playing three-track room whose only receiver has decoded `two` ahead.
+    fn room_with_two_preloaded() -> Room {
+        let mut room = three_track_room();
+        room.set_ready("a", "two");
+        assert_eq!(room.clients["a"].preloaded_media_id.as_deref(), Some("two"), "fixture: a preload of two");
+        room
+    }
+
+    /// When the current track runs out, on the coordinator's clock.
+    fn end_of_current(room: &Room) -> u64 {
+        room.transport.anchor_server_ns + 1_000_000_000 - room.transport.anchor_media_ns
+    }
+
+    #[test]
+    fn the_next_track_is_anchored_at_the_end_of_the_current_one() {
+        // The defect: an advance fired on the tick after the end and scheduled
+        // a start lead later — two to two and a half seconds of silence
+        // between every pair of tracks.
+        let mut room = room_with_two_preloaded();
+        let end = end_of_current(&room);
+        let now = end - GAPLESS_LEAD_NS / 2;
+
+        assert_eq!(room.advance_queue(now).as_deref(), Some("two"), "fires before the end, not after it");
+        assert_eq!(room.transport.anchor_server_ns, end, "anchored exactly where the previous track runs out");
+        assert_eq!(room.transport.anchor_media_ns, 0);
+        assert_eq!(room.transport.state, TransportState::Playing);
+    }
+
+    #[test]
+    fn no_handover_is_published_too_early() {
+        let mut room = room_with_two_preloaded();
+        let end = end_of_current(&room);
+        assert_eq!(room.advance_queue(end - GAPLESS_LEAD_NS - 1), None, "a later tick will catch it");
+        assert_eq!(room.transport.media_id.as_deref(), Some("one"));
+    }
+
+    #[test]
+    fn a_receiver_without_the_next_track_falls_back_to_the_ordinary_advance() {
+        // A device that would have to fetch and decode cannot start on time.
+        // A handover it misses leaves the room sounding on some devices and
+        // silent on others, which is worse than the gap.
+        let mut room = three_track_room();
+        let end = end_of_current(&room);
+        assert_eq!(room.advance_queue(end - GAPLESS_LEAD_NS / 2), None, "nobody holds the next track");
+
+        // Once the track has actually finished, the old path still works.
+        let after = end + 100_000_000;
+        assert_eq!(room.advance_queue(after).as_deref(), Some("two"));
+        assert_eq!(room.transport.anchor_server_ns, after + LEAD, "a start lead from rest");
+    }
+
+    #[test]
+    fn a_controller_does_not_hold_up_a_handover() {
+        // A controller renders nothing, so what it has decoded is irrelevant.
+        let mut room = room_with_two_preloaded();
+        add(&mut room, "phone", Role::Controller);
+        let end = end_of_current(&room);
+        assert_eq!(room.advance_queue(end - GAPLESS_LEAD_NS / 2).as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn a_handover_fires_once_rather_than_on_every_tick_of_the_window() {
+        let mut room = room_with_two_preloaded();
+        let end = end_of_current(&room);
+        assert!(room.advance_queue(end - GAPLESS_LEAD_NS / 2).is_some());
+        let epoch = room.transport.epoch;
+        // The next tick lands inside what used to be the window. The new
+        // track's anchor is in the future, so it is at position zero and
+        // nowhere near its own end.
+        assert_eq!(room.advance_queue(end - GAPLESS_LEAD_NS / 4), None);
+        assert_eq!(room.transport.epoch, epoch, "no second advance");
+        assert_eq!(room.queue_index, 1);
+    }
+
+    #[test]
+    fn a_paused_room_never_hands_over() {
+        let mut room = room_with_two_preloaded();
+        let end = end_of_current(&room);
+        room.pause(end - GAPLESS_LEAD_NS);
+        assert_eq!(room.advance_queue(end - GAPLESS_LEAD_NS / 2), None);
+    }
+
+    #[test]
+    fn the_snapshot_tells_receivers_what_to_preload() {
+        // Receivers used to guess `queue_index + 1`, which under shuffle is
+        // the wrong track. The coordinator's answer travels in the snapshot.
+        let mut room = three_track_room();
+        room.set_playback_modes(true, RepeatMode::Off);
+        let snapshot = room.snapshot(Some(MediaManifest::default()), 1, Vec::new(), 0);
+        assert_eq!(snapshot.next_in_queue.as_deref(), room.next_in_queue());
+        assert!(snapshot.next_in_queue.is_some());
     }
 
     #[test]
