@@ -97,6 +97,12 @@ export function roomHtml(pw, text = true, textScale = 1) {
     <div class="me" style="position:absolute;left:8%;right:8%;top:37%;height:12%;border-radius:${fs * 0.4}px;background:var(--surface-2);border:${pw * 0.005}px solid var(--accent)">
       ${text ? `<div class="me-text" style="position:absolute;left:9%;top:50%;transform:translateY(-50%);font:600 ${fs * textScale}px/1 var(--sans);color:var(--text);white-space:nowrap">this device</div>` : `<div style="position:absolute;left:9%;top:40%;width:52%;height:${fs * 0.4}px;border-radius:${fs}px;background:var(--text-faint)"></div>`}
     </div>
+    ${[0, 1]
+      .map(
+        (i) => `<div style="position:absolute;left:8%;right:8%;top:${52 + i * 12}%;height:10%;border-radius:${fs * 0.4}px;background:var(--surface);border:${pw * 0.003}px solid var(--line)">
+          <div style="position:absolute;left:9%;top:38%;width:${36 + i * 12}%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line-strong)"></div></div>`,
+      )
+      .join('')}
   </div>`;
 }
 
@@ -135,7 +141,7 @@ export function joinTrack(W, H, u, portrait) {
 
   // Screen coordinates within the phone (fractions of the glass).
   const button = { x: 0.03, y: 0.5, w: 0.94, h: 0.11 };
-  const face = { fx: 0.895, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
+  const face = { fx: 0.91, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
   const wait = { fx: 0.895, fy: portrait ? 0.72 : 0.84 }; // where it rides in, below where the button will be
   const indicator = { fx: 0.83, fy: 0.43 };
   const fs = phoneW * 0.088;
@@ -245,7 +251,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
           <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
           <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
-               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-right:${glassW * button.w * (1 - (face.fx - 0.06 - button.x) / button.w)}px;justify-content:center;
+               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-right:${glassW * (button.x + button.w - face.fx + 0.04)}px;justify-content:center;
                display:flex;align-items:center;font:600 ${fs * 0.92 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
           <div class="pressed" style="position:absolute;inset:0;background:var(--accent-ink);opacity:0"></div>
           <div class="socket" style="display:none;position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
@@ -354,14 +360,17 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // stays readable — then the button goes, before the room's card comes in.
     const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
     const gone = easeInOut(span(t, PRESS + 0.25, PRESS + 0.45));
-    btn.style.transform = `translateY(${sink * 3 * u}px) scale(${(1 - 0.012 * sink) * (1 - 0.06 * gone)})`;
+    btn.style.transform = `translateY(${sink * 3 * u}px) scale(${(1 - 0.03 * sink) * (1 - 0.06 * gone)})`;
     btn.style.opacity = String(1 - gone);
     const down = span(t, PRESS - 0.1, PRESS - 0.04);
     // The button's own colour darkens (not an overlay, which would dim its label too).
     btn.style.background = `color-mix(in srgb, var(--accent-ink) ${50 * down}%, var(--accent))`;
     pressed.style.opacity = '0';
     btn.style.color = down >= 0.5 ? 'var(--text)' : 'var(--accent-ink)';
-    ripple.style.opacity = '0';
+    // A small ring from the dot, held inside its circle at the button's free end (clear of the label).
+    const rip = span(t, PRESS, PRESS + 0.35);
+    ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.8 * (1 - rip) : 0);
+    ripple.style.transform = `scale(${0.45 + 0.55 * easeOut(rip)})`;
     // As the phone becomes an icon its words go before they would be too small to read.
     if (meText) meText.style.opacity = String(1 - span(t, 10.66, 10.8));
   });

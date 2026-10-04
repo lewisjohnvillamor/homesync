@@ -240,14 +240,17 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // Accelerates in, then settles slowly: an ease-in-out with its arrival stretched.
     const e = k < 0.5 ? 2 * k * k : 1 - 2 * (1 - k) ** 2;
     // 9:16 has no lean (it would push the icons off the left edge); the hold has its acknowledge instead.
-    return Math.max((portrait ? 0 : 0.2) * (span(t, 11.45, RUSH[0]) ** 1.4), k > 0 ? e : 0);
+    return Math.max((portrait ? 0 : 0.07) * (span(t, 11.45, RUSH[0]) ** 1.2), k > 0 ? e : 0);
   };
   // The pull back leaves fast and lands slowly.
   const backK = (t) => {
     const k = span(t, BACK0, C8 + 1.1);
     return k < 0.12 ? easeIn(k / 0.12) * 0.12 * 0.5 : 0.06 + 0.94 * (1 - (1 - (k - 0.12) / 0.88) ** 4);
   };
-  const cam = (t) => mix(mix(camA(t), camB(t), rushK(t)), camC(t), backK(t));
+  /** The same view as `c`, re-expressed as a zoom about world point (x, y): so a mix zooms about it and it travels straight. */
+  const about = (c, x, y) => ({ ...c, fx: x, fy: y, px: c.px + (x - c.fx) * c.s, py: c.py + (y - c.fy) * c.s });
+  // The rush zooms about T on the phone lane, so T (and its label) travel in a straight line and never leave the frame.
+  const cam = (t) => mix(mix(about(camA(t), L.tX, L.lanes.phone), camB(t), rushK(t)), camC(t), backK(t));
 
   /**
    * Pin an element to a place on screen while the camera is flat, blending
