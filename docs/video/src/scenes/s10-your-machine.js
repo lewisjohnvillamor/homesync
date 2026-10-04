@@ -137,7 +137,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // Where the dot arrives, a little large, for composition 9 to aim at.
   handoff.lanDotAt = (t) => {
     const st = stopAt(t);
-    return { x: st.x, y: st.y, d: st.d * 2.6 };
+    return { x: st.x, y: st.y, d: st.d * 1.15 };
   };
 
   hostDot(t0, LEAVE + 0.075, (t) => {
@@ -147,7 +147,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return {
       x: st.x + drift,
       y: st.y,
-      d: st.d * lerp(2.6, 1, k) * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
+      d: st.d * lerp(1.15, 1, k) * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
       glow: lerp(0.45, 0.08, k) + 0.3 * span(t, LEAVE - 0.05, LEAVE + 0.075),
     };
   });

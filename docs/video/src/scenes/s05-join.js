@@ -42,11 +42,13 @@ export const ICON_LANDS = SHRINK[1];
  */
 export function laneLayout(W, H, u, portrait) {
   const L = diagramLayout(W, H, u, portrait);
-  const iconScale = portrait ? 1.2 : 1.5;
+  const iconScale = portrait ? 1.6 : 1.5;
   // The lanes end just past T, and the whole diagram — icons to T's label —
   // is centred in the frame, so nothing past T is left empty.
-  const iconX0 = portrait ? 130 * u : L.iconX - 40 * u;
-  const laneEnd0 = L.tX + (portrait ? 60 * u : 150 * u);
+  // 9:16: T sits further right and the lanes run to ~60 px from the frame's edge.
+  const tX0 = portrait ? W - 120 * u : L.tX;
+  const iconX0 = portrait ? 150 * u : L.iconX - 40 * u;
+  const laneEnd0 = tX0 + (portrait ? 60 * u : 150 * u);
   const left = iconX0 - 90 * u * iconScale;
   const right = laneEnd0 + 30 * u;
   const dx = W / 2 - (left + right) / 2;
@@ -55,12 +57,12 @@ export function laneLayout(W, H, u, portrait) {
     ...L,
     iconX,
     iconScale,
-    tX: L.tX + dx,
-    laneStart: (portrait ? 250 * u : 390 * u) + dx,
+    tX: tX0 + dx,
+    laneStart: (portrait ? 320 * u : 390 * u) + dx,
     laneEnd: laneEnd0 + dx,
     // 9:16: the lanes spread down the frame, so its lower quarter is not left empty.
-    ...(portrait ? { lanes: { laptop: H * 0.45, phone: H * 0.63, tv: H * 0.81 }, tTop: H * 0.45 - 150 * u } : {}),
-    phoneIcon: { x: iconX, y: portrait ? H * 0.63 : L.lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
+    ...(portrait ? { lanes: { laptop: H * 0.38, phone: H * 0.62, tv: H * 0.86 }, tTop: H * 0.38 - 150 * u } : {}),
+    phoneIcon: { x: iconX, y: portrait ? H * 0.62 : L.lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
   };
 }
 
@@ -140,7 +142,8 @@ export function joinTrack(W, H, u, portrait) {
   // --- the phone's path, before the camera ----------------------------------
   const phonePose = (t) => {
     if (t < SCAN[0]) {
-      const k = easeOut(span(t, ENTER, SCAN[0]));
+      // 9:16 brings the phone up at once, under the dot, so the lower frame is never left with only the dot.
+      const k = easeOut(span(t, portrait ? 7.99 : ENTER, SCAN[0]));
       return { x: lerp(enter.x, over.x, k), y: lerp(enter.y, over.y, k) };
     }
     // Held over the code, lifting a little in the hand; then to rest.
@@ -158,7 +161,7 @@ export function joinTrack(W, H, u, portrait) {
   const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
   // 16:9: pushed in, the phone is centred near x 1000 with its rounded
   // bottom end in frame (so it reads as a phone), the code half off the left.
-  const target = { x: 1000 * u, y: 1040 * u - (phoneH * PUSH) / 2 };
+  const target = { x: 1150 * u, y: 1040 * u - (phoneH * PUSH) / 2 };
   const O = portrait
     ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
     : {
@@ -340,17 +343,17 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     viewfinder.style.opacity = String(1 - span(t, 8.92, 9.05));
     join.style.opacity = String(span(t, 8.92, 9.05) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
     room.style.opacity = String(span(t, JOINED - 0.08, JOINED + 0.06));
-    // The press: the button sinks 3 px and a ripple spreads from the dot.
+    // The press: the dot (solid throughout) shrinks a little, the button sinks
+    // 3 px and darkens to its pressed state — its label turning light so it
+    // stays readable — then the button goes, before the room's card comes in.
     const sink = Math.sin(Math.PI * span(t, PRESS - 0.02, PRESS + 0.2));
-    btn.style.transform = `translateY(${sink * 3 * u}px) scale(${1 - 0.012 * sink})`;
-    // Pressed, the button darkens (so the solid dot reads on it), until the dot has lifted off it.
-    const down = span(t, PRESS - 0.12, PRESS - 0.02) * (1 - span(t, PRESS + 0.42, PRESS + 0.6));
-    // 0.22 keeps the label at ≥ 4.5:1 on the darkened button.
-    pressed.style.opacity = String(0.22 * down);
-    const rip = span(t, PRESS, PRESS + 0.45);
-    ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.7 * (1 - rip) : 0);
-    // The ring stays inside a circle around the dot, at the button's free end, never over the words.
-    ripple.style.transform = `scale(${0.35 + 0.65 * easeOut(rip)})`;
+    const gone = easeInOut(span(t, PRESS + 0.25, PRESS + 0.45));
+    btn.style.transform = `translateY(${sink * 3 * u}px) scale(${(1 - 0.012 * sink) * (1 - 0.06 * gone)})`;
+    btn.style.opacity = String(1 - gone);
+    const down = span(t, PRESS - 0.1, PRESS - 0.04);
+    pressed.style.opacity = String(0.5 * down);
+    btn.style.color = down >= 0.5 ? 'var(--text)' : 'var(--accent-ink)';
+    ripple.style.opacity = '0';
     // As the phone becomes an icon its words go before they would be too small to read.
     if (meText) meText.style.opacity = String(1 - span(t, 10.66, 10.8));
   });

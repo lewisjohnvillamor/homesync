@@ -27,6 +27,7 @@ import * as THREE from 'three';
 import { BEAT, span, lerp, clamp01 } from '../shared/beats.js';
 import { makeRenderer, makeStage, MAKE, BRAND, toScreen } from '../shared/three-kit.js';
 import { handoff } from '../shared/handoff.js';
+import { DEVICE_SVG, ASPECT } from '../shared/devices.js';
 
 export const PRESS = 1 * BEAT;
 /** Late starts: 40, 90 and 210 ms, shown eight times slower so the growth spans the camera's rise. */
@@ -85,7 +86,7 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
     ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * (1 - ring) ** 1.5})`;
     ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
     ctx.beginPath();
-    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.15 * easeOut(ring)), 0, Math.PI * 2);
+    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.05 * easeOut(ring)), 0, Math.PI * 2);
     ctx.stroke();
   }
   // Title line and progress line: the shape of a player, not words.
@@ -161,13 +162,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 40, tg: [0.06, 0.15, 0.0], d0: 3.95, d1: 3.6, orb0: 0.06, orb1: 0.0 },
-        c2: { el: 52, tg: [0.04, 0.0, 0.12], d: 4.45, orbDrift: 0.035 },
+        c1: { el: 40, tg: [0.12, 0.15, 0.0], d0: 4.1, d1: 3.8, orb0: 0.06, orb1: 0.0 },
+        c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 38, tx0: 0.62, tg: [0.25, 0.25, 0.0], d0: 3.95, d1: 3.75, orb0: 0.42, orb1: 0.35 },
-        c2: { el: 42, tg: [0.1, 0.0, -0.2], d: 4.6, orbDrift: -0.04 },
+        c1: { el: 38, tg: [0.36, 0.25, 0.15], d0: 4.1, d1: 3.9, orb0: 0.42, orb1: 0.35 },
+        c2: { el: 42, tg: [0.2, 0.0, -0.26], d: 4.8, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -196,8 +197,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
-    ? { x0: -0.55, speed: 0.22, clear: 0.12, dx: { laptop: 0.12, phone: -0.06, tv: 0 }, rows: { laptop: [0, 1.5], phone: [0.95, 2.4], tv: [-1.0, 1.25] }, turn: 0 }
-    : { x0: -0.8, speed: 0.5, clear: 0.14, dx: { laptop: 0.28, phone: -0.25, tv: 0 }, rows: { laptop: [0, 1.8], phone: [0.8, 2.6], tv: [-1.0, 1.7] }, turn: 0.2 };
+    ? { x0: -0.45, speed: 0.17, clear: 0.34, icon: 0.06, dx: { laptop: 0.1, phone: -0.06, tv: 0 }, rows: { laptop: [0, 1.4], phone: [0.95, 2.3], tv: [-1.0, 1.15] }, turn: 0 }
+    : { x0: -0.7, speed: 0.42, clear: 0.48, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.1 }, rows: { laptop: [0, 1.8], phone: [0.8, 2.6], tv: [-1.0, 1.7] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -258,8 +259,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   tc.fillRect(22, 22, 212, 212);
   const tight = new THREE.CanvasTexture(tightCanvas);
   tight.colorSpace = THREE.SRGBColorSpace;
-  const FOOT = { laptop: [0.34, 0.235], phone: [0.09, 0.06], tv: [0.5, 0.11] };
-  for (const d of devices) {
+  const FOOT = { laptop: [0.34, 0.235], phone: [0.09, 0.06] };
+  for (const d of devices.filter((q) => FOOT[q.kind])) {
     const [fw, fd] = FOOT[d.kind];
     const line = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
@@ -281,18 +282,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   pressLine.rotation.x = -Math.PI / 2;
   pressLine.renderOrder = 3;
   scene.add(pressLine);
-  // The shared start, made explicit: a play mark at the head of the line,
-  // pointing the way time runs, and a tick where each bar begins.
-  const playShape = new THREE.Shape();
-  playShape.moveTo(-0.035, -0.045);
-  playShape.lineTo(0.05, 0);
-  playShape.lineTo(-0.035, 0.045);
-  playShape.closePath();
-  const playMark = new THREE.Mesh(new THREE.ShapeGeometry(playShape), accent(0));
-  playMark.rotation.x = -Math.PI / 2;
-  playMark.position.set(LAYOUT.x0, 0.003, zMin - 0.1);
-  playMark.renderOrder = 3;
-  scene.add(playMark);
+  // The strip is on the floor from frame one, dim: a shared start line, a
+  // tick where each row begins, and (HTML, below) each row's device icon.
+  const pressBase = new THREE.Mesh(new THREE.PlaneGeometry(0.01, zMax - zMin), accent(0.22));
+  pressBase.rotation.x = -Math.PI / 2;
+  pressBase.position.set(LAYOUT.x0, 0.0018, (zMin + zMax) / 2);
+  pressBase.renderOrder = 3;
+  scene.add(pressBase);
   const ticks = devices.map((d) => {
     const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.13), accent(0));
     tick.rotation.x = -Math.PI / 2;
@@ -328,12 +324,24 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   el.insertAdjacentHTML(
     'beforeend',
-    `<div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
+    `<div class="icons" style="position:absolute;inset:0">${devices
+      .map((d) => {
+        const h = (portrait ? 76 : 70) * u;
+        // The film's device drawings, their strokes lifted to the dim text
+        // colour so they read on the floor.
+        const svg = DEVICE_SVG[d.kind]().replaceAll('#2f3b4a', '#94a3b4').replaceAll('#3a4757', '#94a3b4');
+        return `<div class="icon" style="position:absolute;left:0;top:0;width:${h * ASPECT[d.kind]}px;height:${h}px">${svg}</div>`;
+      })
+      .join('')}</div>
+     <div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
      <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;top:${portrait ? 150 * u : 104 * u}px;
        font:700 ${portrait ? 88 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text)">Press play on all three.</div>`,
   );
   const headline = el.querySelector('.headline');
   const dim = el.querySelector('.dim');
+  const iconsEl = el.querySelector('.icons');
+  const icons = [...el.querySelectorAll('.icon')];
+  for (const ic of icons) ic.firstElementChild.style.cssText = 'width:100%;height:100%;display:block';
   // Never still while it is read: the line drifts with the camera's ease-in.
   tl.fromTo(headline, { x: 0 }, { x: 14 * u, duration: 1.4, ease: 'sine.out' }, 0);
   tl.fromTo(headline, { y: 0, opacity: 1 }, { y: -60 * u, opacity: 0, duration: 0.24, ease: 'power2.in', immediateRender: false }, 1.38);
@@ -365,6 +373,17 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     t = Math.min(t, LIFT);
     poseCamera(camera, t);
     canvasEl.style.transform = sink > 0 ? `translateY(${90 * u * sink}px) scale(${1 - 0.05 * sink})` : '';
+    iconsEl.style.transformOrigin = '50% 50%';
+    iconsEl.style.transform = canvasEl.style.transform;
+    // Each row's device icon, just before its start tick: the row is that
+    // device's own start time.
+    devices.forEach((d, i) => {
+      const p = toScreen(new THREE.Vector3(LAYOUT.x0 - LAYOUT.icon, 0, d.z), camera, W, H);
+      const ic = icons[i];
+      const w = ic.offsetWidth;
+      const h = ic.offsetHeight;
+      ic.style.transform = `translate(${p.x - w}px, ${p.y - h / 2}px)`;
+    });
     dim.style.opacity = String(sink);
 
     // The press: down fast, held a moment, up again as the screens come up.
@@ -380,9 +399,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     pressLine.scale.set(1 + 2.2 * flash, lineLen, 1);
     pressLine.position.set(LAYOUT.x0, 0.002, zMin + lineLen / 2);
     pressLine.material.opacity = drawn > 0 ? Math.min(1, 0.6 + 0.4 * flash) : 0;
-    playMark.material.opacity = 0.85 * smooth(span(t, PRESS - 0.07, PRESS + 0.05));
-    playMark.scale.setScalar(1 + 0.6 * flash);
-    for (const tick of ticks) tick.material.opacity = 0.75 * smooth(span(t, PRESS, PRESS + 0.1));
+    for (const tick of ticks) tick.material.opacity = lerp(0.3, 0.8, smooth(span(t, PRESS, PRESS + 0.1)));
 
     for (const d of devices) {
       // Each screen comes up only when its own sound starts (its marker

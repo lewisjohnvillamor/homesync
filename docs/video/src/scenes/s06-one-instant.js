@@ -53,13 +53,13 @@ const C9 = 18.125;
  * diagram is ever seen through or over the house; it only moves off it.
  */
 const LIFT = 17.85;
-const LIFT_SPAN = [17.74, 18.08];
+const LIFT_SPAN = [17.8, 18.1];
 /**
  * The dot stays where T was as the plane drops away beneath it (everything of
  * the diagram moves away from it, nothing crosses it), then is let go and the
  * film flies it into the house's host (17.95).
  */
-const DOT_RELEASE = 17.8;
+const DOT_RELEASE = 17.84;
 
 /** Composition 6: the T line falls from the dot through the lanes. */
 const FALL = [11.0, 11.8];
@@ -73,7 +73,7 @@ const RUN8 = (kind) => (DELAY_MS[kind] / 1000) * 2.5;
 /** The pull back from the close-up starts just after the phone's pulse lands on T. */
 const BACK0 = 15.3;
 /** In composition 6's hold each device acknowledges T in turn. */
-const ACK = { laptop: 12.0, phone: 12.25, tv: 12.5 };
+const ACK = { laptop: 11.95, phone: 12.2, tv: 12.45 };
 
 export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const L = laneLayout(W, H, u, portrait);
@@ -93,8 +93,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
    * it is well clear of the TV's start marker (the longest bar starts near
    * the lane's start) and of the icon.
    */
-  const NAME_X = L.laneStart + (portrait ? 110 : 120) * u;
+  const NAME_X = L.laneStart + (portrait ? 10 : 120) * u;
   const nameY = (kind) => L.lanes[kind] + 40 * u;
+  const ackD = devW * 0.9;
   const lane = (kind) => {
     const y = L.lanes[kind];
     const icon =
@@ -113,6 +114,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         <div class="rule" style="position:absolute;left:${L.laneStart}px;top:${y - ruleH / 2}px;width:${L.laneEnd - L.laneStart}px;height:${ruleH}px;
              background:var(--text-faint);opacity:0.7;border-radius:${ruleH / 2}px"></div>
         ${icon}
+        <div class="ackring" style="position:absolute;left:${L.iconX - ackD / 2}px;top:${y - ackD / 2}px;width:${ackD}px;height:${ackD}px;border-radius:50%;
+             border:${5 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
         <div class="name" style="position:absolute;left:${NAME_X}px;top:${nameY(kind)}px;transform-origin:0 0;
              font:600 ${30 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}</div>
         <div class="tick" style="position:absolute;left:${L.tX - 5 * u}px;top:${y - 34 * u}px;width:${10 * u}px;height:${68 * u}px;border-radius:${5 * u}px;background:var(--accent)"></div>
@@ -120,14 +123,14 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
              border:${4 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
         <div class="bar" style="position:absolute;left:${L.tX - w}px;top:${y - barH / 2}px;width:${w}px;height:${barH}px;border-radius:${barH / 2}px;
              background:var(--accent);transform-origin:100% 50%"></div>
+        <div class="pulse" style="position:absolute;left:${L.tX - w}px;top:${y - barH / 2}px;width:${w}px;height:${barH}px;border-radius:${barH / 2}px;
+             background:var(--text);transform-origin:0 50%;opacity:0"></div>
         <div class="start" style="position:absolute;left:${L.tX - 15 * u}px;top:${y - 15 * u}px;width:${30 * u}px;height:${30 * u}px;border-radius:50%;
              background:var(--bg);border:${6 * u}px solid var(--accent);box-sizing:border-box"></div>
         <div class="fire" style="position:absolute;left:${L.tX - w - 15 * u}px;top:${y - 15 * u}px;width:${30 * u}px;height:${30 * u}px;border-radius:50%;
              border:${3 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
-        <div class="pulse" style="position:absolute;left:${L.tX - w}px;top:${y - barH / 2}px;width:${w}px;height:${barH}px;border-radius:${barH / 2}px;
-             background:var(--text);transform-origin:0 50%;opacity:0"></div>
         <div class="ms" style="position:absolute;left:${L.tX - w - 260 * u}px;width:${w + 234 * u}px;top:${y - barH / 2 - 54 * u}px;text-align:right;transform-origin:100% 100%;
-             font:500 ${34 * u}px/1 var(--mono);color:var(--text-dim);white-space:nowrap">${DELAY_MS[kind]} ms <span class="ex example-tag" style="--tag-size:${16 * u}px;vertical-align:middle;margin-left:${8 * u}px">example</span></div>
+             font:500 ${34 * u}px/1 var(--mono);color:var(--text-dim);white-space:nowrap">${DELAY_MS[kind]} ms <span class="ex example-tag" style="--tag-size:calc(${16 * u}px * var(--tag, 1));vertical-align:middle;margin-left:${8 * u}px">example</span></div>
       </div>`;
   };
 
@@ -142,7 +145,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
       <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
         <div class="card" style="position:absolute;left:${-2600 * u}px;top:${L.tTop - CARD_TOP}px;width:${5200 * u + W}px;height:${CARD_TOP + 2600 * u}px;display:none;
-             background:linear-gradient(to top, var(--bg) calc(100% - ${260 * u}px), transparent)"></div>
+             background:var(--bg);border-top:${4 * u}px solid var(--line-strong);box-sizing:border-box"></div>
         ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
              background:var(--accent);transform-origin:50% 0;border-radius:${3 * u}px"></div>
@@ -167,7 +170,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const root = el.querySelector(`.lane-${kind}`);
       const q = (c) => root.querySelector(c);
       return [kind, {
-        icon: q('.icon'), name: q('.name'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
+        icon: q('.icon'), ackring: q('.ackring'), name: q('.name'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
         screen: q('.screen'), start: q('.start'), fire: q('.fire'), pulse: q('.pulse'), ms: q('.ms'),
         w: DELAY_MS[kind] * L.pxPerMs,
       }];
@@ -203,7 +206,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     fx: L.tX,
     fy: L.lanes.phone,
     px: (portrait ? W - 120 * u : 1650 * u) - 24 * u * sine(span(t, C7 + 0.6, C8)),
-    py: portrait ? 900 * u : 420 * u,
+    py: portrait ? 900 * u : 470 * u,
     tilt: 0,
     rot: 0,
   });
@@ -238,9 +241,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
    * out with weight 0: world anchor (ax, ay) is drawn at screen (sx, sy) at
    * on-screen scale `scr`.
    */
-  const pin = (elx, c, c6, ax, ay, sx, sy, scr, w) => {
+  const pin = (elx, c, c6, ax, ay, sx, sy, scr, w, pop = 1) => {
     if (w <= 0) {
-      elx.style.transform = '';
+      elx.style.transform = pop !== 1 ? `scale(${pop})` : '';
       return;
     }
     // Blend on screen, never further left than where it sat in composition 6.
@@ -252,7 +255,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const k = lerp(c.s, scr, w) / c.s;
     const wx = c.fx + (x - c.px) / c.s;
     const wy = c.fy + (y - c.py) / c.s;
-    elx.style.transform = `translate(${wx - ax}px, ${wy - ay}px) scale(${k})`;
+    elx.style.transform = `translate(${wx - ax}px, ${wy - ay}px) scale(${k * pop})`;
   };
 
   /** Where the dot (T) sits once the camera is frozen for the lift; set each frame, the same value from LIFT_SPAN[0] on. */
@@ -298,8 +301,12 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       l.icon.style.opacity = String(iconK);
       const reach = REACH[kind];
       // The device lights the moment T crosses its lane, and stays lit, dimming a little.
-      const ack = Math.sin(Math.PI * span(t, ACK[kind], ACK[kind] + 0.35));
-      const lit = Math.min(1, easeOut(span(t, reach, reach + 0.18)) * (1 - 0.45 * sine(span(t, reach + 0.3, C7))) + 0.6 * ack);
+      // In the hold each device answers in turn: it pops, its screen floods, a ring opens round it.
+      const ackK = span(t, ACK[kind], ACK[kind] + 0.5);
+      const ack = Math.sin(Math.PI * Math.min(1, ackK * 1.6));
+      l.ackring.style.opacity = String(ackK > 0 && ackK < 1 ? 0.9 * (1 - ackK) : 0);
+      l.ackring.style.transform = `scale(${0.5 + 0.9 * easeOut(ackK)})`;
+      const lit = Math.min(1, easeOut(span(t, reach, reach + 0.18)) * (1 - 0.45 * sine(span(t, reach + 0.3, C7))) + 0.8 * ack);
       // The device lights as its pulse arrives: a glow and a small lift.
       const glowPx = (6 + 22 * lit) * u;
       const glow = lit > 0 ? `drop-shadow(0 0 ${glowPx}px rgba(90,169,255,${0.25 + 0.55 * lit}))` : 'none';
@@ -307,9 +314,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       // Its screen comes up as it is told.
       if (l.screen) {
         l.screen.style.fill = lit > 0 ? 'var(--accent)' : '';
-        l.screen.style.fillOpacity = lit > 0 ? String(0.12 + 0.3 * lit) : '';
+        l.screen.style.fillOpacity = lit > 0 ? String(0.12 + 0.3 * lit + 0.35 * ack) : '';
       }
-      if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit + 0.06 * ack})`;
+      if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit + 0.16 * ack})`;
       // The other lanes' names step aside during the close-up, so no word is ever cut by the frame edge.
       const aside = kind === 'phone' ? 0 : span(rush, 0.22, 0.4) * (1 - span(back, 0.3, 0.7));
       l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside) * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
@@ -342,7 +349,12 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       l.start.style.transform = `translateX(${-l.w * grow}px) scale(${pop > 0 ? 0.4 + 0.6 * easeOut(pop) + 0.25 * Math.sin(Math.PI * pop) : 0.0001})`;
       l.start.style.opacity = String(pop > 0 ? 1 : 0);
       const landed = kind === 'phone' ? C7 + 1.0 : GROW8[kind][1];
-      const msOn = easeOut(span(t, landed - 0.12, landed + 0.12));
+      // The value comes in with its bar and holds (facts.md values only).
+      const growFrom = kind === 'phone' ? C7 + 0.45 : GROW8[kind][0];
+      const msOn = easeOut(span(t, growFrom, growFrom + 0.2));
+      void landed;
+      // Tags grow in composition 8, where they are seen small and tilted.
+      l.ms.style.setProperty('--tag', String(lerp(1, 1.45, back)));
       // Tilted, the labels foreshorten; they grow so they read at ≥ 24 px.
       l.ms.style.transform = `translate(${-24 * u * back}px, ${-22 * u * back}px) scale(${lerp(1, 1.5, back)})`;
       // Gone before the plane lifts, so no label is ever seen over the house.
@@ -356,19 +368,20 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       l.fire.style.opacity = String(fk > 0 && fk < 1 ? 0.9 * (1 - fk) : 0);
       l.fire.style.transform = `scale(${1 + (t < C8 ? 0.9 : 1.1) * easeOut(fk)})`;
       const rk = span(t, fireAt, fireAt + run);
-      const fillOn = rk > 0 && grow > 0.99 ? 1 - span(t, fireAt + run + 0.05, fireAt + run + 0.35) : 0;
+      // Once only: the phone's bar in the close-up. In 8, T brightening is the result.
+      const fillOn = t < C8 && rk > 0 && grow > 0.99 ? 1 - span(t, fireAt + run + 0.05, fireAt + run + 0.35) : 0;
       l.pulse.style.opacity = String(0.85 * fillOn * (1 - span(t, LIFT_SPAN[0] - 0.2, LIFT_SPAN[0])));
       l.pulse.style.transform = `scaleX(${Math.max(0.0001, easeInOut(rk))})`;
 
       // In composition 7 the phone stays in shot, pinned enlarged at the lane's left edge.
       if (kind === 'phone') {
         const wPin = rush * (1 - back);
-        const iconScreenH = portrait ? 380 * u : 240 * u;
+        const iconScreenH = portrait ? 380 * u : 400 * u;
         const iconScr = iconScreenH / ic.h;
         const sx = portrait ? 125 * u : 140 * u;
         const c6 = camA(t);
         const iy = c.py;
-        pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin);
+        pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin, 1 + 0.16 * ack);
         // Its name sits under it.
         const ns = portrait ? 1.6 : 1.45;
         pin(l.name, c, c6, NAME_X, nameY('phone'), sx - 50 * u * ns, iy + iconScreenH / 2 + 8 * u, ns, wPin);

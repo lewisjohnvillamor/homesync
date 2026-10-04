@@ -345,10 +345,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
-    const k = smooth(clamp01((t - t0) / (t1 - t0)));
+    const x = clamp01((t - t0) / (t1 - t0));
+    const k = x * (1.4 - 0.4 * x);
     const azimuth = (HOUSE_VIEW.azimuth + 6 * k + 3.5 * smooth(span(t, HOUSE_TOUCH, 21.5))) * DEG;
     const elevation = frame.elevation * DEG;
-    const distance = frame.distance * (1 - 0.06 * k);
+    const distance = frame.distance * (1 - (portrait ? 0.1 : 0.06) * k);
     const tg = frame.target;
     cam.position.set(
       tg.x + Math.sin(azimuth) * distance * Math.cos(elevation),
@@ -414,8 +415,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     if (k > 0 && to) {
       const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
       return {
-        x: (1 - e) ** 2 * s.x + 2 * e * (1 - e) * lerp(s.x, to.x, 0.4) + e * e * to.x,
-        y: (1 - e) ** 2 * s.y + 2 * e * (1 - e) * (Math.min(s.y, to.y) - 220 * u) + e * e * to.y,
+        x: lerp(s.x, to.x, e),
+        y: lerp(s.y, to.y, e),
         d: lerp(d, to.d, e),
         glow: lerp(0.35, 0.45, k),
       };
@@ -434,7 +435,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
      <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1]}px;
-        overflow:hidden;background:rgba(11,14,19,0.88);box-shadow:0 0 ${120 * u}px ${50 * u}px rgba(11,14,19,0.8)">
+        overflow:hidden;background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${40 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${26 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${40 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${26 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -478,14 +479,14 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The plane fades in under the settling dot; brightens briefly at the touch.
     const touch = Math.exp(-Math.max(0, t - HOUSE_TOUCH) * 5) * (t >= HOUSE_TOUCH ? 1 : 0);
-    planeMat.opacity = 0.5 * smooth(span(t, 18.1, 18.6)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
+    planeMat.opacity = 0.65 * smooth(span(t, 18.1, 18.6)) + 0.4 * touch + 0.2 * smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.2));
     plane.position.y = T_Y + 0.7 * (1 - easeOut(span(t, 18.1, 19.0)));
     const hover = smooth(span(t, SETTLE, SETTLE + 0.3)) * (1 - smooth(span(t, 21.3, 21.5)));
     plumb.material.opacity = 0.35 * hover;
     spot.material.opacity = 0.35 * hover;
     const kr = span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.7);
     ring.visible = kr > 0 && kr < 1;
-    ring.scale.setScalar(0.08 + 0.2 * easeOut(kr));
+    ring.scale.setScalar(0.06 + 0.1 * easeOut(kr));
     ringMat.opacity = 0.9 * (1 - kr);
 
     for (const d of devices) {
@@ -493,13 +494,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const on = t >= d.start;
       d.bar.visible = on && grown > 0.002;
       d.bar.scale.set(1, Math.max(0.0001, grown * d.late * RISE), 1);
-      d.disc.visible = t >= d.start - 0.12;
+      d.disc.visible = t >= d.start;
       d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
-      d.contact.scale.setScalar(met ? 1 + 1.2 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
+      d.contact.scale.setScalar(met ? 1 + 0.4 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
       d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
-      for (const seg of d.guide.children) seg.material.opacity = 0.3 * smooth(span(t, d.start - 0.3, d.start));
+      for (const seg of d.guide.children) seg.material.opacity = 0.18 * smooth(span(t, d.start - 0.3, d.start));
       const pop = smooth(span(t, d.start - 0.12, d.start));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -511,13 +512,14 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const dd = DOT_D * (refDistance / probe.position.distanceTo(p));
     const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, 21.38, 21.5)));
     label.style.opacity = String(show);
-    label.style.transform = `translate(${s.x + dd / 2 + 14 * u}px, ${s.y - 22 * u}px)`;
+    label.style.transform = `translate(${s.x + dd / 2 + 40 * u}px, ${s.y - 22 * u}px)`;
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
-    const lift = span(t, 21.45, 21.74) ** 2;
+    const lift = span(t, 21.45, 21.8) ** 1.6;
     el.style.transformOrigin = '50% 50%';
-    el.style.transform = lift > 0 ? `translateY(${H * 1.25 * lift}px) scale(${1 - 0.25 * lift})` : '';
+    el.style.transform = lift > 0 ? `translateY(${-H * 0.5 * lift}px) scale(${1 - 0.75 * lift})` : '';
+    el.style.opacity = String(1 - smooth(span(t, 21.62, 21.8)));
     el.style.opacity = '1';
 
 
@@ -533,8 +535,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const capY = d.baseY + clamp01((t - d.start) / d.late) * d.late * RISE;
       const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
       const lh = d.label.offsetHeight;
-      const lx = d.kind === 'tv' ? Math.max(40 * u, top.x - lw - 30 * u) : top.x + 30 * u;
-      const ly = top.y - lh / 2;
+      let lx = d.kind === 'tv' ? top.x - lw - 56 * u : top.x + 56 * u;
+      let ly = top.y - lh / 2;
+      // No room on the left (9:16): above the bar's top, clear of its ring.
+      if (lx < 40 * u) { lx = Math.max(40 * u, top.x - lw / 2); ly = top.y - lh - 56 * u; }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
