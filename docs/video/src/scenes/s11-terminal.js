@@ -40,7 +40,7 @@ const cubicIn = (k) => k * k * k;
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
   const winW = portrait ? 900 * u : 1680 * u;
-  const winH = portrait ? 720 * u : 560 * u;
+  const winH = portrait ? 900 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
@@ -48,9 +48,9 @@ export function terminalGeo(W, H, u, portrait) {
   // terminal, so the type can be large enough to fill the frame.
   const f = portrait ? 54 * u : 48 * u;
   const padX = portrait ? 48 * u : 72 * u;
-  const lineH = f * (portrait ? 2.0 : 1.7);
+  const lineH = f * (portrait ? 2.5 : 1.7);
   const textX = winX + padX;
-  const textY = winY + bar + (portrait ? 44 * u : 64 * u);
+  const textY = winY + bar + (portrait ? (winH - bar - 4 * lineH) / 2 : 64 * u);
   // The cursor is about the text's cap height, not a blob beside it.
   return { W, H, u, portrait, winW, winH, winX, winY, bar, f, padX, lineH, textX, textY, cw: f * CW, d: f * 0.66, outRows: portrait ? 2 : 1 };
 }
@@ -94,7 +94,12 @@ export function cursorAt(t, g) {
   const swell = 1 + 0.2 * cubicOut(span(t, COLLAPSE + 0.06, COLLAPSE + 0.24));
   const drift = Math.sin(t * 2.2) * 1.2 * g.u;
   const off = t > 24.66 && t < 24.75 ? 0.12 : 1;
-  return { opacity: off, x: x + drift, y, d: g.d * s * dip * swell * blink, glow: 0.12 + 0.35 * span(t, COLLAPSE, COLLAPSE + 0.15) };
+  // As the window rushes past, the cursor already heads for the frame's
+  // centre, where composition 12 builds the mark around it.
+  const toC = (k => k * k * (3 - 2 * k))(span(t, GONE, 26.875));
+  x = lerp(x, g.W / 2, toC);
+  y = lerp(y, g.H * (g.portrait ? 0.38 : 0.36), toC);
+  return { opacity: off, x: x + drift * (1 - toC), y, d: g.d * s * dip * swell * blink, glow: 0.12 + 0.35 * span(t, COLLAPSE, COLLAPSE + 0.15) };
 }
 
 export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
@@ -138,7 +143,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     // The window waits under the leaving words; its text comes up once
     // they have cleared, so no word passes over another.
     win.style.opacity = String(appear * fade);
-    txt.style.opacity = String(appear * fade);
+    txt.style.opacity = String(clamp01((t - 24.31) / 0.1) * fade);
     txt.style.transformOrigin = `${W / 2}px ${H / 2}px`;
     win.style.transformOrigin = `${W / 2 - g.winX}px ${H / 2 - g.winY}px`;
     win.style.transform = `scale(${s})`;
@@ -157,7 +162,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     l1.style.transform = `translate(${-6 * u * settle}px, 0px) scale(${1 - kc})`;
 
     // The caption: in the film's type, on its own band, between the two.
-    const C0 = ENTER - 0.06;
+    const C0 = ENTER + 0.05;
     const ci = expoOut(span(t, C0, C0 + 0.4));
     const co = cubicIn(span(t, PRINT + 0.7, PRINT + 0.9));
     cap.style.visibility = t > C0 && co < 1 ? 'visible' : 'hidden';

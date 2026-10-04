@@ -227,8 +227,6 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // Kitchen: a counter along the left wall, a TV on a low cabinet, a table.
   const kLeft = -HOUSE_W / 2 + WALL_T;
   const counterD = 0.34;
-  house.add(box(counterD, 0.3, 1.15, paleCab, kLeft + counterD / 2, Y0, zIn0 + 0.575));
-  house.add(box(counterD + 0.02, 0.03, 1.17, oak, kLeft + counterD / 2 + 0.01, Y0 + 0.3, zIn0 + 0.585));
   const cab = { x: -1.2, z: zIn0 + 0.17, w: 0.95, h: 0.14, d: 0.3 };
   house.add(box(cab.w, cab.h, cab.d, walnut, cab.x, Y0, cab.z, { radius: 0.01 }));
   const table = { x: -0.78, z: 0.42, w: 0.82, d: 0.52, h: 0.34 };
@@ -259,7 +257,6 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const stand = { x: 2.0, z: zIn0 + 0.17, w: 0.3, h: 0.24, d: 0.28 };
   house.add(box(stand.w, stand.h, stand.d, walnut, stand.x, Y0, stand.z, { radius: 0.01 }));
   const rug = box(1.5, 0.008, 0.62, rugMat, bed.x, Y0, 0.72, { cast: false });
-  house.add(rug);
 
   // --- the three devices, the same models as compositions 1–2 ------------------
   const facing = -0.32;
@@ -326,10 +323,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 24);
+    const stemGeo = new THREE.CylinderGeometry(0.02, 0.02, 1, 16);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
-    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: BRAND.accent.clone().multiplyScalar(0.42), toneMapped: false, fog: false }));
+    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: '#2f3b4a', toneMapped: false, fog: false }));
     stem.position.set(ax, from, az);
     stem.scale.set(1, Math.max(0.0001, d.baseY - from), 1);
     d.guide.add(stem);
@@ -343,7 +340,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
     ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
-    : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.42, 0.62, -0.05) };
+    : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 0.86, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -373,7 +370,6 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const spot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
   spot.rotation.x = -Math.PI / 2;
   spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
-  scene.add(spot);
   const probe = camera.clone();
   poseCamera(probe, SETTLE);
   const refDistance = probe.position.distanceTo(DOT_HOME);
@@ -401,7 +397,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const pulse = (t) => {
     const a = t - HOUSE_TOUCH;
     if (a < 0 || a > 0.4) return 0;
-    return a < 0.08 ? easeOut(a / 0.08) : 1 - smooth((a - 0.08) / 0.32);
+    return a < 0.12 ? smooth(a / 0.12) : 1 - smooth((a - 0.12) / 0.32);
   };
 
   hostDot(HOST[0], HOST[1], (t) => {
@@ -414,7 +410,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const kIn = from ? smooth(span(t, HOST[0], HOST[0] + 0.35)) : 1;
     if (kIn < 1) {
       const dd0 = DOT_D * (refDistance / probe.position.distanceTo(p));
-      return { x: lerp(from.x, s.x, kIn), y: lerp(from.y, s.y, kIn), d: lerp(from.d, dd0, kIn), glow: 0.35 };
+      const kx = 1 - (1 - kIn) ** 2;
+      const ky = kIn ** 2;
+      return { x: lerp(from.x, s.x, kx), y: lerp(from.y, s.y, ky), d: lerp(from.d, dd0, kIn), glow: 0.35 };
     }
     const d = DOT_D * (refDistance / probe.position.distanceTo(p)) * (1 + 0.4 * pulse(t));
     // Leaving: the dot comes forward — swelling as it nears the lens — and
@@ -424,7 +422,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const to = handoff.lanDotAt?.(HOST[1]);
     if (k > 0 && to) {
       const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
-      const up = 180 * u * Math.sin(Math.PI * Math.min(1, k * 1.15));
+      const up = 100 * u * Math.sin(Math.PI * Math.min(1, k * 1.25));
       return {
         x: lerp(s.x, to.x, e),
         y: lerp(s.y, to.y, e) - up,

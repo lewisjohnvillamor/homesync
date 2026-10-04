@@ -60,7 +60,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       // so each fills the width on its own — all right-aligned to the one
       // full stop, which never moves.
       // One size for all three — a parallel list — set by the widest line.
-      const target = portrait ? W - 180 * u : W * 0.8;
+      const target = portrait ? W - 220 * u : W * 0.8;
       const w0 = lines.map((l) => l.getBoundingClientRect().width);
       const k1 = Math.min(target / Math.max(...w0), 1.9);
       const k = w0.map(() => k1);
@@ -82,8 +82,8 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       if (portrait) {
         // 9:16: the three lines stack, filling the tall frame as they arrive;
         // the dot moves down to be the newest line's full stop.
-        const rowGap = big * 1.2;
-        const mid = H * 0.53 + big * 0.35;
+        const rowGap = big * 1.38;
+        const mid = H * 0.58 + big * 0.35;
         const base = [mid - rowGap, mid, mid + rowGap];
         geo.top = blTops.map((b, i) => base[i] - b);
         geo.left = geo.w.map(() => left);
@@ -137,7 +137,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return { x, y, o };
   };
 
-  const pushAt = (t) => lerp(1, portrait ? 1.1 : 1.14, span(t, ...PUSH) ** 1.6);
+  const pushAt = (t) => lerp(1, portrait ? 1.04 : 1.1, span(t, ...PUSH) ** 1.6);
 
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {
@@ -145,7 +145,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     let st = geo.stop;
     if (portrait && geo.rows) {
       const a = cubicOut(span(t, IN[1] + 0.3, IN[1] + 0.5));
-      const b = cubicOut(span(t, IN[2] + 0.3, IN[2] + 0.5));
+      const b = cubicOut(span(t, IN[2] - 0.12, IN[2] + 0.06));
       const r = geo.rows;
       st = { x: lerp(lerp(r[0].x, r[1].x, a), r[2].x, b), y: lerp(lerp(r[0].y, r[1].y, a), r[2].y, b) };
     }
