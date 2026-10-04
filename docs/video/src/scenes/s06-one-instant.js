@@ -290,7 +290,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         l.screen.style.fillOpacity = lit > 0 ? String(0.12 + 0.3 * lit) : '';
       }
       if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconK) * -30 * u}px) scale(${1 + 0.06 * lit})`;
-      l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)));
+      // The other lanes' names step aside during the close-up, so no word is ever cut by the frame edge.
+      const aside = kind === 'phone' ? 0 : span(rush, 0.08, 0.3) * (1 - span(back, 0.3, 0.7));
+      l.name.style.opacity = String(easeOut(span(t, ICON_LANDS - 0.1, ICON_LANDS + 0.3)) * (1 - aside));
       l.name.style.color = lit > 0.5 ? 'var(--text)' : 'var(--text-dim)';
       // A tick and a ring flash where T crosses the lane — on the line, never travelling along it.
       const tk = span(t, reach, reach + 0.18);
@@ -313,7 +315,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
       const landed = kind === 'phone' ? C7 + 1.0 : GROW8[kind][1];
       const msOn = easeOut(span(t, landed - 0.12, landed + 0.12));
       // Tilted, the labels foreshorten; they grow so they read at ≥ 24 px.
-      l.ms.style.transform = `scale(${lerp(1, 1.5, back)})`;
+      l.ms.style.transform = `translate(${-24 * u * back}px, ${-22 * u * back}px) scale(${lerp(1, 1.5, back)})`;
       // Gone before the plane lifts, so no label is ever seen over the house.
       l.ms.style.opacity = String(msOn * (1 - span(t, LIFT_SPAN[0] - 0.22, LIFT_SPAN[0] - 0.04)));
 
