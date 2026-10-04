@@ -26,7 +26,8 @@ import { LATE } from './s01-press-play.js';
 import { handoff } from '../shared/handoff.js';
 
 /** Visible from 17.825 s, when composition 8's plane lifts off it, to just past the cut. */
-export const pad = [0.3, 0.075];
+/** Drawn from 17.4 s, fully lit, underneath composition 8's diagram, so the diagram lifts off a scene that is already there. */
+export const pad = [0.725, 0.075];
 
 const DEG = Math.PI / 180;
 const smooth = (k) => k * k * (3 - 2 * k);
