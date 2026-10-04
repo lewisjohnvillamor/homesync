@@ -85,7 +85,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Plain ground arrives under the sinking floor; it is fully there before
   // the first word is.
-  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: 'power1.inOut' }, t0);
+  tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: 'power2.out' }, t0);
   // The lines from opposite sides, slowing as they land; set by 4.40 s.
   // (in 9:16 too they come from the sides, so nothing crosses the markers'
   // row below the sentence)

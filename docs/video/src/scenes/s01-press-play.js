@@ -163,12 +163,12 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.16, 0.15, 0.15], d0: 4.05, d1: 3.55, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.16, 0.15, 0.2], d0: 3.95, d1: 3.5, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 38, tg: [0.36, 0.25, 0.15], d0: 4.35, d1: 3.9, orb0: 0.46, orb1: 0.35 },
+        c1: { el: 38, tg: [0.5, 0.25, 0.15], d0: 4.35, d1: 3.9, orb0: 0.46, orb1: 0.35 },
         c2: { el: 42, tg: [0.2, 0.0, -0.26], d: 4.8, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
@@ -176,7 +176,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   /** The camera's pose at time t — a pure function of t. */
   function poseCamera(cam, t) {
     const { c1, c2 } = CAM;
-    const intro = easeOut(span(t, 0, 1.9));
+    // A clear ease-in from frame one: most of it in the first 0.6 s.
+    const intro = easeOut(span(t, 0, 1.2));
     // The rise starts early, while the bars grow, so they are read from above.
     const rise = smooth(span(t, 1.05, 2.3));
     const after = span(t, 2.3, 3.75);
@@ -198,8 +199,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
-    ? { x0: -0.45, speed: 0.17, clear: 0.34, icon: 0.06, dx: { laptop: 0.1, phone: -0.06, tv: 0 }, rows: { laptop: [0, 1.4], phone: [0.95, 2.3], tv: [-1.0, 1.15] }, turn: 0 }
-    : { x0: -0.7, speed: 0.42, clear: 0.48, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.24 }, rows: { laptop: [0, 1.8], phone: [0.8, 2.6], tv: [-1.1, 1.7] }, turn: 0.2 };
+    ? { x0: -0.38, speed: 0.17, clear: 0.3, icon: 0.06, dx: { laptop: 0.08, phone: -0.06, tv: 0.04 }, rows: { laptop: [0, 1.45], phone: [0.95, 2.45], tv: [-1.0, 1.2] }, turn: 0 }
+    : { x0: -0.7, speed: 0.42, clear: 0.3, icon: 0.07, dx: { laptop: 0.28, phone: -0.2, tv: 0.24 }, rows: { laptop: [0, 2.05], phone: [0.82, 3.0], tv: [-1.15, 1.95] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -337,7 +338,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       })
       .join('')}</div>
      <div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
-     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">starts</div>`).join('')}
+     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap;padding:${5 * u}px ${8 * u}px;border-radius:${6 * u}px;background:rgba(11,14,19,0.88)">starts</div>`).join('')}
      <div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
      <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;top:${portrait ? 150 * u : 104 * u}px;
        font:700 ${portrait ? 88 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text)">Press play on all three.</div>`,
@@ -393,8 +394,10 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       // Interface-style labels, not claims: where each row's sound starts.
       const m = toScreen(markerWorld(d, t), camera, W, H);
       const ls = lblStart[i];
-      ls.style.transform = `translate(${m.x + 18 * u}px, ${m.y - 30 * u}px)`;
-      ls.style.opacity = String(smooth(span(t, PRESS + d.late, PRESS + d.late + 0.2)) * (1 - sink));
+      // Up and to the right of the marker, on its own small band, so neither
+      // the dot nor a passing ring ever touches the word.
+      ls.style.transform = `translate(${m.x + 30 * u}px, ${m.y - 58 * u}px)`;
+      ls.style.opacity = String(smooth(span(t, PRESS + d.late + 0.3, PRESS + d.late + 0.5)) * (1 - sink));
     });
     // "pressed" at one end of the shared start line.
     // (16:9: at the line's near end, clear of the caption at the top left.)

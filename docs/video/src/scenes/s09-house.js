@@ -54,7 +54,7 @@ const PART_X = 0.1;
 const T_HEIGHT = 1.4;
 const T_Y = Y0 + T_HEIGHT;
 /** Where the dot hovers on T, in plan. */
-const DOT_XZ = [0.3, 0.95];
+const DOT_XZ = [-0.05, 0.85];
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
 const RISE = 0.45;
 
@@ -341,7 +341,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
     ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
-    : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.2, 0.62, -0.05) };
+    : { distance: 10.2, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.42, 0.62, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -381,7 +381,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   function dotWorld(t, cam) {
     const p = DOT_HOME.clone();
     // Drop: from above, slowing as it settles onto T.
-    p.y += 1.4 * (1 - easeOut(span(t, HOST[0], SETTLE)));
+    p.y += 1.6 * (1 - smooth(span(t, HOST[0], SETTLE + 0.1)));
     // Hover: a slow, small breath so it is never still.
     p.y += 0.025 * Math.sin((t - SETTLE) * 2.4) * smooth(span(t, SETTLE, SETTLE + 0.4));
     // Leave: up and towards the camera, accelerating.
@@ -501,7 +501,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? 1 + 0.4 * Math.exp(-(t - HOUSE_TOUCH) * 7) : 0.0001);
       d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
-      for (const seg of d.guide.children) seg.material.opacity = 0.22 * smooth(span(t, d.start - 0.3, d.start));
+      for (const seg of d.guide.children) seg.material.opacity = 0.4 * smooth(span(t, d.start - 0.3, d.start));
       const pop = smooth(span(t, d.start, d.start + 0.15));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -517,17 +517,16 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
-    const lift = span(t, 21.45, 21.8) ** 1.4;
+    const lift = span(t, 21.56, 21.74) ** 1.4;
     el.style.transformOrigin = '50% 50%';
     el.style.transform = lift > 0 ? `scale(${1 - 0.8 * lift})` : '';
-    el.style.opacity = String(1 - smooth(span(t, 21.58, 21.76)));
-    el.style.opacity = '1';
+    el.style.opacity = String(1 - smooth(span(t, 21.6, 21.72)));
 
 
     // Each bar's delay, by its start disc: the example values of F8.
     for (const d of devices) {
       const sp = toScreen(new THREE.Vector3(d.anchor.x, d.baseY, d.anchor.z), camera, W, H);
-      const o = smooth(span(t, d.start + 0.25, d.start + 0.5)) * (1 - smooth(span(t, 21.38, 21.5)));
+      const o = smooth(span(t, d.start + 0.45, d.start + 0.7)) * (1 - smooth(span(t, 21.38, 21.5)));
       d.label.style.opacity = String(o);
       // Right of its disc; the TV's (leftmost, beside the T label) to the
       // left, or under its disc where the left would leave the frame.

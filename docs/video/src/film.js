@@ -140,7 +140,11 @@ function showScenes(t) {
     // it while that one leaves.
     const on = t >= scene.t0 - pad[0] && t < scene.t1 + pad[1];
     const allowed = solo === null || solo === scene.id;
+    // display, not only visibility: a child set to `visibility: visible`
+    // would show through a hidden parent, and which frames that happens on
+    // would depend on which worker drew the scene last.
     el.style.visibility = on && allowed ? 'visible' : 'hidden';
+    el.style.display = on && allowed ? '' : 'none';
   }
 }
 

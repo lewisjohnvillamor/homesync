@@ -115,7 +115,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return { x, y, o };
   };
 
-  const pushAt = (t) => lerp(1, portrait ? 1.07 : 1.1, span(t, ...PUSH) ** 1.6);
+  const pushAt = (t) => lerp(1, portrait ? 1.1 : 1.14, span(t, ...PUSH) ** 1.6);
 
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {
