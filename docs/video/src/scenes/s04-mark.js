@@ -142,7 +142,9 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
     const w = expoOut(span(t, WORD, WORD + 0.5));
     const drift = sineInOut(span(t, WORD + 0.3, LEAVE)) * 18 * u;
     const wx = geo.wx + (portrait ? 0 : (1 - w) * 160 * u + drift);
-    const wy = geo.wy + (portrait ? (1 - w) * 120 * u + drift : 0) - liftBy;
+    // In 9:16 the word is under the mark, in the falling dot's way: it leaves
+    // downwards, ahead of the dot, instead of rising through it.
+    const wy = geo.wy + (portrait ? (1 - w) * 120 * u + drift + liftBy : -liftBy);
     word.style.visibility = gone || t < WORD ? 'hidden' : 'visible';
     word.style.transform = `translate(${wx}px, ${wy}px)`;
     word.style.opacity = String(Math.min(easeOut(span(t, WORD, WORD + 0.3)), 1 - lift));
