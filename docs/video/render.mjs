@@ -13,12 +13,12 @@
  *   node render.mjs --page src/film.html --w 1920 --h 1080 --out out/film.mp4
  *   node render.mjs --page src/film.html --stills 0,1.5,3 --out work/stills
  *
- * Options: --fps (60) --from (0) --to (page duration) --workers (4)
+ * Options: --fps (60) --from (0) --to (page duration) --workers (4) --resume 1 (keep frames already rendered)
  *          --param key=value (repeatable; passed to the page as query string)
  */
 
 import { createServer } from 'node:http';
-import { readFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, mkdir, rm, rename } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
 import { extname, join, resolve, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -145,7 +145,10 @@ async function main() {
     const to = Math.min(args.to ?? duration, duration);
     const total = Math.round((to - from) * args.fps);
     const framesDir = join(ROOT, 'frames', args.out.replace(/[^\w.-]/g, '_'));
-    await rm(framesDir, { recursive: true, force: true });
+    // --resume keeps frames already rendered (a run interrupted part-way can
+    // be restarted); otherwise start clean. A frame on disk only counts if it
+    // is a complete PNG: frames are written to a temp name and renamed.
+    if (!args.resume) await rm(framesDir, { recursive: true, force: true });
     await mkdir(framesDir, { recursive: true });
 
     const started = Date.now();
@@ -156,7 +159,10 @@ async function main() {
         // Frame centres are not used: frame n shows time n / fps exactly, so a
         // cut placed on a beat lands on a frame boundary.
         const t = from + frame / args.fps;
-        await seekAndShoot(page, t, join(framesDir, `${String(frame).padStart(5, '0')}.png`));
+        const file = join(framesDir, `${String(frame).padStart(5, '0')}.png`);
+        if (args.resume && existsSync(file)) { done += 1; continue; }
+        await seekAndShoot(page, t, `${file}.part.png`);
+        await rename(`${file}.part.png`, file);
         done += 1;
         if (done % 120 === 0) {
           const rate = done / ((Date.now() - started) / 1000);
