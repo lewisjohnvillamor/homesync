@@ -203,7 +203,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const barPhone = lanes.phone.w;
   const camA = (t) => {
     const k = sine(span(t, ICON_LANDS, C7));
-    return { s: lerp(1, 1.05, k), fx: W / 2, fy: H * 0.55, px: W / 2 - 30 * u * k, py: H * 0.55 - 14 * u * k, tilt: 0, rot: 0 };
+    // 9:16 drifts up, not left, so the icons keep their margin.
+    return { s: lerp(1, portrait ? 1.025 : 1.05, k), fx: W / 2, fy: H * 0.55, px: W / 2 - (portrait ? 0 : 30) * u * k, py: H * 0.55 - (portrait ? 30 : 14) * u * k, tilt: 0, rot: 0 };
   };
   const camB = (t) => ({
     s: (portrait ? 520 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
@@ -217,10 +218,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const camC = (t) => {
     const k = sine(span(t, C8 + 0.6, LIFT));
     return {
-      s: (portrait ? 0.76 : 1.2) * lerp(1, 1.04, k),
+      // 9:16 pushes harder through the hold (5 %), so it never reads as paused.
+      s: (portrait ? 0.74 : 1.2) * lerp(1, portrait ? 1.05 : 1.04, k),
       fx: (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
-      px: W / 2 + (portrait ? 0 : 10 * u) + (portrait ? 10 : 30) * u * k,
+      px: W / 2 + (portrait ? 40 * u : 10 * u) + (portrait ? 0 : 30) * u * k,
       py: (portrait ? H * 0.47 : H * 0.44) + 10 * u * k,
       tilt: 90 - elevation,
       rot: VIEW.azimuth,
@@ -237,7 +239,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const k = span(t, ...RUSH);
     // Accelerates in, then settles slowly: an ease-in-out with its arrival stretched.
     const e = easeInOut(k ** 0.7);
-    return Math.max((portrait ? 0.07 : 0.14) * (span(t, 11.9, RUSH[0]) ** 1.6), k > 0 ? e : 0);
+    // 9:16 has no lean (it would push the icons off the left edge); the hold has its acknowledge instead.
+    return Math.max((portrait ? 0 : 0.14) * (span(t, 11.9, RUSH[0]) ** 1.6), k > 0 ? e : 0);
   };
   // The pull back leaves fast and lands slowly.
   const backK = (t) => {

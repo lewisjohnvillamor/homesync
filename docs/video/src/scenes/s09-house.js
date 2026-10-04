@@ -34,7 +34,7 @@ const easeOut = (k) => 1 - (1 - k) ** 3;
 const easeIn = (k) => k * k * k;
 
 /** The dot's host range. */
-const HOST = [17.95, 21.875];
+const HOST = [17.92, 21.875];
 /** The dot has dropped and settled. */
 const SETTLE = 18.6;
 
@@ -381,7 +381,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   function dotWorld(t, cam) {
     const p = DOT_HOME.clone();
     // Drop: from above, slowing as it settles onto T.
-    p.y += 0.35 * (1 - easeOut(span(t, HOST[0], SETTLE)));
+    p.y += 1.4 * (1 - easeOut(span(t, HOST[0], SETTLE)));
     // Hover: a slow, small breath so it is never still.
     p.y += 0.025 * Math.sin((t - SETTLE) * 2.4) * smooth(span(t, SETTLE, SETTLE + 0.4));
     // Leave: up and towards the camera, accelerating.
