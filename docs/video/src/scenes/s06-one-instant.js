@@ -414,7 +414,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         const ns = portrait ? 1.6 : 1.45;
         pin(l.name, c, c6, NAME_X, nameY('phone'), sx - 50 * u * ns, iy + iconScreenH / 2 + 8 * u, ns, wPin);
       }
-      if (portrait && back > 0) l.name.style.transform = `${l.name.style.transform} rotate(${-c.rot}deg)`;
+      // (Built fresh each frame — never read back — so nothing accumulates between frames.)
+      if (kind !== 'phone') l.name.style.transform = portrait && back > 0 ? `rotate(${-c.rot}deg)` : '';
+      else if (portrait && back > 0 && rush * (1 - back) <= 0) l.name.style.transform = `rotate(${-c.rot}deg)`;
       void i;
     });
     // 9:16, tilted: T's line ends just below the TV lane.
