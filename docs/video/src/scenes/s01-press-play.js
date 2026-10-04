@@ -163,7 +163,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.21, 0.15, -0.12], d0: 4.2, d1: 3.85, orb0: 0.06, orb1: 0.0 },
+        c1: { el: 46, tg: [0.14, 0.15, -0.12], d0: 4.2, d1: 3.85, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.12, 0.0, 0.12], d: 4.6, orbDrift: 0.035 },
       }
     : {
@@ -199,7 +199,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // --- the devices and the strip ------------------------------------------------
   const LAYOUT = portrait
-    ? { x0: -0.38, speed: 0.17, clear: 0.3, icon: 0.06, dx: { laptop: 0.08, phone: -0.06, tv: 0.04 }, rows: { laptop: [0, 1.45], phone: [0.95, 2.45], tv: [-1.0, 1.2] }, turn: 0 }
+    ? { x0: -0.38, speed: 0.17, clear: 0.3, icon: 0.06, dx: { laptop: 0.08, phone: -0.06, tv: 0.04 }, rows: { laptop: [0, 1.32], phone: [0.95, 2.25], tv: [-1.0, 1.08] }, turn: 0 }
     : {
         // 16:9: the three devices stand side by side at the back; the strip
         // lies on the same floor directly in front of them, its three lanes
@@ -348,7 +348,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     'beforeend',
     `<div class="icons" style="position:absolute;inset:0">${devices
       .map((d) => {
-        const h = (portrait ? 76 : 70) * u;
+        const h = (portrait ? 62 : 70) * u;
         // The film's device drawings, their strokes lifted to the dim text
         // colour so they read on the floor.
         const svg = DEVICE_SVG[d.kind]().replaceAll('#2f3b4a', '#94a3b4').replaceAll('#3a4757', '#94a3b4');
