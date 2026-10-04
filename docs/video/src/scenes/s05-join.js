@@ -45,8 +45,8 @@ export function laneLayout(W, H, u, portrait) {
   const iconScale = portrait ? 1.2 : 1.5;
   // The lanes end just past T, and the whole diagram — icons to T's label —
   // is centred in the frame, so nothing past T is left empty.
-  const iconX0 = portrait ? 130 * u : L.iconX;
-  const laneEnd0 = L.tX + (portrait ? 110 * u : 150 * u);
+  const iconX0 = portrait ? 130 * u : L.iconX - 40 * u;
+  const laneEnd0 = L.tX + (portrait ? 60 * u : 150 * u);
   const left = iconX0 - 90 * u * iconScale;
   const right = laneEnd0 + 30 * u;
   const dx = W / 2 - (left + right) / 2;
