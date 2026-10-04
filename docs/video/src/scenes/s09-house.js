@@ -34,7 +34,7 @@ const easeOut = (k) => 1 - (1 - k) ** 3;
 const easeIn = (k) => k * k * k;
 
 /** The dot's host range. */
-const HOST = [17.92, 21.875];
+const HOST = [17.9, 21.875];
 /** The dot has dropped and settled. */
 const SETTLE = 18.6;
 
@@ -407,7 +407,15 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   hostDot(HOST[0], HOST[1], (t) => {
     poseCamera(probe, t);
     const p = dotWorld(t, probe);
-    const s = toScreen(p, probe, W, H);
+    let s = toScreen(p, probe, W, H);
+    // Picked up exactly where composition 8 let it go, then eased on to the
+    // house's own path.
+    const from = handoff.liftDotAt?.(HOST[0]);
+    const kIn = from ? smooth(span(t, HOST[0], HOST[0] + 0.35)) : 1;
+    if (kIn < 1) {
+      const dd0 = DOT_D * (refDistance / probe.position.distanceTo(p));
+      return { x: lerp(from.x, s.x, kIn), y: lerp(from.y, s.y, kIn), d: lerp(from.d, dd0, kIn), glow: 0.35 };
+    }
     const d = DOT_D * (refDistance / probe.position.distanceTo(p)) * (1 + 0.4 * pulse(t));
     // Leaving: the dot comes forward — swelling as it nears the lens — and
     // settles back on to the exact pixels where composition 10 takes it,

@@ -40,7 +40,7 @@ const cubicIn = (k) => k * k * k;
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
   const winW = portrait ? 900 * u : 1680 * u;
-  const winH = portrait ? 920 * u : 560 * u;
+  const winH = portrait ? 720 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
@@ -73,7 +73,7 @@ export function cursorAt(t, g) {
   const tt = Math.min(t, GONE);
   // The command ends at column 21 ("$ " + 19 characters); the cursor sits
   // one space after it.
-  const a = cell(g, 0, 2 + CMD.length + 0.35);
+  const a = cell(g, 0, 2 + CMD.length + 0.6);
   const b = cell(g, 1, 0);
   const c = cell(g, 1 + g.outRows, 0);
   const k1y = cubicOut(span(tt, ENTER + 0.02, ENTER + 0.14));
@@ -143,7 +143,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     win.style.transformOrigin = `${W / 2 - g.winX}px ${H / 2 - g.winY}px`;
     win.style.transform = `scale(${s})`;
     const grow = expoOut(span(t, PRINT - 0.12, PRINT + 0.3));
-    win.style.height = `${g.winH * lerp(portrait ? 0.62 : 0.8, 1, grow)}px`;
+    win.style.height = `${g.winH * lerp(portrait ? 0.78 : 0.8, 1, grow)}px`;
     txt.style.transform = `scale(${s})`;
 
     // The printed line: appears whole, as terminal output does, with the
@@ -168,7 +168,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     const capFoot = g.winY + g.winH * lerp(portrait ? 0.62 : 0.8, 1, grow) - cap.offsetHeight - 30 * u;
     // A row the cursor never crosses before the output prints.
     const capRow = g.textY + g.lineH * 2.5 - cap.offsetHeight / 2;
-    const capTop = lerp(capRow, capFoot, grow);
+    const capTop = g.winY - cap.offsetHeight - 28 * u;
     cap.style.top = `${H / 2 + (capTop - H / 2) * s}px`;
     cap.style.transform = `translate(-50%, ${22 * u * (1 - ci) + capDrift}px)`;
   });

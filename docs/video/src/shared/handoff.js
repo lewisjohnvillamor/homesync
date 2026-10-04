@@ -24,4 +24,17 @@ export const handoff = {
    * @type {((t:number) => {x:number,y:number,d:number}) | null}
    */
   lanDotAt: null,
+  /**
+   * Composition 5's dot at time t, from its first frame: set by composition 5,
+   * read by composition 4 so its leaving dot lands on the same pixels and size.
+   * @type {((t:number) => {x:number,y:number,d:number}) | null}
+   */
+  joinDotAt: null,
+  /**
+   * Composition 8's dot as it lets go over the house (17.90): set by
+   * composition 6, read by composition 9, which starts from that exact point
+   * and size and eases to its own hover.
+   * @type {((t:number) => {x:number,y:number,d:number}) | null}
+   */
+  liftDotAt: null,
 };

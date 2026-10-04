@@ -59,9 +59,11 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       // Each line is set as large as the frame allows — one line per beat,
       // so each fills the width on its own — all right-aligned to the one
       // full stop, which never moves.
-      const target = portrait ? W - 210 * u : W * 0.8;
+      // One size for all three — a parallel list — set by the widest line.
+      const target = portrait ? W - 180 * u : W * 0.8;
       const w0 = lines.map((l) => l.getBoundingClientRect().width);
-      const k = w0.map((w) => Math.min(target / w, 1.9));
+      const k1 = Math.min(target / Math.max(...w0), 1.9);
+      const k = w0.map(() => k1);
       geo.sz = k.map((ki) => size * ki);
       lines.forEach((l, i) => { l.style.fontSize = `${geo.sz[i]}px`; });
       const kd = Math.sqrt(Math.min(...k) * Math.max(...k));
@@ -77,6 +79,17 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       geo.top = blTops.map((b) => baseline - b);
       geo.stop = { x: left + block - geo.d / 2, y: baseline - geo.d * 0.5 };
       geo.left = geo.w.map((w) => geo.stop.x - geo.d / 2 - geo.gap - w);
+      if (portrait) {
+        // 9:16: the three lines stack, filling the tall frame as they arrive;
+        // the dot moves down to be the newest line's full stop.
+        const rowGap = big * 1.2;
+        const mid = H * 0.53 + big * 0.35;
+        const base = [mid - rowGap, mid, mid + rowGap];
+        geo.top = blTops.map((b, i) => base[i] - b);
+        geo.left = geo.w.map(() => left);
+        geo.rows = geo.w.map((w, i) => ({ x: left + w + geo.gap + geo.d / 2, y: base[i] - geo.d * 0.5 }));
+        geo.stop = geo.rows[0];
+      }
     }),
   );
 
@@ -90,6 +103,15 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     let y = 0;
     let o = 1;
     const kIn = span(t, IN[i], IN[i] + 0.32);
+    if (portrait) {
+      // Each line slides into its own row from alternate sides and stays.
+      const from = i === 1 ? 1 : -1;
+      const dist = i === 1 ? W - geo.left[i] + 60 * u : geo.left[i] + geo.w[i] + 60 * u;
+      x = from * dist * (1 - cubicOut(span(t, IN[i], IN[i] + 0.42)));
+      o = clamp01((t - IN[i]) / 0.06) * (1 - clamp01((t - LEAVE - 0.04) / 0.14));
+      if (t < IN[i]) o = 0;
+      return { x, y, o };
+    }
     if (i === 1) {
       // From the right, below the dot's line; rises only once its last
       // letter has passed left of the dot.
@@ -109,7 +131,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     } else {
       // The last line rushes past the camera with the whole sentence (see
       // the frame hook), fading only at the very end.
-      o *= 1 - clamp01((t - LEAVE - 0.06) / 0.08);
+      o *= 1 - clamp01((t - LEAVE - 0.04) / 0.14);
     }
     if (t < IN[i]) o = 0;
     return { x, y, o };
@@ -120,7 +142,14 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {
     const s = pushAt(t);
-    return { x: W / 2 + (geo.stop.x - W / 2) * s, y: H / 2 + (geo.stop.y - H / 2) * s, d: geo.d * s };
+    let st = geo.stop;
+    if (portrait && geo.rows) {
+      const a = cubicOut(span(t, IN[1] + 0.3, IN[1] + 0.5));
+      const b = cubicOut(span(t, IN[2] + 0.3, IN[2] + 0.5));
+      const r = geo.rows;
+      st = { x: lerp(lerp(r[0].x, r[1].x, a), r[2].x, b), y: lerp(lerp(r[0].y, r[1].y, a), r[2].y, b) };
+    }
+    return { x: W / 2 + (st.x - W / 2) * s, y: H / 2 + (st.y - H / 2) * s, d: geo.d * s };
   };
 
   onFrame((t) => {
