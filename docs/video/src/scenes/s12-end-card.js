@@ -25,7 +25,7 @@ const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   const S = portrait ? 700 * u : 540 * u; // the mark's box; arcs span ±0.35 S
   const sizes = portrait
-    ? { word: 184 * u, try: 42 * u, url: 44 * u, lic: 34 * u }
+    ? { word: 168 * u, try: 42 * u, url: 44 * u, lic: 34 * u }
     : { word: 142 * u, try: 48 * u, url: 56 * u, lic: 32 * u };
   const gaps = portrait
     ? { mark: 64 * u, word: 34 * u, try: 46 * u, url: 34 * u }
@@ -62,7 +62,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       const stackH = stack.getBoundingClientRect().height;
       const markVis = 0.7 * S; // arcs: y from 4.5 to 19.5 of 24, plus the stroke
       const total = markVis + gaps.mark + stackH;
-      const top = (H - total) / 2 + (portrait ? -20 * u : 0);
+      const top = (H - total) / 2 + (portrait ? 30 * u : 0);
       geo.cy = top + markVis / 2;
       geo.stackTop = top + markVis + gaps.mark;
       stack.style.top = `${geo.stackTop}px`;

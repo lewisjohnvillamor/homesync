@@ -40,7 +40,7 @@ const cubicIn = (k) => k * k * k;
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
   const winW = portrait ? 1000 * u : 1680 * u;
-  const winH = portrait ? 640 * u : 560 * u;
+  const winH = portrait ? 800 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
@@ -48,7 +48,7 @@ export function terminalGeo(W, H, u, portrait) {
   // terminal, so the type can be large enough to fill the frame.
   const f = portrait ? 50 * u : 48 * u;
   const padX = portrait ? 48 * u : 72 * u;
-  const lineH = f * 1.7;
+  const lineH = f * (portrait ? 2.0 : 1.7);
   const textX = winX + padX;
   const textY = winY + bar + (portrait ? 44 * u : 64 * u);
   // The cursor is about the text's cap height, not a blob beside it.
@@ -87,7 +87,8 @@ export function cursorAt(t, g) {
   // The key press: a dip on Enter, a smaller one as the line prints.
   const dip = 1 - 0.22 * Math.sin(Math.PI * span(tt, ENTER - 0.03, ENTER + 0.14)) - 0.1 * Math.sin(Math.PI * span(tt, PRINT - 0.12, PRINT));
   // Waiting for output, the cursor pulses on the beat, as a cursor blinks.
-  const blink = 1 + 0.12 * Math.sin(Math.PI * 2 * ((tt - ENTER) / 0.625)) ** 2 * span(tt, ENTER + 0.3, ENTER + 0.4) * (1 - span(tt, PRINT - 0.2, PRINT - 0.12))
+  const blink = 1 + 0.14 * Math.sin(Math.PI * 2 * ((tt - T0) / 0.625)) ** 2 * span(tt, T0 + 0.1, T0 + 0.2) * (1 - span(tt, ENTER - 0.1, ENTER - 0.03))
+    + 0.12 * Math.sin(Math.PI * 2 * ((tt - ENTER) / 0.625)) ** 2 * span(tt, ENTER + 0.3, ENTER + 0.4) * (1 - span(tt, PRINT - 0.2, PRINT - 0.12))
     + 0.12 * Math.sin(Math.PI * 2 * ((tt - PRINT) / 0.625)) ** 2 * span(tt, PRINT + 0.15, PRINT + 0.25);
   // Swallowing the printed line, it swells a little and glows.
   const swell = 1 + 0.2 * cubicOut(span(t, COLLAPSE + 0.06, COLLAPSE + 0.24));
@@ -141,18 +142,18 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     win.style.transformOrigin = `${W / 2 - g.winX}px ${H / 2 - g.winY}px`;
     win.style.transform = `scale(${s})`;
     const grow = expoOut(span(t, PRINT - 0.12, PRINT + 0.3));
-    win.style.height = `${g.winH * lerp(0.66, 1, grow)}px`;
+    win.style.height = `${g.winH * lerp(0.8, 1, grow)}px`;
     txt.style.transform = `scale(${s})`;
 
     // The printed line: appears whole, as terminal output does, with the
     // briefest settle; then collapses into the cursor below its first cell.
     const shown = t >= PRINT;
-    const kc = cubicIn(span(t, COLLAPSE, COLLAPSE + 0.16));
+    const kc = cubicIn(span(t, COLLAPSE, COLLAPSE + 0.22));
     const settle = 1 - expoOut(span(t, PRINT, PRINT + 0.25));
     l1.style.visibility = shown && kc < 1 ? 'visible' : 'hidden';
-    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01(kc / 0.35)));
+    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01((kc - 0.55) / 0.35)));
     l1.style.transformOrigin = `0px ${g.lineH / 2}px`;
-    l1.style.transform = `translate(${-6 * u * settle}px, ${g.lineH * kc}px) scale(${1 - kc}, ${1 - 0.75 * kc})`;
+    l1.style.transform = `translate(${-6 * u * settle}px, ${g.lineH * g.outRows * kc}px) scale(${1 - 0.92 * kc})`;
 
     // The caption: in the film's type, on its own band, between the two.
     const C0 = ENTER - 0.06;
@@ -163,7 +164,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     const capDrift = lerp(0, -8 * u, span(t, C0 + 0.4, COLLAPSE));
     cap.style.transformOrigin = `50% 50%`;
     // Sits inside the window's lower edge as the window grows, scaled with it.
-    const capTop = g.winY + g.winH * lerp(0.66, 1, grow) - cap.offsetHeight - 30 * u;
+    const capTop = g.winY + g.winH * lerp(0.8, 1, grow) - cap.offsetHeight - 30 * u;
     cap.style.top = `${H / 2 + (capTop - H / 2) * s}px`;
     cap.style.transform = `translate(-50%, ${22 * u * (1 - ci) + capDrift}px)`;
   });

@@ -20,13 +20,13 @@ import { span, lerp, BEAT } from '../shared/beats.js';
 import { diagramLayout } from '../shared/diagram.js';
 
 /** Visible from 7.98 s (composition 4's mark is gone by then) until the phone is the lane icon. */
-export const pad = [0.145, 0.3];
+export const pad = [0.19, 0.3];
 
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
 
 /** Times, on beats where an action happens. */
-const REVEAL = 7.98; // composition 4's arcs and wordmark are off screen
+const REVEAL = 7.94; // the reveal opens as composition 4's arcs and wordmark finish leaving (gone by 7.98)
 /** The phone comes in once the reveal has opened most of the frame. */
 const ENTER = 8.12;
 const SCAN = [8.4, 8.75]; // the scan completes on beat 14
@@ -58,7 +58,9 @@ export function laneLayout(W, H, u, portrait) {
     tX: L.tX + dx,
     laneStart: (portrait ? 250 * u : 390 * u) + dx,
     laneEnd: laneEnd0 + dx,
-    phoneIcon: { x: iconX, y: L.lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
+    // 9:16: the lanes spread down the frame, so its lower quarter is not left empty.
+    ...(portrait ? { lanes: { laptop: H * 0.45, phone: H * 0.63, tv: H * 0.81 }, tTop: H * 0.45 - 150 * u } : {}),
+    phoneIcon: { x: iconX, y: portrait ? H * 0.63 : L.lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
   };
 }
 
@@ -79,7 +81,7 @@ export function phoneHtml(w, h, inner = '') {
 }
 
 /** The room screen: the device list with this device highlighted. Sizes are fractions of the phone's width `pw`. */
-export function roomHtml(pw, text = true) {
+export function roomHtml(pw, text = true, textScale = 1) {
   const fs = pw * 0.088;
   return `<div class="room" style="position:absolute;inset:0;background:var(--bg)">
     <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
@@ -90,7 +92,7 @@ export function roomHtml(pw, text = true) {
       )
       .join('')}
     <div class="me" style="position:absolute;left:8%;right:8%;top:52%;height:13%;border-radius:${fs * 0.4}px;background:var(--surface-2);border:${pw * 0.005}px solid var(--accent)">
-      ${text ? `<div class="me-text" style="position:absolute;left:9%;top:50%;transform:translateY(-50%);font:600 ${fs}px/1 var(--sans);color:var(--text);white-space:nowrap">this device</div>` : `<div style="position:absolute;left:9%;top:40%;width:52%;height:${fs * 0.4}px;border-radius:${fs}px;background:var(--text-faint)"></div>`}
+      ${text ? `<div class="me-text" style="position:absolute;left:9%;top:50%;transform:translateY(-50%);font:600 ${fs * textScale}px/1 var(--sans);color:var(--text);white-space:nowrap">this device</div>` : `<div style="position:absolute;left:9%;top:40%;width:52%;height:${fs * 0.4}px;border-radius:${fs}px;background:var(--text-faint)"></div>`}
     </div>
   </div>`;
 }
@@ -145,9 +147,13 @@ export function joinTrack(W, H, u, portrait) {
   // The camera pushes in on the phone at rest so the interface's words are
   // ≥ 48 px, keeps creeping in through the hold, and lets go as the phone
   // shrinks. It pushes about a fixed point low on the phone.
-  const PUSH = portrait ? 1.17 : 1.6;
+  // 16:9 pushes less than before, so the phone reads as a phone (both edges and
+  // ground around it), centred in frame; its words are set larger to stay ≥ 48 px.
+  const PUSH = portrait ? 1.17 : 1.35;
   const push = (t) => lerp(1, PUSH, easeInOut(span(t, 9.0, 9.6))) * lerp(1, 1.04, span(t, 9.6, SHRINK[0]));
-  const O = { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 };
+  const O = portrait
+    ? { x: rest.x + phoneW / 2, y: rest.y + phoneH * 0.62 }
+    : { x: (1060 * u - PUSH * (rest.x + phoneW / 2)) / (1 - PUSH), y: rest.y + phoneH * 0.62 };
   const L = laneLayout(W, H, u, portrait);
   const icon = L.phoneIcon;
 
@@ -180,6 +186,11 @@ export function joinTrack(W, H, u, portrait) {
 
 export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const { phoneW, phoneH, inset, glassW, glassH, laptop, qrSize, qrC0, laptopShift, button, face, wait, indicator, fs, push, O, phoneRect, onGlass } = joinTrack(W, H, u, portrait);
+  /** 16:9 sets the interface words larger (its push-in is smaller). */
+  const tScale = portrait ? 1 : 1.04;
+  const roomScale = portrait ? 1 : 1.12;
+  /** The press ring's circle: around the dot, inside the button's free right end. */
+  const well = button.h * glassH * 0.75;
 
   // --- the laptop ----------------------------------------------------------
   const lid = 14 * u;
@@ -220,13 +231,15 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
           <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
                border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.035}px;
-               display:flex;align-items:center;font:600 ${fs * 0.92}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
+               display:flex;align-items:center;font:600 ${fs * 0.92 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
           <div class="socket" style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;
                border-radius:50%;background:var(--accent-ink);opacity:0"></div>
-          <div class="ripple" style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${60 * u}px;height:${60 * u}px;margin:${-30 * u}px 0 0 ${-30 * u}px;
-               border-radius:50%;border:${4 * u}px solid var(--text);box-sizing:border-box;opacity:0"></div></div>
+          <div style="position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${well}px;height:${well}px;margin:${-well / 2}px 0 0 ${-well / 2}px;
+               border-radius:50%;overflow:hidden">
+            <div class="ripple" style="position:absolute;left:50%;top:50%;width:${well}px;height:${well}px;margin:${-well / 2}px 0 0 ${-well / 2}px;
+               border-radius:50%;border:${4 * u}px solid var(--text);box-sizing:border-box;opacity:0"></div></div></div>
         </div>
-        ${roomHtml(phoneW)}`,
+        ${roomHtml(phoneW, true, roomScale)}`,
       )}
     </div>`;
 
@@ -285,7 +298,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     const out = span(t, 10.3, 10.55);
     world.style.transform =
       `translate(${O.x}px, ${O.y}px) scale(${s}) translate(${-O.x}px, ${-O.y}px) translate(${sh.x - out * out * 300 * u}px, ${sh.y}px)`;
-    world.style.opacity = String(1 - out);
+    // Once the phone has the code, the laptop steps back (dimmed) so the phone leads.
+    world.style.opacity = String((1 - out) * lerp(1, 0.38, easeInOut(span(t, 8.95, 9.5))));
     // A soft-edged reveal over 0.32 s; the phone is inside it, so nothing appears outside the opening.
     const ik = span(t, REVEAL, 8.3);
     const ir = lerp(80 * u, irisR, 1 - (1 - ik) ** 2);
@@ -323,7 +337,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     socket.style.transform = `scale(${0.6 + 0.4 * easeOut(well)})`;
     const rip = span(t, PRESS, PRESS + 0.45);
     ripple.style.opacity = String(rip > 0 && rip < 1 ? 0.7 * (1 - rip) : 0);
-    ripple.style.transform = `scale(${0.6 + 3.2 * easeOut(rip)})`;
+    // The ring stays inside a circle around the dot, at the button's free end, never over the words.
+    ripple.style.transform = `scale(${0.35 + 0.65 * easeOut(rip)})`;
     // As the phone becomes an icon its words go before they would be too small to read.
     if (meText) meText.style.opacity = String(1 - span(t, 10.66, 10.8));
   });

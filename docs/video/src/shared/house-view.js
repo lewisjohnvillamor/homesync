@@ -16,4 +16,4 @@ export const HOUSE_VIEW = {
  * When the three bars touch the plane of light inside the house — the film's
  * one "arrival" moment, which the score marks with its only chime.
  */
-export const HOUSE_TOUCH = 20.625; // beat 33 — on the grid, so the chime lands on a beat, and ~1 s of payoff before the dot leaves
+export const HOUSE_TOUCH = 20.3125; // beat 32.5 — on the grid (half beat), so the chime lands in time, with ~1.2 s of payoff before the dot leaves

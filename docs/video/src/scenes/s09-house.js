@@ -53,6 +53,8 @@ const PART_X = 0.1;
 /** The instant T: the plane of light, above the floor. */
 const T_HEIGHT = 1.4;
 const T_Y = Y0 + T_HEIGHT;
+/** Where the dot hovers on T, in plan. */
+const DOT_XZ = [0.8, 0.85];
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
 const RISE = 0.45;
 
@@ -291,7 +293,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const ringMat = accent(0);
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 96), ringMat);
   ring.rotation.x = -Math.PI / 2;
-  ring.position.set(0, T_Y + 0.004, 0);
+  ring.position.set(DOT_XZ[0], T_Y + 0.004, DOT_XZ[1]);
   ring.renderOrder = 9;
   scene.add(ring);
 
@@ -302,7 +304,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A bar whose top rises; geometry has its origin at the bottom.
     const geo = new THREE.CylinderGeometry(0.036, 0.036, 1, 20);
     geo.translate(0, 0.5, 0);
-    d.bar = new THREE.Mesh(geo, accent(0.95));
+    d.bar = new THREE.Mesh(geo, accent(1));
     const { x: ax, y: ay, z: az } = d.anchor;
     d.bar.position.set(ax, d.baseY, az);
     d.bar.renderOrder = 6;
@@ -314,7 +316,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.disc.renderOrder = 7;
     scene.add(d.disc);
     // Where its top meets T: marked on the plane the moment it arrives.
-    d.contact = new THREE.Mesh(new THREE.CircleGeometry(0.07, 40), accent(1));
+    d.contact = new THREE.Mesh(new THREE.CircleGeometry(0.085, 40), accent(1));
     d.contact.rotation.x = -Math.PI / 2;
     d.contact.position.set(ax, T_Y + 0.003, az);
     d.contact.renderOrder = 8;
@@ -322,7 +324,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.026, 0.026, 1, 16);
+    const stemGeo = new THREE.CylinderGeometry(0.036, 0.036, 1, 20);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
     const stem = new THREE.Mesh(stemGeo, accent(0.3));
@@ -340,7 +342,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
-    const k = (t - t0) / (t1 - t0);
+    const k = smooth(clamp01((t - t0) / (t1 - t0)));
     const azimuth = (HOUSE_VIEW.azimuth + 6 * k) * DEG;
     const elevation = frame.elevation * DEG;
     const distance = frame.distance * (1 - 0.06 * k);
@@ -355,7 +357,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   }
 
   // --- the dot ---------------------------------------------------------------------
-  const DOT_HOME = new THREE.Vector3(0, T_Y, 0);
+  // Over the bedroom's open floor: clear of every bar top and its label.
+  const DOT_HOME = new THREE.Vector3(DOT_XZ[0], T_Y, DOT_XZ[1]);
   const probe = camera.clone();
   poseCamera(probe, SETTLE);
   const refDistance = probe.position.distanceTo(DOT_HOME);
@@ -401,7 +404,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       return {
         x: lerp(s.x, to.x, e),
         y: lerp(s.y, to.y, e),
-        d: lerp(d, to.d, e) * (1 + 1.8 * Math.sin(Math.PI * k)),
+        d: lerp(d, to.d, e),
         glow: lerp(0.35, 0.45, k),
       };
     }
@@ -419,7 +422,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
      <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1]}px;
-        overflow:hidden;background:rgba(11,14,19,0.88)">
+        overflow:hidden;background:rgba(11,14,19,0.88);box-shadow:0 0 ${36 * u}px ${22 * u}px rgba(11,14,19,0.88)">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -445,7 +448,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 18.15);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 220 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.4, ease: 'expo.out' }, 18.22 + i * 0.03);
+    tl.fromTo(ln, { x: from * 220 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.36, ease: 'expo.out' }, 18.22);
   });
   // Held, never still: a slow push on the whole band.
   tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.45, ease: 'none', immediateRender: false }, 18.45);
@@ -467,7 +470,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     plane.position.y = T_Y + 0.7 * (1 - easeOut(span(t, 18.1, 19.0)));
     const kr = span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.7);
     ring.visible = kr > 0 && kr < 1;
-    ring.scale.setScalar(0.15 + 0.5 * easeOut(kr));
+    ring.scale.setScalar(0.1 + 0.34 * easeOut(kr));
     ringMat.opacity = 0.9 * (1 - kr);
 
     for (const d of devices) {
@@ -479,8 +482,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
-      d.contact.scale.setScalar(met ? 1 + 0.9 * Math.exp(-(t - HOUSE_TOUCH) * 10) : 0.0001);
-      for (const seg of d.guide.children) seg.material.opacity = 0.42 * smooth(span(t, d.start - 0.3, d.start));
+      d.contact.scale.setScalar(met ? 1 + 0.9 * Math.exp(-(t - HOUSE_TOUCH) * 9) : 0.0001);
+      for (const seg of d.guide.children) seg.material.opacity = 0.55 * smooth(span(t, d.start - 0.3, d.start));
       const pop = smooth(span(t, d.start - 0.12, d.start));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
     }
@@ -498,21 +501,27 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // is gone before composition 10 sets any type.
     const lift = span(t, 21.5, t1 - 0.01) ** 2.2;
     el.style.transformOrigin = '50% 50%';
-    el.style.transform = lift > 0 ? `translateY(${-H * 1.35 * lift}px) scale(${1 + 0.55 * lift})` : '';
+    el.style.transform = lift > 0 ? `translateY(${H * 1.25 * lift}px) scale(${1 - 0.25 * lift})` : '';
     el.style.opacity = '1';
+    const lit = smooth(span(t, 17.85, 18.125));
+    el.style.filter = lit < 1 ? `brightness(${lerp(0.4, 1, lit)})` : '';
 
     // Each bar's delay, by its start disc: the example values of F8.
     for (const d of devices) {
       const sp = toScreen(new THREE.Vector3(d.anchor.x, d.baseY, d.anchor.z), camera, W, H);
-      const o = smooth(span(t, d.start, d.start + 0.25)) * (1 - smooth(span(t, 21.38, 21.5)));
+      const o = smooth(span(t, d.start + 0.25, d.start + 0.5)) * (1 - smooth(span(t, 21.38, 21.5)));
       d.label.style.opacity = String(o);
       // Right of its disc; the TV's (leftmost, beside the T label) to the
       // left, or under its disc where the left would leave the frame.
       const lw = d.label.offsetWidth;
       let lx = sp.x + 22 * u;
       let ly = sp.y - msSize * 0.62;
-      if (d.kind === 'tv') {
-        if (sp.x - 62 * u - lw >= 40 * u) lx = sp.x - 62 * u - lw;
+      if (portrait) {
+        const top = toScreen(new THREE.Vector3(d.anchor.x, T_Y, d.anchor.z), camera, W, H);
+        ly = top.y - msSize * 2.1;
+        lx = d.kind === 'tv' ? Math.max(40 * u, top.x - lw - 18 * u) : top.x + 18 * u;
+      } else if (d.kind === 'tv') {
+        if (sp.x - 80 * u - lw >= 40 * u) lx = sp.x - 80 * u - lw;
         else { lx = Math.max(40 * u, sp.x - lw / 2); ly = sp.y + 26 * u; }
       }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;

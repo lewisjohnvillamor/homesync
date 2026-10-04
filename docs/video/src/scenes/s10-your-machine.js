@@ -28,7 +28,7 @@ const quartOut = (k) => 1 - (1 - k) ** 4;
 const cubicIn = (k) => k * k * k;
 
 export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
-  const size = portrait ? 150 * u : 184 * u;
+  const size = portrait ? 124 * u : 184 * u;
   const track = portrait ? -0.045 : -0.035;
   // In front of composition 11 while it waits underneath.
   el.style.zIndex = '2';
@@ -47,7 +47,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // landed ~0.35 s later. "Your files" starts a little before its beat
   // because it has a longer road: along the lower lane, then up.
   const IN = [t0, t0 + 0.38, t0 + 1.25];
-  const OUT = [t0 + 0.625, t0 + 1.155, t1 - 0.17];
+  const OUT = [t0 + 0.54, t0 + 1.155, t1 - 0.17];
   const LEAVE = t1 - 0.25; // 24.125: gone before the terminal frame shows
   const PUSH = [t0, LEAVE];
 
@@ -95,10 +95,9 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       y -= size * 1.3 * quartOut(k);
       o *= 1 - clamp01((t - OUT[i]) / 0.22);
     } else {
-      // The last line clears to the left, fast.
-      const k = span(t, LEAVE - 0.04, LEAVE + 0.14) ** 2;
-      x -= W * 0.55 * k;
-      o *= 1 - clamp01((t - LEAVE) / 0.08);
+      // The last line rushes past the camera with the whole sentence (see
+      // the frame hook), fading only at the very end.
+      o *= 1 - clamp01((t - LEAVE - 0.06) / 0.08);
     }
     if (t < IN[i]) o = 0;
     return { x, y, o };
@@ -114,8 +113,12 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
 
   onFrame((t) => {
     const s = pushAt(t);
+    // Leaving, the words rush towards the camera about the full stop, which
+    // stays put: the slow push about the centre, then the rush about the dot.
+    const rush = 1 + 1.6 * span(t, LEAVE - 0.02, LEAVE + 0.14) ** 2;
+    const P = stopAt(t);
     words.style.transformOrigin = `${W / 2}px ${H / 2}px`;
-    words.style.transform = `scale(${s})`;
+    words.style.transform = `translate(${(W / 2 - P.x) * (rush - 1)}px, ${(H / 2 - P.y) * (rush - 1)}px) scale(${s * rush})`;
     lines.forEach((l, i) => {
       const p = lineAt(i, t);
       l.style.transform = `translate(${geo.left[i] + p.x}px, ${geo.top + p.y}px)`;

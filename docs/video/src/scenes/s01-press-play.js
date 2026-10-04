@@ -85,7 +85,7 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
     ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * (1 - ring) ** 1.5})`;
     ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
     ctx.beginPath();
-    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.55 * easeOut(ring)), 0, Math.PI * 2);
+    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.35 * easeOut(ring)), 0, Math.PI * 2);
     ctx.stroke();
   }
   // Title line and progress line: the shape of a player, not words.
@@ -128,10 +128,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const renderer = makeRenderer(W, H);
   el.appendChild(renderer.domElement);
   const canvasEl = renderer.domElement;
-  const { scene, rim, ground } = makeStage(renderer, { groundTint: GROUND, fogNear: 3.6, fogFar: 8.5 });
+  const { scene, key, rim, ground } = makeStage(renderer, { groundTint: GROUND, fogNear: 3.6, fogFar: 8.5 });
   // A stronger rim, behind and to the right, so every silhouette is drawn off the floor.
-  rim.intensity = 6.5;
+  rim.intensity = 5;
   rim.position.set(4, 4.5, -7);
+  // The key, higher and nearer overhead than the shared rig's, so each
+  // device's shadow falls under it rather than off to one side.
+  key.position.set(-3.5, 9, 3.5);
 
   // A studio floor: a soft pool of light under the devices that falls off to
   // exactly the measured ground colour, so the edge of frame is still the
@@ -158,13 +161,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 36, tg: [0.1, 0.2, 0.05], d0: 4.3, d1: 3.75, orb0: 0.16, orb1: 0.0 },
+        c1: { el: 40, tg: [0.06, 0.15, 0.0], d0: 3.95, d1: 3.6, orb0: 0.06, orb1: 0.0 },
         c2: { el: 52, tg: [0.04, 0.0, 0.12], d: 4.45, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 35, tg: [0.42, 0.3, -0.15], d0: 3.7, d1: 3.25, orb0: 0.52, orb1: 0.35 },
-        c2: { el: 44, tg: [0.18, 0.0, -0.2], d: 4.4, orbDrift: -0.04 },
+        c1: { el: 38, tg: [0.3, 0.25, -0.25], d0: 4.1, d1: 3.8, orb0: 0.6, orb1: 0.5 },
+        c2: { el: 42, tg: [0.15, 0.0, -0.45], d: 4.7, orbDrift: -0.04 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
 
@@ -190,8 +193,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // --- the devices, one behind another ----------------------------------------
   const LAYOUT = portrait
-    ? { x0: -0.52, speed: 0.27, gap: 0.06, rows: { laptop: [0, 1.6], phone: [1.0, 2.4], tv: [-1.0, 1.3] }, turn: 0 }
-    : { x0: -0.9, speed: 0.72, gap: 0.06, rows: { laptop: [0, 1.8], phone: [0.76, 2.6], tv: [-0.98, 1.7] }, turn: 0.2 };
+    ? { x0: -0.42, speed: 0.22, gap: 0.06, rows: { laptop: [0, 1.5], phone: [0.95, 2.4], tv: [-1.0, 1.25] }, turn: 0 }
+    : { x0: -0.75, speed: 0.6, gap: 0.06, rows: { laptop: [0, 1.8], phone: [0.7, 2.6], tv: [-1.25, 1.7] }, turn: 0.2 };
   // Distance from composition 2's camera to each row decides how long a bar
   // must be in metres to look its true length on screen.
   const probe = camera.clone();
@@ -238,13 +241,32 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
 
   // The press line: one line across the floor, the moment all three were pressed.
   const zs = devices.map((d) => d.z);
-  const zMin = Math.min(...zs) - 0.22;
-  const zMax = Math.max(...zs) + 0.22;
-  const pressLine = new THREE.Mesh(new THREE.PlaneGeometry(0.014, zMax - zMin), accent(0));
+  const zMin = Math.min(...zs) - 0.16;
+  const zMax = Math.max(...zs) + 0.1;
+  const pressLine = new THREE.Mesh(new THREE.PlaneGeometry(0.014, 1), accent(0));
   pressLine.rotation.x = -Math.PI / 2;
-  pressLine.position.set(LAYOUT.x0, 0.002, (zMin + zMax) / 2);
   pressLine.renderOrder = 3;
   scene.add(pressLine);
+  // The shared start, made explicit: a play mark at the head of the line,
+  // pointing the way time runs, and a tick where each bar begins.
+  const playShape = new THREE.Shape();
+  playShape.moveTo(-0.035, -0.045);
+  playShape.lineTo(0.05, 0);
+  playShape.lineTo(-0.035, 0.045);
+  playShape.closePath();
+  const playMark = new THREE.Mesh(new THREE.ShapeGeometry(playShape), accent(0));
+  playMark.rotation.x = -Math.PI / 2;
+  playMark.position.set(LAYOUT.x0, 0.003, zMin - 0.1);
+  playMark.renderOrder = 3;
+  scene.add(playMark);
+  const ticks = devices.map((d) => {
+    const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.13), accent(0));
+    tick.rotation.x = -Math.PI / 2;
+    tick.position.set(LAYOUT.x0, 0.0025, d.z);
+    tick.renderOrder = 3;
+    scene.add(tick);
+    return tick;
+  });
 
   for (const d of devices) {
     d.bar = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), accent(0.9));
@@ -316,15 +338,26 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
     const up = smooth(span(t, PRESS + 0.16, PRESS + 0.36));
     const press = down * (1 - up);
     const ring = span(t, PRESS, PRESS + 0.45);
-    const lit = smooth(span(t, PRESS + 0.08, PRESS + 0.4));
-    const glyph = 1 - smooth(span(t, PRESS + 0.3, PRESS + 0.6));
-    // The shared start line flashes at the press, then stays as the origin of every bar.
+    // The shared start line draws in across the press (7 frames, from the
+    // back), pulses once at the press, then stays as the origin of every bar.
+    const drawn = easeOut(span(t, PRESS - 0.07, PRESS + 0.05));
     const flash = t >= PRESS ? Math.exp(-(t - PRESS) * 7) : 0;
-    pressLine.material.opacity = Math.min(1, 0.6 * smooth(span(t, PRESS, PRESS + 0.1)) + 0.4 * flash);
-    pressLine.scale.x = 1 + 2.2 * flash;
+    const lineLen = Math.max(0.0001, (zMax - zMin) * drawn);
+    pressLine.scale.set(1 + 2.2 * flash, lineLen, 1);
+    pressLine.position.set(LAYOUT.x0, 0.002, zMin + lineLen / 2);
+    pressLine.material.opacity = drawn > 0 ? Math.min(1, 0.6 + 0.4 * flash) : 0;
+    playMark.material.opacity = 0.85 * smooth(span(t, PRESS - 0.07, PRESS + 0.05));
+    playMark.scale.setScalar(1 + 0.6 * flash);
+    for (const tick of ticks) tick.material.opacity = 0.75 * smooth(span(t, PRESS, PRESS + 0.1));
 
     for (const d of devices) {
-      paintPlayer(d.screen, { lit, press, ring: t >= PRESS ? ring : 0, glyph });
+      // Each screen comes up only when its own sound starts (its marker
+      // lands): picture-on is sound-on. Until then its button stays pressed.
+      const start = PRESS + d.late;
+      const lit = smooth(span(t, start, start + 0.25));
+      const glyph = 1 - smooth(span(t, start + 0.05, start + 0.35));
+      const held = t < start ? Math.max(press, 0.6 * down) : press * (1 - lit);
+      paintPlayer(d.screen, { lit, press: held, ring: t >= PRESS ? ring : 0, glyph });
 
       // The lag bar: grows from the press line until this device's sound starts.
       const length = barLength(d, t);
@@ -342,7 +375,6 @@ export function build({ el, tl, u, W, H, portrait, onFrame }) {
       d.burst.material.opacity = t >= PRESS + d.late && b < 1 ? 0.9 * (1 - b) ** 1.5 : 0;
 
       // Rings: only from this device's own moment.
-      const start = PRESS + d.late;
       d.rings.forEach((r, n) => {
         const index = Math.floor((t - start) / PULSE) - n;
         const age = t - (start + index * PULSE);

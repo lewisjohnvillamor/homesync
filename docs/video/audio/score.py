@@ -43,7 +43,7 @@ TAP = 15 * BEAT  # 9.375 s
 JOINED = 16 * BEAT  # 10.000 s
 ENTER = 40 * BEAT  # 25.000 s
 # The house: the three bars touch the plane of T together.
-HOUSE_ARRIVAL = 33 * BEAT  # 20.625 s — must match HOUSE_TOUCH in src/shared/house-view.js
+HOUSE_ARRIVAL = 32.5 * BEAT  # 20.3125 s — must match HOUSE_TOUCH in src/shared/house-view.js
 
 HERO = 10 * BEAT  # 6.25 s: HomeSync appears; the echo stops
 
