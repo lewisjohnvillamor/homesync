@@ -410,7 +410,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     let s = toScreen(p, probe, W, H);
     // Picked up exactly where composition 8 let it go, then eased on to the
     // house's own path.
-    const from = handoff.liftDotAt?.(HOST[0]);
+    const from = handoff.liftDotAt?.(t);
     const kIn = from ? smooth(span(t, HOST[0], HOST[0] + 0.35)) : 1;
     if (kIn < 1) {
       const dd0 = DOT_D * (refDistance / probe.position.distanceTo(p));

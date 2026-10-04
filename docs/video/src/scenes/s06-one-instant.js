@@ -430,8 +430,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
         pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin, 1 + 0.16 * ack);
         // Its name sits under it.
         const ns = portrait ? 1.6 : 1.45;
-        // Its name stays where it was relative to the phone — right of it, above the lane — so the move never crosses the icon.
-        pin(l.name, c, c6, NAME_X, nameY('phone'), sx + (ic.w * iconScr) / 2 + 24 * u, iy - 60 * u - 22 * u * ns, ns, wPin);
+        // Its name moves up over the phone (it starts above the lane, right of it), so the move never crosses the icon.
+        pin(l.name, c, c6, NAME_X, nameY('phone'), sx - (ic.w * iconScr) / 2, iy - iconScreenH / 2 - 30 * u - 32 * u * ns, ns, wPin);
       }
       // (Built fresh each frame — never read back — so nothing accumulates between frames.)
       if (kind !== 'phone') l.name.style.transform = portrait && back > 0 ? `rotate(${-c.rot}deg)` : '';
