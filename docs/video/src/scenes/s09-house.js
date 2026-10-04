@@ -156,7 +156,7 @@ function planeTexture() {
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   /** Where the dot hovers on T, in plan: over open floor (16:9: the kitchen's
    * front corner; 9:16: the doorway), never over furniture. */
-  const DOT_XZ = [0.6, -0.45];
+  const DOT_XZ = portrait ? [0.1, 0.1] : [0.6, -0.45];
   // Underneath composition 6's diagram, which lifts away to reveal the house.
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
@@ -267,8 +267,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const facing = -0.32;
   const devices = [
     // `top`: the top edge of each model, in its own units (TV frame, laptop lid, phone body).
-    { kind: 'tv', scale: 1.15, pos: [cab.x, Y0 + cab.h, cab.z + 0.02], rot: -0.18, top: [0, 0.42, 0] },
-    { kind: 'laptop', scale: 1.5, pos: [table.x, Y0 + table.h, table.z + 0.02], rot: facing, top: [0, 0.23, -0.186] },
+    { kind: 'tv', scale: 1.55, pos: [cab.x, Y0 + cab.h, cab.z + 0.02], rot: -0.18, top: [0, 0.42, 0] },
+    { kind: 'laptop', scale: 1.2, pos: [table.x, Y0 + table.h, table.z + 0.02], rot: facing, top: [0, 0.23, -0.186] },
     { kind: 'phone', scale: 2.1, pos: [stand.x, Y0 + stand.h, stand.z + 0.02], rot: facing, top: [0, 0.163, -0.034] },
   ].map((spec) => {
     const d = MAKE[spec.kind]();
@@ -302,9 +302,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   scene.add(ring);
 
   for (const d of devices) {
-    const length = d.late * RISE;
+    d.len = d.late * RISE;
     d.start = HOUSE_TOUCH - d.late;
-    d.baseY = T_Y - length;
+    d.baseY = T_Y - d.len;
     // A bar whose top rises; geometry has its origin at the bottom.
     const geo = new THREE.CylinderGeometry(0.05, 0.05, 1, 24);
     geo.translate(0, 0.5, 0);
@@ -328,12 +328,14 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.02, 0.02, 1, 16);
+    const stemGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 12);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
-    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: '#2f3b4a', toneMapped: false, fog: false }));
+    // Very faint, so only the bright bar carries length.
+    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: '#161c25', toneMapped: false, fog: false }));
     stem.position.set(ax, from, az);
-    stem.scale.set(1, Math.max(0.0001, d.baseY - from), 1);
+    d.stem = stem;
+    d.stemFrom = from;
     d.guide.add(stem);
     scene.add(d.guide);
   }
@@ -345,7 +347,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
     ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
-    : { distance: 10.0, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.08, -0.05) };
+    : { distance: 9.3, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.22, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -375,6 +377,25 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   spot.rotation.x = -Math.PI / 2;
   spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
   const probe = camera.clone();
+  // Each bar's 3D length is set so its length ON SCREEN, seen from the
+  // camera at the touch, is in the true 40 : 90 : 210 ratio — perspective
+  // would otherwise lengthen the bar nearest the camera. All three still
+  // take exactly their delay to grow, so they meet T together.
+  poseCamera(probe, HOUSE_TOUCH);
+  const pxPerUnit = (d) => {
+    const a = toScreen(new THREE.Vector3(d.anchor.x, T_Y, d.anchor.z), probe, W, H);
+    const b = toScreen(new THREE.Vector3(d.anchor.x, T_Y - 0.1, d.anchor.z), probe, W, H);
+    return Math.hypot(a.x - b.x, a.y - b.y) / 0.1;
+  };
+  const tv = devices.find((d) => d.kind === 'tv');
+  const pxPerSecond = (tv.late * RISE * pxPerUnit(tv)) / tv.late;
+  for (const d of devices) {
+    d.len = (pxPerSecond * d.late) / pxPerUnit(d);
+    d.baseY = T_Y - d.len;
+    d.bar.position.y = d.baseY;
+    d.disc.position.y = d.baseY;
+    d.stem.scale.set(1, Math.max(0.0001, d.baseY - d.stemFrom), 1);
+  }
   poseCamera(probe, SETTLE);
   const refDistance = probe.position.distanceTo(DOT_HOME);
   const DOT_D = 32 * u;
@@ -383,7 +404,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   function dotWorld(t, cam) {
     const p = DOT_HOME.clone();
     // Drop: from above, slowing as it settles onto T.
-    p.y += 1.6 * (1 - smooth(span(t, HOST[0], SETTLE + 0.1)));
+    p.y += 0.25 * (1 - smooth(span(t, HOST[0], SETTLE + 0.1)));
     // Hover: a slow, small breath so it is never still.
     p.y += 0.025 * Math.sin((t - SETTLE) * 2.4) * smooth(span(t, SETTLE, SETTLE + 0.4));
     // Leave: up and towards the camera, accelerating.
@@ -414,8 +435,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const kIn = from ? smooth(span(t, HOST[0], HOST[0] + 0.35)) : 1;
     if (kIn < 1) {
       const dd0 = DOT_D * (refDistance / probe.position.distanceTo(p));
-      const kx = 1 - (1 - kIn) ** 2;
-      const ky = kIn ** 2;
+      const kx = kIn ** 2;
+      const ky = 1 - (1 - kIn) ** 2;
       return { x: lerp(from.x, s.x, kx), y: lerp(from.y, s.y, ky), d: lerp(from.d, dd0, kIn), glow: 0.35 };
     }
     const d = DOT_D * (refDistance / probe.position.distanceTo(p)) * (1 + 0.4 * pulse(t));
@@ -426,11 +447,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const to = handoff.lanDotAt?.(HOST[1]);
     if (k > 0 && to) {
       const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
-      const up = 160 * u * Math.sin(Math.PI * Math.min(1, k * 1.25));
+      const up = 220 * u * Math.sin(Math.PI * Math.min(1, k * 1.15));
       return {
         x: lerp(s.x, to.x, e),
         y: lerp(s.y, to.y, e) - up,
-        d: lerp(d, to.d, e) * (1 + 0.5 * Math.sin(Math.PI * Math.min(1, k * 1.2))),
+        d: lerp(d, to.d, e) * (1 + 0.9 * Math.sin(Math.PI * Math.min(1, k * 1.15))),
         glow: lerp(0.35, 0.45, k),
       };
     }
@@ -480,7 +501,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // Held, never still: a slow push on the whole band.
   tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.45, ease: 'none', immediateRender: false }, 18.45);
   // Leaves fast.
-  tl.to(band, { y: -50 * u, opacity: 0, duration: 0.18, ease: 'power2.in' }, 21.4);
+  tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
@@ -506,12 +527,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const grown = clamp01((t - d.start) / d.late);
       const on = t >= d.start;
       d.bar.visible = on && grown > 0.002;
-      d.bar.scale.set(1, Math.max(0.0001, grown * d.late * RISE), 1);
+      d.bar.scale.set(1, Math.max(0.0001, grown * d.len), 1);
       d.disc.visible = false;
       d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
-      d.contact.scale.setScalar(met ? Math.max(0.0001, easeOut(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.25))) * (1 + 0.3 * Math.exp(-(t - HOUSE_TOUCH) * 5)) : 0.0001);
+      d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
       d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
       
       const pop = smooth(span(t, d.start, d.start + 0.15));
@@ -534,8 +555,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // is gone before composition 10 sets any type.
     const lift = span(t, 21.56, 21.74) ** 1.4;
     el.style.transformOrigin = '50% 50%';
-    el.style.transform = lift > 0 ? `scale(${1 + 1.4 * lift})` : '';
-    el.style.opacity = String(1 - smooth(span(t, 21.6, 21.72)));
+    el.style.transform = lift > 0 ? `translateY(${H * 0.9 * lift}px) scale(${1 - 0.15 * lift})` : '';
+    el.style.opacity = String(1 - smooth(span(t, 21.68, 21.74)));
 
 
     // Each bar's delay, by its start disc: the example values of F8.
@@ -547,7 +568,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // left, or under its disc where the left would leave the frame.
       const lw = d.label.offsetWidth;
       // Rides on the bar's own top as it rises, and stays beside it at T.
-      const capY = d.baseY + clamp01((t - d.start) / d.late) * d.late * RISE;
+      const capY = d.baseY + clamp01((t - d.start) / d.late) * d.len;
       const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
       const lh = d.label.offsetHeight;
       let lx = d.kind === 'tv' ? top.x - lw - 56 * u : top.x + 56 * u;

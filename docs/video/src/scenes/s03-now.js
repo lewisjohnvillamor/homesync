@@ -79,25 +79,25 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Times.
   const LIFT = t0 - 0.35; // 3.40: the markers lift off the floor
-  const SWEEP = t0 - 0.12; // 3.63: they sweep under the sentence…
+  const SWEEP = t0 - 0.17; // 3.58: they sweep under the sentence…
   const MERGED = t0 + 0.65; // 4.40: …and merge into the full stop, once every line has stopped
   const EXIT = 5.9;
 
   // Plain ground arrives under the sinking floor; it is fully there before
   // the first word is.
   tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.15, ease: 'power2.out' }, t0 - 0.05);
-  // The lines from opposite sides, slowing as they land; set by 4.40 s.
-  // (in 9:16 too they come from the sides, so nothing crosses the markers'
-  // row below the sentence)
+  // The lines arrive slowing as they land; set by 4.40 s. 16:9: from
+  // opposite sides. 9:16: each line rises a short way into its own row from
+  // just beneath it (top to bottom), so no line ever passes through another
+  // or through the markers' row below the sentence.
   lines.forEach((l, i) => {
     const late = i >= lines.length / 2;
     tl.fromTo(
       l,
-      // 16:9 from the sides; 9:16 from the top and the bottom (storyboard).
-      portrait ? { y: side(i) * 260 * u, opacity: 0 } : { x: side(i) * 520 * u, opacity: 0 },
-      { x: 0, y: 0, opacity: 1, duration: 0.5, ease: 'expo.out' },
+      portrait ? { y: 36 * u, opacity: 0 } : { x: side(i) * 520 * u, opacity: 0 },
+      { x: 0, y: 0, opacity: 1, duration: portrait ? 0.4 : 0.5, ease: 'expo.out' },
       // On the beat (3.75 s); every line set by 4.40.
-      t0 + 0.05 + (late ? 0.1 : 0) + (portrait ? 0.04 * (i % 2) : 0),
+      portrait ? t0 + 0.05 + 0.1 * i : t0 + 0.05 + (late ? 0.1 : 0),
     );
   });
   // Then the words rush past the camera; the full stop stays.

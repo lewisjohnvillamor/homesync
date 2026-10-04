@@ -84,7 +84,9 @@ function paintPlayer(screen, { lit = 0, press = 0, ring = 0, glyph = 1 }) {
   // The press ring, behind the player's lines so it never crosses them.
   if (glyph > 0 && ring > 0 && ring < 1) {
     const r0 = m * 0.17 * 1.35;
-    ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * (1 - ring) ** 1.5})`;
+    // Fades in over 3 frames once the button is down, so the press reads as
+    // a sink first, then a ring.
+    ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * smooth(Math.min(1, ring / 0.12)) * (1 - ring) ** 1.5})`;
     ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
     ctx.beginPath();
     ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.05 * easeOut(ring)), 0, Math.PI * 2);
@@ -163,12 +165,12 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [-0.12, 0.15, -0.1], d0: 4.55, d1: 4.2, orb0: 0.06, orb1: 0.0 },
-        c2: { el: 52, tg: [-0.12, 0.0, -0.05], d: 4.75, orbDrift: 0.035 },
+        c1: { el: 46, tg: [-0.12, 0.15, -0.28], d0: 4.15, d1: 3.85, orb0: 0.06, orb1: 0.0 },
+        c2: { el: 52, tg: [-0.12, 0.0, -0.3], d: 4.4, orbDrift: 0.035 },
       }
     : {
         fov: 30,
-        c1: { el: 36, tg: [0.12, 0.42, -0.2], d0: 4.1, d1: 3.75, orb0: 0.1, orb1: 0.04 },
+        c1: { el: 36, tg: [0.0, 0.42, -0.2], d0: 4.1, d1: 3.75, orb0: 0.1, orb1: 0.04 },
         c2: { el: 44, tg: [0.05, 0.0, -0.2], d: 4.25, orbDrift: -0.03 },
       };
   const camera = new THREE.PerspectiveCamera(CAM.fov, W / H, 0.05, 50);
@@ -207,8 +209,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
         x0: -0.5,
         speed: 0.42,
         icon: 0.05,
-        place: { tv: [0.12, -1.3, 1.15], laptop: [0.12, -0.05, 1.4], phone: [0.12, 1.0, 2.35] },
-        rows: { tv: [-0.98, 1.15], laptop: [0.27, 1.4], phone: [1.22, 2.35] },
+        place: { tv: [0.12, -1.18, 1.15], laptop: [0.12, -0.1, 1.4], phone: [0.12, 0.85, 2.35] },
+        rows: { tv: [-0.86, 1.15], laptop: [0.22, 1.4], phone: [1.07, 2.35] },
         turn: 0,
       }
     : {
@@ -216,7 +218,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
         // lies on the same floor directly in front of them, its three lanes
         // running across the picture from one shared press line. One subject,
         // one floor; no bar points at or ends at any device.
-        x0: -1.05,
+        x0: -0.95,
         speed: 0.6,
         icon: 0.07,
         place: { tv: [-0.62, -0.62, 1.9], laptop: [0.55, -0.5, 2.0], phone: [1.25, -0.3, 2.9] },
@@ -438,8 +440,9 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       const ls = lblStart[i];
       // Up and to the right of the marker, on its own small band, so neither
       // the dot nor a passing ring ever touches the word.
-      ls.style.transform = `translate(${m.x + 30 * u}px, ${m.y - 58 * u}px)`;
-      ls.style.opacity = String(smooth(span(t, PRESS + d.late + 0.3, PRESS + d.late + 0.5)) * labelsOut);
+      // Right after its own marker, on the lane's line, arriving with it.
+      ls.style.transform = `translate(${m.x + 22 * u}px, ${m.y - ls.offsetHeight / 2}px)`;
+      ls.style.opacity = String(smooth(span(t, PRESS + d.late, PRESS + d.late + 0.15)) * labelsOut);
     });
     // "pressed" at one end of the shared start line.
     // (16:9: at the line's near end, clear of the caption at the top left.)
@@ -456,7 +459,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     const down = smooth(span(t, PRESS - 0.02, PRESS + 0.05));
     const up = smooth(span(t, PRESS + 0.13, PRESS + 0.3));
     const press = down * (1 - up);
-    const ring = span(t, PRESS, PRESS + 0.45);
+    const ring = span(t, PRESS + 0.04, PRESS + 0.5);
     // The shared start line draws in across the press (7 frames, from the
     // back), pulses once at the press, then stays as the origin of every bar.
     const drawn = easeOut(span(t, PRESS - 0.07, PRESS + 0.05));
@@ -498,7 +501,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
           return;
         }
         const k = age / RING_LIFE;
-        const radius = 0.16 + easeOut(k) * 0.62 * Math.sqrt(d.s / 1.6);
+        const radius = 0.16 + easeOut(k) * (portrait ? 0.42 : 0.62) * Math.sqrt(d.s / 1.6);
         r.geometry.dispose();
         r.geometry = new THREE.RingGeometry(radius, radius + lerp(0.02, 0.006, k), 128);
         r.material.opacity = 0.45 * (1 - k) ** 1.6;

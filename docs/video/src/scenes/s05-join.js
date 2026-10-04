@@ -248,7 +248,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div style="position:absolute;inset:0;background:radial-gradient(90% 60% at 50% 45%, var(--surface-2), var(--bg-sunken))"></div>
           <img class="vf-qr" src="/src/assets/qr-repo.svg" style="position:absolute;left:50%;top:30%;width:${phoneW * 0.58}px;height:${phoneW * 0.58}px;margin:${phoneW * 0.09}px 0 0 ${-phoneW * 0.29}px;image-rendering:pixelated;border-radius:${8 * u}px">
           <div class="vf-frame" style="position:absolute;left:12%;right:12%;top:30%;height:${phoneW * 0.76}px;border:${5 * u}px solid var(--text);border-radius:${18 * u}px;box-sizing:border-box"></div>
-          <div class="scanline" style="position:absolute;left:10%;right:10%;height:${4 * u}px;background:var(--accent);box-shadow:0 0 ${20 * u}px var(--accent)"></div>
+          <div class="scanline" style="position:absolute;left:13%;right:13%;height:${4 * u}px;background:var(--accent);box-shadow:0 0 ${20 * u}px var(--accent)"></div>
         </div>
         <div class="join" style="position:absolute;inset:0;background:var(--bg)">
           <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
@@ -331,7 +331,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     wrap.style.transform = `translate(${r.x}px, ${r.y}px) scale(${r.s})`;
     // As it shrinks into the lane icon it picks up the icon's glow, so it never reads as fading.
     const sh0 = span(t, 10.45, 10.9);
-    wrap.style.filter = sh0 > 0 ? `drop-shadow(0 0 ${(6 + 6 * sh0) * u / r.s}px rgba(90,169,255,${0.25 + 0.2 * sh0}))` : 'none';
+    wrap.style.filter = sh0 > 0 ? `drop-shadow(0 0 ${(2 * u) / r.s}px rgba(148,163,180,${0.8 * sh0})) drop-shadow(0 0 ${(6 + 8 * sh0) * u / r.s}px rgba(90,169,255,${0.3 + 0.3 * sh0}))` : 'none';
 
     // The laptop: opened by an iris from the dot, moved aside, pushed with the camera, then out fast.
     const sh = laptopShift(t);
@@ -368,16 +368,16 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // Screens, on their beats.
     // The code leaves the viewfinder before the button arrives, so the label is never over it.
     viewfinder.style.opacity = String(1 - span(t, 8.83, 8.95));
-    join.style.opacity = String(span(t, 8.97, 9.08) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
+    join.style.opacity = String(span(t, 8.92, 9.03) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
     // The room's card comes in as the pressed button leaves (no dead beat);
     // on the 10.0 beat the dot lands in it and it turns accent — joined.
-    room.style.opacity = String(span(t, 9.72, 9.9));
+    room.style.opacity = String(span(t, 9.8, 9.95));
     meRow.style.borderColor = t >= JOINED - 0.03 ? 'var(--accent)' : 'var(--line-strong)';
     // The press: the dot (solid throughout) shrinks a little, the button sinks
     // 3 px and darkens to its pressed state — its label turning light so it
     // stays readable — then the button goes, before the room's card comes in.
     const sink = t < PRESS ? easeOut(span(t, PRESS - 0.08, PRESS)) : 1 - easeInOut(span(t, PRESS + 0.04, PRESS + 0.19));
-    const gone = easeInOut(span(t, PRESS + 0.25, PRESS + 0.45));
+    const gone = easeInOut(span(t, PRESS + 0.22, PRESS + 0.42));
     btn.style.transform = `translateY(${sink * 4 * u}px) scale(${(1 - 0.03 * sink) * (1 - 0.06 * gone)})`;
     btn.style.opacity = String(1 - gone);
     const down = span(t, PRESS - 0.1, PRESS - 0.04);
