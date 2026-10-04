@@ -188,7 +188,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     return { s: lerp(1, 1.05, k), fx: W / 2, fy: H * 0.55, px: W / 2 - 30 * u * k, py: H * 0.55 - 14 * u * k, tilt: 0, rot: 0 };
   };
   const camB = (t) => ({
-    s: (portrait ? 640 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
+    s: (portrait ? 590 * u : 1300 * u) / barPhone * lerp(1, 1.035, sine(span(t, C7 + 0.6, C8))),
     fx: L.tX,
     fy: L.lanes.phone,
     px: (portrait ? W - 150 * u : 1650 * u) - 24 * u * sine(span(t, C7 + 0.6, C8)),
@@ -355,9 +355,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
         const iconScr = iconScreenH / ic.h;
         const sx = portrait ? 80 * u : 140 * u;
         const c6 = camA(t);
-        pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, c.py, iconScr, wPin);
+        // 9:16: set a little below the lane, clear of the 90 ms label above it.
+        const iy = c.py + (portrait ? 34 * u : 0);
+        pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin);
         // Its name sits under it, clear of the lane and the start marker.
-        pin(l.name, c, c6, L.laneStart + 6 * u, L.lanes.phone + 46 * u, sx - 50 * u, c.py + iconScreenH / 2 + 16 * u, portrait ? 1.3 : 1.35, wPin);
+        pin(l.name, c, c6, L.laneStart + 6 * u, L.lanes.phone + 46 * u, sx - 50 * u, iy + iconScreenH / 2 + 16 * u, portrait ? 1.3 : 1.35, wPin);
       }
       void i;
     });
