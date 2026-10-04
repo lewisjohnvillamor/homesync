@@ -40,3 +40,4 @@ homesync-downloads/
 docs/video/node_modules/
 docs/video/frames/
 docs/video/work/
+__pycache__/
