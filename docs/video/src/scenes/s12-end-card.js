@@ -81,7 +81,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
 
   /** The mark's centre (unpushed) at time t. */
   const centre = (t) => {
-    const k = easeInOut(span(t, HOLD, HOLD + 0.32));
+    const k = easeInOut(span(t, HOLD, HOLD + 0.26));
     return { x: lerp(from.x, geo.cx, k), y: lerp(from.y, geo.cy, k) };
   };
   /** The mark's own scale: grows from the size of the cursor it was. */
@@ -103,7 +103,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     // as they draw; then breathing.
     arcs.forEach((a, i) => {
       const outer = i >= 2;
-      const start = HOLD + 0.26 + (outer ? 0.12 : 0);
+      const start = HOLD + 0.16 + (outer ? 0.1 : 0);
       const k = expoOut(span(t, start, start + 0.6));
       const len = lens[i];
       const vis = len * k;
@@ -121,7 +121,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       const k = span(t, IN[i], IN[i] + DUR[i]);
       const e = expoOut(k);
       node.style.opacity = String(clamp01((t - IN[i]) / (DUR[i] * 0.45)));
-      node.style.transform = `translateY(${(portrait ? 46 : 38) * u * (1 - e)}px)`;
+      node.style.transform = `translateX(${(i % 2 ? 1 : -1) * (portrait ? 90 : 120) * u * (1 - e)}px)`;
     });
     ground.style.opacity = '1';
   });

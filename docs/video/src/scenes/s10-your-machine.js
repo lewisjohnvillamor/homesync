@@ -18,7 +18,8 @@
 import { span, lerp, clamp01 } from '../shared/beats.js';
 import { handoff } from '../shared/handoff.js';
 
-export const pad = [0, 0.06];
+/** "Your LAN" starts sliding in while the house is still dropping away. */
+export const pad = [0.1, 0.06];
 
 const LINES = ['Your LAN', 'Your files', 'Your machine'];
 
@@ -28,7 +29,7 @@ const quartOut = (k) => 1 - (1 - k) ** 4;
 const cubicIn = (k) => k * k * k;
 
 export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
-  const size = portrait ? 124 * u : 184 * u;
+  const size = portrait ? 140 * u : 184 * u;
   const track = portrait ? -0.045 : -0.035;
   // In front of composition 11 while it waits underneath.
   el.style.zIndex = '2';
@@ -46,7 +47,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // Times. Each line starts moving on a beat (21.875, 22.5, 23.125) and has
   // landed ~0.35 s later. "Your files" starts a little before its beat
   // because it has a longer road: along the lower lane, then up.
-  const IN = [t0, t0 + 0.38, t0 + 1.25];
+  const IN = [t0 - 0.08, t0 + 0.38, t0 + 1.25];
   const OUT = [t0 + 0.54, t0 + 1.155, t1 - 0.17];
   const LEAVE = t1 - 0.25; // 24.125: gone before the terminal frame shows
   const PUSH = [t0, LEAVE];
@@ -76,7 +77,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     let x = 0;
     let y = 0;
     let o = 1;
-    const kIn = span(t, IN[i], IN[i] + 0.45);
+    const kIn = span(t, IN[i], IN[i] + 0.32);
     if (i === 1) {
       // From the right, below the dot's line; rises only once its last
       // letter has passed left of the dot.
@@ -127,6 +128,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     });
     // The ground thins as the words clear, revealing the terminal.
     ground.style.opacity = String(clamp01(t < t0 + 0.07 ? (t - t0) / 0.07 : 1 - (t - LEAVE - 0.06) / 0.12));
+    if (t < t0) ground.style.opacity = '0';
   });
 
   // Hosts the dot from the start of the composition to just after the words
@@ -135,7 +137,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
   // Where the dot arrives, a little large, for composition 9 to aim at.
   handoff.lanDotAt = (t) => {
     const st = stopAt(t);
-    return { x: st.x, y: st.y, d: st.d * 1.9 };
+    return { x: st.x, y: st.y, d: st.d * 2.6 };
   };
 
   hostDot(t0, LEAVE + 0.075, (t) => {
@@ -145,7 +147,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return {
       x: st.x + drift,
       y: st.y,
-      d: st.d * lerp(1.9, 1, k) * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
+      d: st.d * lerp(2.6, 1, k) * (1 + 0.1 * Math.max(0, Math.cos(Math.PI * 2 * ((t - t0) / 0.625))) ** 6 * span(t, t0 + 0.6, t0 + 0.7)),
       glow: lerp(0.45, 0.08, k) + 0.3 * span(t, LEAVE - 0.05, LEAVE + 0.075),
     };
   });

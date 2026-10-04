@@ -24,8 +24,8 @@ export const pad = [0.18, 0];
 const T0 = 24.375;
 const ENTER = 25.0;
 const PRINT = 25.625;
-const COLLAPSE = 26.6;
-const GONE = 26.69; // the window starts to fall away
+const COLLAPSE = 26.64;
+const GONE = 26.74; // the window starts to fall away
 const HOST_END = 26.865;
 
 const CMD = 'cargo run --release';
@@ -39,14 +39,14 @@ const cubicIn = (k) => k * k * k;
 
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
-  const winW = portrait ? 1000 * u : 1680 * u;
-  const winH = portrait ? 800 * u : 560 * u;
+  const winW = portrait ? 900 * u : 1680 * u;
+  const winH = portrait ? 700 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
   // In 9:16 the address wraps on to its own line, as it would in a narrow
   // terminal, so the type can be large enough to fill the frame.
-  const f = portrait ? 50 * u : 48 * u;
+  const f = portrait ? 46 * u : 48 * u;
   const padX = portrait ? 48 * u : 72 * u;
   const lineH = f * (portrait ? 2.0 : 1.7);
   const textX = winX + padX;
@@ -115,7 +115,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
       <div class="l1" style="position:absolute;left:${g.textX}px;top:${g.textY + g.lineH}px;display:flex;align-items:center;gap:${g.f * 0.55}px">
         ${
           portrait
-            ? `<span><span style="color:var(--text-dim)">${LABEL.trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
+            ? `<span><span style="color:var(--text-dim)">${LABEL.replace(/ +:/, ' :').trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${tagSize}px;position:absolute;left:${(URL.length + 0.8) * g.cw}px;top:${g.lineH * 1.5}px;transform:translateY(-50%)">example</span>`
             : `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
@@ -133,11 +133,11 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
   onFrame((t) => {
     const s = windowScale(t);
     const fade = 1 - clamp01((t - 26.8) / 0.075);
-    const appear = clamp01((t - (t0 - 0.18)) / 0.2);
+    const appear = clamp01((t - 24.24) / 0.12);
     // The window waits under the leaving words; its text comes up once
     // they have cleared, so no word passes over another.
     win.style.opacity = String(appear * fade);
-    txt.style.opacity = String(clamp01((t - 24.36) / 0.1) * fade);
+    txt.style.opacity = String(appear * fade);
     txt.style.transformOrigin = `${W / 2}px ${H / 2}px`;
     win.style.transformOrigin = `${W / 2 - g.winX}px ${H / 2 - g.winY}px`;
     win.style.transform = `scale(${s})`;
@@ -148,12 +148,12 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     // The printed line: appears whole, as terminal output does, with the
     // briefest settle; then collapses into the cursor below its first cell.
     const shown = t >= PRINT;
-    const kc = cubicIn(span(t, COLLAPSE, COLLAPSE + 0.22));
+    const kc = span(t, COLLAPSE, COLLAPSE + 0.16) ** 2;
     const settle = 1 - expoOut(span(t, PRINT, PRINT + 0.25));
     l1.style.visibility = shown && kc < 1 ? 'visible' : 'hidden';
-    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01((kc - 0.55) / 0.35)));
-    l1.style.transformOrigin = `0px ${g.lineH / 2}px`;
-    l1.style.transform = `translate(${-6 * u * settle}px, ${g.lineH * g.outRows * kc}px) scale(${1 - 0.92 * kc})`;
+    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01((kc - 0.4) / 0.4)));
+    l1.style.transformOrigin = `${g.d / 2}px ${g.lineH * g.outRows + g.lineH / 2}px`;
+    l1.style.transform = `translate(${-6 * u * settle}px, 0px) scale(${1 - kc})`;
 
     // The caption: in the film's type, on its own band, between the two.
     const C0 = ENTER - 0.06;
