@@ -235,8 +235,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const RUSH = [12.98, 13.42];
   const rushK = (t) => {
     const k = span(t, ...RUSH);
-    // Accelerates in, then settles slowly (quintic ease-out tail).
-    const e = k < 0.35 ? 0.5 * (k / 0.35) ** 2 * 0.35 / 0.35 * 0.35 : 0.175 + 0.825 * (1 - (1 - (k - 0.35) / 0.65) ** 4);
+    // Accelerates in, then settles slowly: an ease-in-out with its arrival stretched.
+    const e = easeInOut(k ** 0.7);
     return Math.max((portrait ? 0.07 : 0.14) * (span(t, 11.9, RUSH[0]) ** 1.6), k > 0 ? e : 0);
   };
   // The pull back leaves fast and lands slowly.
