@@ -75,7 +75,7 @@ function radialTexture(stops) {
  * (its marker lands) an accent progress arc runs round that track and the
  * progress line moves: playing.
  */
-function paintPlayer(screen, { lit = 0, press = 0, dip = 1, pause = 0, armed = 0, played = 0 }) {
+function paintPlayer(screen, { lit = 0, press = 0, dip = 1, play = 1, pause = 0, armed = 0, played = 0 }) {
   const { ctx, canvas, texture } = screen;
   const w = canvas.width;
   const h = canvas.height;
@@ -131,9 +131,9 @@ function paintPlayer(screen, { lit = 0, press = 0, dip = 1, pause = 0, armed = 0
   ctx.fill();
   const glyphColour = `rgb(${Math.round(lerp(90, 160, press))}, ${Math.round(lerp(169, 205, press))}, 255)`;
   ctx.fillStyle = glyphColour;
-  // Play, shrinking away…
-  if (pause < 1) {
-    const k = 1 - pause;
+  // Play, shrinking away to nothing first…
+  if (play > 0) {
+    const k = play;
     ctx.save();
     ctx.translate(0, sink);
     ctx.scale(k, k);
@@ -145,7 +145,8 @@ function paintPlayer(screen, { lit = 0, press = 0, dip = 1, pause = 0, armed = 0
     ctx.fill();
     ctx.restore();
   }
-  // …and pause growing in its place.
+  // …and only then pause, growing from nothing in its place: the two glyphs
+  // never share a frame, so no in-between shape is ever drawn.
   if (pause > 0) {
     ctx.save();
     ctx.translate(0, sink);
@@ -197,8 +198,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.0, 0.15, -0.28], d0: 4.15, d1: 3.85, orb0: 0.06, orb1: 0.0 },
-        c2: { el: 55, tg: [0.02, 0.0, -0.43], d: 4.36, orbDrift: 0.035 },
+        c1: { el: 46, tg: [0.0, 0.15, -0.28], d0: 3.95, d1: 3.66, orb0: 0.06, orb1: 0.0 },
+        c2: { el: 55, tg: [0.02, 0.0, -0.43], d: 4.1, push: 0.978, orbDrift: 0.035 },
       }
     : {
         fov: 30,
@@ -216,7 +217,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     const rise = smooth(span(t, 1.05, 2.3));
     const after = span(t, 2.3, 3.75);
     const elevation = lerp(c1.el, c2.el, rise) * (Math.PI / 180);
-    const distance = lerp(lerp(c1.d0, c1.d1, intro), c2.d * lerp(1, 0.965, after), rise);
+    const distance = lerp(lerp(c1.d0, c1.d1, intro), c2.d * lerp(1, c2.push ?? 0.965, after), rise);
     const orbit = lerp(lerp(c1.orb0, c1.orb1, intro), c2.orbDrift * after, rise);
     // Frame one is framed on the devices; the camera drifts across to take in
     // the floor where the press line will be drawn, arriving as it is.
@@ -237,12 +238,14 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
         // 9:16: the devices in a centred column, TV at the back; each lane
         // lies on the floor directly in front of its own device, running
         // across from one shared press line at the left. No bar points at
-        // or ends at any device.
+        // or ends at any device. Each row sits just in front of its own
+        // device's front edge (TV legs −1.12, laptop 0.19, phone stand 0.83),
+        // so on screen every bar is far nearer its own device than the next.
         shared: true,
         x0: -0.42,
         tvBar: 0.44 * LATE.tv,
         place: { tv: [0.26, -1.2, 1.5], laptop: [0.26, -0.02, 1.8], phone: [0.26, 0.74, 2.9] },
-        rows: { tv: -0.9, laptop: 0.33, phone: 0.98 },
+        rows: { tv: -1.02, laptop: 0.23, phone: 0.88 },
         turn: 0,
       }
     : {
@@ -384,11 +387,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   // The rings never cross a label: each label's rounded rect (with generous
   // padding) is cut out of every ring, with a soft edge. The rects are in
   // frame pixels, set each frame from the same projection the labels use.
-  const MASK_PAD = 12 * u;
+  /** A tag's cut-out is its own backing plus a hair; "pressed", which has no backing, keeps a wide margin. */
+  const MASK_PAD = 2 * u;
+  const PRESS_PAD = 12 * u;
   const ringMask = {
     uBox: { value: Array.from({ length: 4 }, () => new THREE.Vector4(-1e5, -1e5, 0, 0)) },
     uOn: { value: [0, 0, 0, 0] },
-    uFeather: { value: 10 * u },
+    uFeather: { value: 12 * u },
     uRad: { value: 10 * u },
     uFrameH: { value: H },
   };
@@ -403,7 +408,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
         for (int i = 0; i < 4; i++) {
           vec2 q = abs(fp - uBox[i].xy) - uBox[i].zw + uRad;
           float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRad;
-          keep *= mix(1.0, smoothstep(0.0, uFeather, dist), uOn[i]);
+          keep *= mix(1.0, smoothstep(0.0, 1.0, dist / uFeather), uOn[i]);
         }
         gl_FragColor.a *= keep;`,
       );
@@ -456,7 +461,11 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const lblStart = [...el.querySelectorAll('.lbl-start')];
   // Never still while it is read: the line drifts with the camera's ease-in.
   tl.fromTo(headline, { x: 0 }, { x: 18 * u, duration: 1.5, ease: 'sine.out' }, 0);
-  tl.fromTo(headline, { y: 0, opacity: 1 }, { y: (portrait ? -60 : 60) * u, opacity: 0, duration: 0.2, ease: 'power2.in', immediateRender: false }, 1.5);
+  // It leaves fast, out to the left, accelerating; composition 2's line
+  // chases it in from the right (s02-echo.js, from 1.68 s), so text is on
+  // screen throughout and the two boxes never meet (checked every frame).
+  tl.fromTo(headline, { x: 18 * u }, { x: (18 - 1100) * u, duration: 0.22, ease: 'power3.in', immediateRender: false }, 1.56);
+  tl.fromTo(headline, { opacity: 1 }, { opacity: 0, duration: 0.05, ease: 'none', immediateRender: false }, 1.73);
 
   /** Where each device's lag marker sits on the floor at time t. */
   const barLength = (d, t) => Math.max(0.0001, clamp01((t - PRESS) / d.late) * d.full);
@@ -507,13 +516,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       // "pressed" at the far end of the shared start line.
       const head = toScreen(new THREE.Vector3(LAYOUT.x0, 0, zMin), camera, W, H);
       lblPress.style.transform = `translate(${head.x - 50 * u}px, ${head.y - 40 * u}px)`;
-      ringMask.uBox.value[3].set(head.x - 50 * u + PRESS_W / 2, head.y - 40 * u + PRESS_H / 2, PRESS_W / 2 + MASK_PAD, PRESS_H / 2 + MASK_PAD);
+      ringMask.uBox.value[3].set(head.x - 50 * u + PRESS_W / 2, head.y - 40 * u + PRESS_H / 2, PRESS_W / 2 + PRESS_PAD, PRESS_H / 2 + PRESS_PAD);
     } else {
       // 16:9: centred under the TV's start line, the first of the three.
       const tv = devices[0];
       const head = toScreen(new THREE.Vector3(tv.bx0, 0, tv.lane + STUB), camera, W, H);
       lblPress.style.transform = `translate(${head.x}px, ${head.y + 10 * u}px) translateX(-50%)`;
-      ringMask.uBox.value[3].set(head.x, head.y + 10 * u + PRESS_H / 2, PRESS_W / 2 + MASK_PAD, PRESS_H / 2 + MASK_PAD);
+      ringMask.uBox.value[3].set(head.x, head.y + 10 * u + PRESS_H / 2, PRESS_W / 2 + PRESS_PAD, PRESS_H / 2 + PRESS_PAD);
     }
     const pressOn = smooth(span(t, PRESS, PRESS + 0.2)) * labelsOut;
     lblPress.style.opacity = String(pressOn);
@@ -528,7 +537,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     const up = easeInOut(span(t, PRESS + 0.15, PRESS + 0.36));
     const press = down * (1 - up);
     const dip = 1 - 0.05 * press + 0.03 * Math.sin(Math.PI * up);
-    const pause = easeInOut(span(t, PRESS + 0.04, PRESS + 0.14));
+    const play = 1 - easeInOut(span(t, PRESS + 0.02, PRESS + 0.085));
+    const pause = easeOut(span(t, PRESS + 0.085, PRESS + 0.17));
     const armed = smooth(span(t, PRESS + 0.05, PRESS + 0.25));
     // The shared start line draws in across the press (7 frames, from the
     // back), pulses once at the press, then stays as the origin of every bar.
@@ -554,7 +564,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       // Playing: the progress arc runs from this device's own start — so the
       // three arcs are visibly out of step.
       const played = t >= start ? 0.06 + 0.42 * (t - start) : 0;
-      paintPlayer(d.screen, { lit, press, dip, pause, armed, played });
+      paintPlayer(d.screen, { lit, press, dip, play, pause, armed, played });
 
       // The lag bar: grows from the press line until this device's sound starts.
       const length = barLength(d, t);
