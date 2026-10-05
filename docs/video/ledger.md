@@ -303,3 +303,14 @@ Measured on r16: flicker 0; windowed frozen 0.017 s (16:9) and 0.05 s (9:16); co
 | D 21.9–30 | Ship. Polish only (9:16 stack width-limited; 16:9 terminal box bottom; the dot's size across the hand-over; 9:16 pre-caption box). | Not changed (ship). |
 
 Known measurement note: the brand ground #0b0e13 (11,14,19) renders exactly in every PNG frame and decodes as (9,13,19) after the BT.709 limited-range encode — a 2-level quantisation of a very dark colour in 8-bit YUV, not a scene error.
+
+## Component round 17 — full render r17 (B and C only; A and D unchanged since they passed)
+
+Measured on r17: flicker 0; windowed frozen 0.117 s (16:9) and 0.067 s (9:16); contrast ≥ 4.5:1; bar ratio 5.25 : 2.24 : 1 (16:9) and 5.28 : 2.27 : 1 (9:16); 3D colours within 3 levels. Findings: `work/round17/b.md`, `c.md`. Both: one more pass.
+
+| Range | Main findings | Fixed by |
+| --- | --- | --- |
+| B 8.1–18.1 | **The house appeared as a pure-black slab for 4 frames** (a light ramp from 0 rendered the unlit model darker than the ground, with full-bright screens in it); icons waited outside the house then flew through walls, the bed and the 3D TV one after another; icons briefly doubled beside their models; the laptop landed last. | Lead: **the house emerges evenly from the ground colour** — fog in the ground colour whose blend is uniform across the model lifts over 17.40–17.80, so at 17.40 every house pixel equals the ground and no pixel is ever darker than it (a 5–8 % light floor still left ~80k pixels darker than the ground). Builder B: the three icons fly together 17.30–17.46 to points above their own models, then descend onto them without sideways movement and dissolve only once every corner is within 5 px (0.0 px at 17.517), gone by 17.567; the sheet fades by 17.40. Zero overlaps with other icons, lanes or labels; from 17.467 no icon covers a wall or the bed outside its own model's margin. |
+| C 18.1–21.9 | The black slab (as above); bars still effectively linear, stopping together after a 0.08 s ease; 9:16 210 chip above its ring; 90 chip over the plane's edge; recurring items (laptop bar short on a long stalk, fill, rim, 9:16 camera). | Lead: the bars ease to rest over their last 0.3 s (all three still meet T together); the entry as above. Recorded limits unchanged. |
+
+The house's whoosh now sits on the reveal (beat 28, 17.5 s) rather than composition 9's slot boundary; every effect measures 10–20 dB under the music over its own span.
