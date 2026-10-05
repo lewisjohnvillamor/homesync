@@ -142,8 +142,8 @@ function planeTexture() {
   const h = canvas.height;
   const grad = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
   // three.js reads an alpha map from its green channel: grey on black.
-  grad.addColorStop(0, 'rgb(90,90,90)');
-  grad.addColorStop(1, 'rgb(30,30,30)');
+  grad.addColorStop(0, 'rgb(58,58,58)');
+  grad.addColorStop(1, 'rgb(22,22,22)');
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
   // A glowing edge: a soft halo inside a bright line.
@@ -166,8 +166,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const { scene, ground, key, rim } = makeStage(renderer);
   // A stronger, warmer-edged rim than the device shots: it draws the walls'
   // top edges off the dark ground like a lit architectural model.
-  rim.intensity = 5.2;
-  rim.position.set(-2.5, 6, -7);
+  rim.intensity = 6.5;
+  rim.position.set(-2.5, 3.2, -7);
   // A warm, low grazing light from behind-right catches the wall tops and
   // bevels, so the model reads as a lit object rather than flat card.
   const graze = new THREE.DirectionalLight('#ffd9a8', 2.4);
@@ -189,8 +189,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   scene.add(house);
 
   // Plinth: a darker base under the whole model, softly bevelled.
-  const plinthMat = new THREE.MeshStandardMaterial({ color: '#1f1c19', roughness: 0.6, metalness: 0.05 });
-  house.add(box(HOUSE_W + 0.5, PLINTH_TOP, HOUSE_D + 0.5, plinthMat, 0, 0, 0, { radius: 0.02 }));
+  const plinthMat = new THREE.MeshStandardMaterial({ color: '#2b2722', roughness: 0.42, metalness: 0.08 });
+  house.add(box(HOUSE_W + 0.5, PLINTH_TOP, HOUSE_D + 0.5, plinthMat, 0, 0, 0, { radius: 0.05 }));
 
   // Floor slab, boards on top; the walls stand on the plinth around it, so no seam shows.
   const floor = new THREE.Mesh(new THREE.BoxGeometry(HOUSE_W - 0.02, FLOOR_T, HOUSE_D - 0.02), [
@@ -284,6 +284,16 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   });
 
   // --- T: the plane of light, the bars, their start discs ---------------------
+  const barShadeCanvas = document.createElement('canvas');
+  barShadeCanvas.width = 32; barShadeCanvas.height = 1;
+  {
+    const bg = barShadeCanvas.getContext('2d');
+    const gr = bg.createLinearGradient(0, 0, 32, 0);
+    gr.addColorStop(0, '#9ccbff'); gr.addColorStop(0.3, '#5aa9ff'); gr.addColorStop(0.7, '#5aa9ff'); gr.addColorStop(1, '#3b7fcc');
+    bg.fillStyle = gr; bg.fillRect(0, 0, 32, 1);
+  }
+  const barShade = new THREE.CanvasTexture(barShadeCanvas);
+  barShade.colorSpace = THREE.SRGBColorSpace;
   const accent = (opacity) =>
     new THREE.MeshBasicMaterial({ color: BRAND.accent, transparent: true, opacity, depthWrite: false, toneMapped: false, fog: false });
 
@@ -315,6 +325,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     geo.translate(0, 0.5, 0);
     d.bar = new THREE.Mesh(geo, accent(1));
     d.bar.material.side = THREE.DoubleSide;
+    // Shaded across its width like a lit rod — lighter edge to the key,
+    // darker to the far side — with its middle exactly the brand accent.
+    d.bar.material.color.set('#ffffff');
+    d.bar.material.map = barShade;
     // Drawn over the model: a device must never hide part of its own bar,
     // or the bar would read shorter than its delay.
     d.bar.material.depthTest = false;
