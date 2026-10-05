@@ -91,17 +91,28 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   // the first word is.
   tl.fromTo(ground, { opacity: 0 }, { opacity: 1, duration: 0.15, ease: 'power2.out' }, t0 - 0.05);
   // The lines arrive slowing as they land; set by 4.40 s. 16:9: from
-  // opposite sides. 9:16: each line rises a short way into its own row from
-  // just beneath it (top to bottom), so no line ever passes through another
-  // or through the markers' row below the sentence.
+  // opposite sides. 9:16: each slides into its own row — the first down from
+  // above, the second in from the right, the last up from below — so no line
+  // ever passes through another. The last one starts only once the markers
+  // have swept out to the right of it (they sit in the row below it until
+  // then), so it never rises through them.
+  const ENTER = portrait
+    ? [
+        { from: { y: -200 * u }, at: t0 + 0.03 },
+        { from: { x: 220 * u }, at: t0 + 0.09 },
+        { from: { y: 200 * u }, at: t0 + 0.17 },
+      ]
+    : null;
   lines.forEach((l, i) => {
     const late = i >= lines.length / 2;
     tl.fromTo(
       l,
-      portrait ? { y: 36 * u, opacity: 0 } : { x: side(i) * 520 * u, opacity: 0 },
-      { x: 0, y: 0, opacity: 1, duration: portrait ? 0.4 : 0.5, ease: 'expo.out' },
+      portrait ? { x: 0, y: 0, ...ENTER[i].from, opacity: 0 } : { x: side(i) * 520 * u, opacity: 0 },
+      portrait
+        ? { x: 0, y: 0, opacity: 1, duration: 0.48, ease: 'power3.out' }
+        : { x: 0, y: 0, opacity: 1, duration: 0.5, ease: 'expo.out' },
       // On the beat (3.75 s); every line set by 4.40.
-      portrait ? t0 + 0.05 + 0.1 * i : t0 + 0.05 + (late ? 0.1 : 0),
+      portrait ? ENTER[i].at : t0 + 0.05 + (late ? 0.1 : 0),
     );
   });
   // Then the words rush past the camera; the full stop stays.
@@ -144,7 +155,14 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   const dotAt = (t) => {
     const s = stopAt(t);
     const settle = clamp01((t - MERGED) / 0.5);
-    return { x: s.x + Math.sin((t - MERGED) * 2.1) * 2.5 * u * settle, y: s.y, d: s.d, glow: 0.4 * clamp01((t - EXIT) / 0.3) };
+    // As the words rush away the stop swells to twice its size (5.90–6.10),
+    // so the lone dot reads as the object that becomes the mark's centre.
+    const k = clamp01((t - EXIT) / (t1 - 0.15 - EXIT));
+    const swell = 1 + k * k * (3 - 2 * k);
+    // It grows up and to the right from its own baseline corner, away from
+    // the "s", so it never touches the leaving word.
+    const grow = (s.d * (swell - 1)) / 2;
+    return { x: s.x + grow + Math.sin((t - MERGED) * 2.1) * 2.5 * u * settle, y: s.y - grow, d: s.d * swell, glow: 0.4 * clamp01((t - EXIT) / 0.3) };
   };
   handoff.stopAt = dotAt;
 
@@ -153,7 +171,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
   const markers = () => (handoff.markersAt ? handoff.markersAt(LIFT) : []);
 
   /** The row below the sentence the markers lift into. */
-  const rowY = () => geo.bottom + (portrait ? 170 : 120) * u;
+  const rowY = () => geo.bottom + (portrait ? 240 : 120) * u;
   const margin = 110 * u;
 
   /** A marker's path at t: lift towards the camera, sweep, merge. */
@@ -167,21 +185,36 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     const mean = ms.reduce((acc, q) => acc + q.x, 0) / Math.max(1, ms.length);
     const spacing = (portrait ? 150 : 190) * u;
     const slot = ms.filter((q, j) => q.x < m.x || (q.x === m.x && j < i)).length;
+    // 9:16: the TV's marker (rightmost) takes the right-hand slot, beyond the
+    // laptop, so its path never crosses another device; the other two keep
+    // their places on the left.
+    const slotX = portrait
+      ? [0.3 * W, 0.47 * W, W - 130 * u][slot]
+      : Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (slot - 1) * spacing));
     const lifted = {
       // Drifting all the way to the merge, so the markers never stop dead.
-      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (slot - 1) * spacing)) + 110 * u * (Math.min(t, MERGED) - LIFT),
+      x: slotX + 110 * u * (Math.min(t, MERGED) - LIFT),
       y: rowY() + (slot - 1) * 14 * u,
       d: m.d * 1.7,
     };
     // Lifting (to SWEEP), and already sweeping (from SWEEP_IN): the sweep
     // starts from wherever the lift has got to, so the row is never still.
-    const from = { x: lerp(m.x, lifted.x, lift), y: lerp(m.y, lifted.y, lift), d: lerp(m.d, lifted.d, lift) };
+    // 9:16, the TV's marker: out to the right first, then down past the
+    // laptop's right edge — never across its screen.
+    const around = portrait && slot === 2;
+    const kx = around ? 1 - (1 - lift) ** 3 : lift;
+    const ky = around ? lift * lift * (3 - 2 * lift) : lift;
+    const from = {
+      x: lerp(m.x, lifted.x, kx) + (around ? 100 * u * Math.sin(Math.PI * lift) : 0),
+      y: lerp(m.y, lifted.y, ky),
+      d: lerp(m.d, lifted.d, lift),
+    };
     if (t < SWEEP_IN) return from;
     // Sweep along under the sentence, past the end of it, and curl up into
     // the stop from below-right, so the last stretch never crosses a letter.
     const k = sweepEase(span(t, SWEEP_IN, MERGED));
     const s = stopAt(t);
-    const c = { x: Math.min(s.x + 150 * u, W - 40 * u), y: lifted.y };
+    const c = { x: Math.min(s.x + (portrait ? 250 : 150) * u, W - 40 * u), y: lifted.y };
     const a = (1 - k) * (1 - k);
     const b = 2 * (1 - k) * k;
     const cc = k * k;

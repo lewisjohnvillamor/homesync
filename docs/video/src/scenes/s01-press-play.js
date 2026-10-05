@@ -9,7 +9,8 @@
  * from the side; rising across the cut to ~50° and swinging square to the
  * floor for composition 2, so the devices themselves carry the shot.
  *
- * At the shared press every play button sinks (with a small ring), and an
+ * At the shared press every play button sinks and rebounds, turning from play
+ * to pause, and an
  * accent bar grows from the press line towards each device until that
  * device's sound actually starts — laptop short, phone longer, TV longest, in
  * the ratio 40 : 90 : 210, slowed eight times so it can be read while the
@@ -27,7 +28,6 @@ import * as THREE from 'three';
 import { BEAT, span, lerp, clamp01 } from '../shared/beats.js';
 import { makeRenderer, makeStage, MAKE, BRAND, toScreen } from '../shared/three-kit.js';
 import { handoff } from '../shared/handoff.js';
-import { DEVICE_SVG, ASPECT } from '../shared/devices.js';
 
 export const PRESS = 1 * BEAT;
 /** Late starts: 40, 90 and 210 ms, shown eight times slower so the growth spans the camera's rise. */
@@ -67,8 +67,15 @@ function radialTexture(stops) {
   return tex;
 }
 
-/** A dim paused player: what a screen shows before anybody presses play. */
-function paintPlayer(screen, { lit = 0, press = 0, dip = 1, ring = 0, glyph = 1 }) {
+/**
+ * A player screen. Before the press: dim, paused, a raised play button. The
+ * press sinks the button (it dips in scale, holds, rebounds) and, while it is
+ * down, its glyph turns from play to pause: the new state. A dim track ring
+ * appears round it — armed — and once this device's sound actually starts
+ * (its marker lands) an accent progress arc runs round that track and the
+ * progress line moves: playing.
+ */
+function paintPlayer(screen, { lit = 0, press = 0, dip = 1, pause = 0, armed = 0, played = 0 }) {
   const { ctx, canvas, texture } = screen;
   const w = canvas.width;
   const h = canvas.height;
@@ -82,51 +89,74 @@ function paintPlayer(screen, { lit = 0, press = 0, dip = 1, ring = 0, glyph = 1 
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
-  // The press ring, behind the player's lines so it never crosses them.
-  if (glyph > 0 && ring > 0 && ring < 1) {
-    const r0 = m * 0.17 * 1.35;
-    // Fades in over 3 frames once the button is down, so the press reads as
-    // a sink first, then a ring.
-    ctx.strokeStyle = `rgba(90,169,255,${0.9 * glyph * smooth(Math.min(1, ring / 0.12)) * (1 - ring) ** 1.5})`;
-    ctx.lineWidth = m * 0.02 * (1 - ring) + 1;
-    ctx.beginPath();
-    ctx.arc(w / 2, h / 2 + m * 0.045 * press, r0 * (1 + 0.05 * easeOut(ring)), 0, Math.PI * 2);
-    ctx.stroke();
-  }
   // Title line and progress line: the shape of a player, not words.
   ctx.fillStyle = `rgba(148,163,180,${0.55 - 0.25 * lit})`;
   ctx.fillRect(w * 0.12, h * 0.16, w * 0.46, m * 0.035);
   ctx.fillStyle = 'rgba(100,116,139,0.45)';
   ctx.fillRect(w * 0.12, h * 0.84, w * 0.76, m * 0.018);
   ctx.fillStyle = '#5aa9ff';
-  ctx.fillRect(w * 0.12, h * 0.84, w * 0.76 * lerp(0.0, 0.18, lit), m * 0.018);
-  // The play button: a raised disc that visibly sinks when pressed — it
-  // drops, loses its raised edge and darkens — and sends out one ring.
-  if (glyph > 0) {
-    const r = m * 0.17;
-    const sink = m * 0.07 * press;
+  ctx.fillRect(w * 0.12, h * 0.84, w * 0.76 * Math.min(1, 0.04 * lit + 0.1 * played), m * 0.018);
+
+  const r = m * 0.15;
+  const R = r * 1.35;
+  const sink = m * 0.07 * press;
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(dip, dip);
+  // The track ring (armed) and the progress arc (playing), outside the disc.
+  const RR = R * 1.2;
+  if (armed > 0) {
+    ctx.lineWidth = m * 0.03;
+    ctx.strokeStyle = `rgba(148,163,180,${0.35 * armed})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, RR, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (played > 0) {
+    ctx.lineWidth = m * 0.042;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#5aa9ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, RR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(0.999, played));
+    ctx.stroke();
+  }
+  // The raised edge: a lighter rim under the disc that the press closes.
+  ctx.fillStyle = `rgba(148,163,180,${0.32 * (1 - press)})`;
+  ctx.beginPath();
+  ctx.arc(0, m * 0.045, R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = `rgb(${Math.round(lerp(24, 16, press))}, ${Math.round(lerp(46, 34, press))}, ${Math.round(lerp(76, 60, press))})`;
+  ctx.beginPath();
+  ctx.arc(0, sink, R * (1 - 0.06 * press), 0, Math.PI * 2);
+  ctx.fill();
+  const glyphColour = `rgb(${Math.round(lerp(90, 160, press))}, ${Math.round(lerp(169, 205, press))}, 255)`;
+  ctx.fillStyle = glyphColour;
+  // Play, shrinking away…
+  if (pause < 1) {
+    const k = 1 - pause;
     ctx.save();
-    ctx.globalAlpha = glyph;
-    ctx.translate(w / 2, h / 2);
-    ctx.scale(dip, dip);
-    // The raised edge: a lighter rim under the disc that the press closes.
-    ctx.fillStyle = `rgba(148,163,180,${0.32 * (1 - press)})`;
+    ctx.translate(0, sink);
+    ctx.scale(k, k);
     ctx.beginPath();
-    ctx.arc(0, m * 0.045, r * 1.35, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = `rgb(${Math.round(lerp(24, 16, press))}, ${Math.round(lerp(46, 34, press))}, ${Math.round(lerp(76, 60, press))})`;
-    ctx.beginPath();
-    ctx.arc(0, sink, r * 1.35 * (1 - 0.06 * press), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = press > 0 ? `rgb(${Math.round(lerp(90, 160, press))}, ${Math.round(lerp(169, 205, press))}, 255)` : '#5aa9ff';
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.36, sink - r * 0.5);
-    ctx.lineTo(r * 0.52, sink);
-    ctx.lineTo(-r * 0.36, sink + r * 0.5);
+    ctx.moveTo(-r * 0.36, -r * 0.5);
+    ctx.lineTo(r * 0.52, 0);
+    ctx.lineTo(-r * 0.36, r * 0.5);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
   }
+  // …and pause growing in its place.
+  if (pause > 0) {
+    ctx.save();
+    ctx.translate(0, sink);
+    ctx.scale(pause, pause);
+    const bw = r * 0.2;
+    const bh = r * 0.95;
+    ctx.fillRect(-r * 0.32, -bh / 2, bw, bh);
+    ctx.fillRect(r * 0.12, -bh / 2, bw, bh);
+    ctx.restore();
+  }
+  ctx.restore();
   texture.needsUpdate = true;
 }
 
@@ -167,8 +197,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [-0.12, 0.15, -0.28], d0: 4.15, d1: 3.85, orb0: 0.06, orb1: 0.0 },
-        c2: { el: 52, tg: [-0.12, 0.0, -0.3], d: 4.4, orbDrift: 0.035 },
+        c1: { el: 46, tg: [0.0, 0.15, -0.28], d0: 4.15, d1: 3.85, orb0: 0.06, orb1: 0.0 },
+        c2: { el: 55, tg: [0.02, 0.0, -0.43], d: 4.36, orbDrift: 0.035 },
       }
     : {
         fov: 30,
@@ -209,11 +239,10 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
         // across from one shared press line at the left. No bar points at
         // or ends at any device.
         shared: true,
-        x0: -0.5,
-        tvBar: 0.42 * LATE.tv,
-        icon: 0.05,
-        place: { tv: [0.12, -1.18, 1.15], laptop: [0.12, -0.1, 1.4], phone: [0.12, 0.85, 2.35] },
-        rows: { tv: -0.86, laptop: 0.22, phone: 1.07 },
+        x0: -0.42,
+        tvBar: 0.44 * LATE.tv,
+        place: { tv: [0.26, -1.2, 1.5], laptop: [0.26, -0.02, 1.8], phone: [0.26, 0.74, 2.9] },
+        rows: { tv: -0.9, laptop: 0.33, phone: 0.98 },
         turn: 0,
       }
     : {
@@ -341,7 +370,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     base.position.set(p.bx0, 0.0018, p.from + p.len / 2);
     base.renderOrder = 3;
     scene.add(base);
-    return { ...p, line };
+    return { ...p, line, base };
   });
   const ticks = devices.map((d) => {
     const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.13), accent(0));
@@ -351,6 +380,36 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     scene.add(tick);
     return tick;
   });
+
+  // The rings never cross a label: each label's rounded rect (with generous
+  // padding) is cut out of every ring, with a soft edge. The rects are in
+  // frame pixels, set each frame from the same projection the labels use.
+  const MASK_PAD = 12 * u;
+  const ringMask = {
+    uBox: { value: Array.from({ length: 4 }, () => new THREE.Vector4(-1e5, -1e5, 0, 0)) },
+    uOn: { value: [0, 0, 0, 0] },
+    uFeather: { value: 10 * u },
+    uRad: { value: 10 * u },
+    uFrameH: { value: H },
+  };
+  const maskRing = (material) => {
+    material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, ringMask);
+      shader.fragmentShader = `uniform vec4 uBox[4];\nuniform float uOn[4];\nuniform float uFeather;\nuniform float uRad;\nuniform float uFrameH;\n${shader.fragmentShader}`.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        vec2 fp = vec2(gl_FragCoord.x, uFrameH - gl_FragCoord.y);
+        float keep = 1.0;
+        for (int i = 0; i < 4; i++) {
+          vec2 q = abs(fp - uBox[i].xy) - uBox[i].zw + uRad;
+          float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRad;
+          keep *= mix(1.0, smoothstep(0.0, uFeather, dist), uOn[i]);
+        }
+        gl_FragColor.a *= keep;`,
+      );
+    };
+    return material;
+  };
 
   for (const d of devices) {
     d.bar = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), accent(0.9));
@@ -362,7 +421,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     d.marker.renderOrder = 4;
     scene.add(d.marker);
     d.rings = Array.from({ length: 3 }, () => {
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.11, 96), accent(0));
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.11, 96), maskRing(accent(0)));
       ring.rotation.x = -Math.PI / 2;
       ring.position.set(d.x, 0.002, d.z);
       ring.renderOrder = 2;
@@ -371,45 +430,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     });
   }
 
-  // Each lane's device icon, printed on the floor at the lane's start (the
-  // film's own device drawings, strokes lifted to the dim text colour), so the
-  // lane reads as that device's own start time, in the same perspective.
-  const ICON_DEPTH = 0.13;
-  for (const d of LAYOUT.shared ? devices : []) {
-    const svg = DEVICE_SVG[d.kind]().replaceAll('#2f3b4a', '#94a3b4').replaceAll('#3a4757', '#94a3b4');
-    const ch = 256;
-    const cw = Math.round(ch * ASPECT[d.kind]);
-    const cnv = document.createElement('canvas');
-    cnv.width = cw;
-    cnv.height = ch;
-    const tex = new THREE.CanvasTexture(cnv);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
-    const img = new Image();
-    waitFor(
-      new Promise((resolve) => {
-        img.onload = () => {
-          cnv.getContext('2d').drawImage(img, 0, 0, cw, ch);
-          tex.needsUpdate = true;
-          resolve();
-        };
-        img.onerror = resolve;
-        img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.replace('<svg ', `<svg width="${cw}" height="${ch}" xmlns="http://www.w3.org/2000/svg" `))}`;
-      }),
-    );
-    const w = ICON_DEPTH * ASPECT[d.kind];
-    const icon = new THREE.Mesh(
-      new THREE.PlaneGeometry(w, ICON_DEPTH),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false, fog: false, opacity: 0.85 }),
-    );
-    icon.rotation.x = -Math.PI / 2;
-    icon.position.set(LAYOUT.x0 - LAYOUT.icon - w / 2, 0.0022, d.lane);
-    icon.renderOrder = 3;
-    scene.add(icon);
-  }
-
   /** The "starts" tag's height, fixed so placing it never reads layout. */
   const TAG_H = 32 * u;
+  /** …and its width: six JetBrains Mono cells (0.6 em + 0.04 em tracking) plus padding — no layout read. */
+  const TAG_W = 6 * 0.64 * 22 * u + 2 * 11 * u;
+  /** "pressed": seven cells, no backing. */
+  const PRESS_W = 7 * 0.64 * 22 * u;
+  const PRESS_H = 22 * u;
   /** The marker's radius in metres, and its largest scale (the landing overshoot). */
   const MARKER_R = 0.045;
   const OVERSHOOT = 1.6;
@@ -418,7 +445,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   el.insertAdjacentHTML(
     'beforeend',
     `<div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
-     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap;box-sizing:border-box;height:${TAG_H}px;padding:${5 * u}px ${8 * u}px;border-radius:${6 * u}px;background:rgba(11,14,19,0.88)">starts</div>`).join('')}
+     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap;box-sizing:border-box;width:${TAG_W}px;height:${TAG_H}px;padding:${5 * u}px 0;text-align:center;border-radius:${6 * u}px;background:rgba(11,14,19,0.88)">starts</div>`).join('')}
      <div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
      <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;${portrait ? `top:${150 * u}px` : `bottom:${104 * u}px`};
        font:700 ${portrait ? 88 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text)">Press play on all three.</div>`,
@@ -470,30 +497,39 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       const edge = toScreen(mw.clone().add(new THREE.Vector3(MARKER_R * OVERSHOOT, 0, 0)), camera, W, H);
       const ls = lblStart[i];
       ls.style.transform = `translate(${edge.x + TAG_GAP}px, ${m.y - TAG_H / 2}px)`;
-      ls.style.opacity = String(smooth(span(t, PRESS + d.late, PRESS + d.late + 0.15)) * labelsOut);
+      const tagOn = smooth(span(t, PRESS + d.late, PRESS + d.late + 0.15)) * labelsOut;
+      ls.style.opacity = String(tagOn);
+      ringMask.uBox.value[i].set(edge.x + TAG_GAP + TAG_W / 2, m.y, TAG_W / 2 + MASK_PAD, TAG_H / 2 + MASK_PAD);
+      // The cut-out leads the tag in: fully cut by the time it is a quarter in.
+      ringMask.uOn.value[i] = Math.min(1, 4 * tagOn);
     });
     if (LAYOUT.shared) {
       // "pressed" at the far end of the shared start line.
       const head = toScreen(new THREE.Vector3(LAYOUT.x0, 0, zMin), camera, W, H);
       lblPress.style.transform = `translate(${head.x - 50 * u}px, ${head.y - 40 * u}px)`;
+      ringMask.uBox.value[3].set(head.x - 50 * u + PRESS_W / 2, head.y - 40 * u + PRESS_H / 2, PRESS_W / 2 + MASK_PAD, PRESS_H / 2 + MASK_PAD);
     } else {
       // 16:9: centred under the TV's start line, the first of the three.
       const tv = devices[0];
       const head = toScreen(new THREE.Vector3(tv.bx0, 0, tv.lane + STUB), camera, W, H);
       lblPress.style.transform = `translate(${head.x}px, ${head.y + 10 * u}px) translateX(-50%)`;
+      ringMask.uBox.value[3].set(head.x, head.y + 10 * u + PRESS_H / 2, PRESS_W / 2 + MASK_PAD, PRESS_H / 2 + MASK_PAD);
     }
-    lblPress.style.opacity = String(smooth(span(t, PRESS, PRESS + 0.2)) * labelsOut);
+    const pressOn = smooth(span(t, PRESS, PRESS + 0.2)) * labelsOut;
+    lblPress.style.opacity = String(pressOn);
+    ringMask.uOn.value[3] = Math.min(1, 4 * pressOn);
     // The floor stays at ~40 % until the beat; the incoming words sweep it away.
     dim.style.opacity = String(0.6 * sink);
 
     // The press: the button eases down over ~5 frames while the whole
-    // button dips 3 % in scale, holds, then eases back up with a small
-    // rebound; only once it is fully down does the ring go out.
+    // button dips 5 % in scale, holds while its glyph turns from play to
+    // pause, then eases back up with a 3 % rebound.
     const down = easeInOut(span(t, PRESS - 0.05, PRESS + 0.035));
-    const up = easeInOut(span(t, PRESS + 0.13, PRESS + 0.33));
+    const up = easeInOut(span(t, PRESS + 0.15, PRESS + 0.36));
     const press = down * (1 - up);
-    const dip = 1 - 0.03 * press + 0.015 * Math.sin(Math.PI * up);
-    const ring = span(t, PRESS + 0.05, PRESS + 0.5);
+    const dip = 1 - 0.05 * press + 0.03 * Math.sin(Math.PI * up);
+    const pause = easeInOut(span(t, PRESS + 0.04, PRESS + 0.14));
+    const armed = smooth(span(t, PRESS + 0.05, PRESS + 0.25));
     // The shared start line draws in across the press (7 frames, from the
     // back), pulses once at the press, then stays as the origin of every bar.
     const drawn = easeOut(span(t, PRESS - 0.07, PRESS + 0.05));
@@ -504,18 +540,21 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       p.line.position.set(p.bx0, 0.002, p.from + lineLen / 2);
       p.line.material.opacity = drawn > 0 ? Math.min(1, 0.6 + 0.4 * flash) : 0;
     }
-    for (const tick of ticks) tick.material.opacity = lerp(0.3, 0.8, smooth(span(t, PRESS, PRESS + 0.1)));
+    // 9:16: the shared line and its row ticks are dim from frame one. 16:9:
+    // the short start lines have no line to belong to before the press, so
+    // they and their ticks are drawn with it.
+    for (const p of pressLines) if (!LAYOUT.shared) p.base.material.opacity = 0.22 * drawn;
+    for (const tick of ticks) tick.material.opacity = LAYOUT.shared ? lerp(0.3, 0.8, smooth(span(t, PRESS, PRESS + 0.1))) : 0.8 * drawn;
 
     for (const d of devices) {
       // Each screen comes up only when its own sound starts (its marker
       // lands): picture-on is sound-on. Until then its button stays pressed.
       const start = PRESS + d.late;
       const lit = smooth(span(t, start, start + 0.2));
-      // The paused button clears on the frame the marker lands.
-      const glyph = t < start ? 1 : 0;
-      // A visible sink-and-return on every button at the press.
-      const held = press;
-      paintPlayer(d.screen, { lit, press: held, dip, ring: t >= PRESS ? ring : 0, glyph });
+      // Playing: the progress arc runs from this device's own start — so the
+      // three arcs are visibly out of step.
+      const played = t >= start ? 0.06 + 0.42 * (t - start) : 0;
+      paintPlayer(d.screen, { lit, press, dip, pause, armed, played });
 
       // The lag bar: grows from the press line until this device's sound starts.
       const length = barLength(d, t);
