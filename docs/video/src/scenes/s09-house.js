@@ -573,15 +573,17 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const lineEls = [...el.querySelectorAll('.ln')];
 
   // The band opens first, so no word is ever over bare picture; the lines
-  // enter from opposite sides inside it, slowing as they land; set by 18.80 s.
-  tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 18.15);
+  // enter from opposite sides inside it, slowing as they land; set by 18.6 s.
+  // They arrive as the house settles, into the space left for them, so the
+  // landing is never a half-empty frame.
+  tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 17.95);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 70 * u }, { x: 0, duration: 0.42, ease: 'power3.out' }, 18.2);
-    tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, 18.2);
+    tl.fromTo(ln, { x: from * 70 * u }, { x: 0, duration: 0.42, ease: 'power3.out' }, 18.0);
+    tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, 18.0);
   });
   // Held, never still: a slow push on the whole band.
-  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.45, ease: 'none', immediateRender: false }, 18.45);
+  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.25, ease: 'none', immediateRender: false }, 18.25);
   // Leaves fast.
   tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
@@ -599,7 +601,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (no see-through walls), never darker than the ground. Fog in the ground
     // colour does it: with `near` far behind the camera, its blend is the same
     // (1 − emerge) at every depth across the model.
-    const emerge = smooth(span(t, 17.32, 17.8));
+    const emerge = smooth(span(t, 17.15, 17.75));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
