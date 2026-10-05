@@ -44,16 +44,17 @@ const cubicIn = (k) => k * k * k;
 
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
-  const winW = portrait ? 960 * u : 1680 * u;
-  const winH = portrait ? 620 * u : 560 * u;
+  const winW = portrait ? 1000 * u : 1680 * u;
+  const winH = portrait ? 940 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
-  // In 9:16 the README's line is kept whole, padding and all (F21), so the
-  // type is set to fit it on one line; the example tag goes under the address.
-  const f = portrait ? 30.5 * u : 48 * u;
-  const padX = portrait ? 42 * u : 72 * u;
-  const lineH = f * (portrait ? 2.4 : 1.7);
+  // In 9:16 the README's line wraps after its padded label, as it would in a
+  // narrow terminal; the address takes its own line with the example tag
+  // beside it, so the type can be large enough to read on a phone.
+  const f = portrait ? 44 * u : 48 * u;
+  const padX = portrait ? 52 * u : 72 * u;
+  const lineH = f * (portrait ? 2.6 : 1.7);
   const textX = winX + padX;
   const textY = winY + bar + (portrait ? (winH - bar - 4 * lineH) / 2 : 64 * u);
   // The cursor is about the text's cap height, not a blob beside it.
@@ -129,8 +130,8 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
       <div class="l1" style="position:absolute;left:${g.textX}px;top:${g.textY + g.lineH}px;display:flex;align-items:center;gap:${g.f * 0.55}px">
         ${
           portrait
-            ? `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
-               <span class="example-tag" style="--tag-size:${Math.round(g.f * 0.8)}px;position:absolute;right:0;top:${g.lineH * 1.4}px;transform:translateY(-50%)">example</span>`
+            ? `<span><span style="color:var(--text-dim)">${LABEL.trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
+               <span class="example-tag" style="--tag-size:${Math.round(g.f * 0.62)}px;position:absolute;left:${(URL.length + 1) * g.cw}px;top:${g.lineH * 1.5}px;transform:translateY(-50%)">example</span>`
             : `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
         }
@@ -167,7 +168,8 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     const kc = span(t, COLLAPSE, COLLAPSE + 0.16) ** 2;
     const settle = 1 - expoOut(span(t, PRINT, PRINT + 0.25));
     l1.style.visibility = shown && kc < 1 ? 'visible' : 'hidden';
-    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01((kc - 0.4) / 0.4)));
+    // Gone (kc 0.35, ~26.735) before the dot sets off, so it never crosses the line.
+    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01(kc / 0.35)));
     l1.style.transformOrigin = `${g.d / 2}px ${g.lineH * g.outRows + g.lineH / 2}px`;
     l1.style.transform = `translate(${-6 * u * settle}px, 0px) scale(${1 - kc})`;
 

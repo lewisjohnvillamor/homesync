@@ -60,7 +60,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       // so each fills the width on its own — all right-aligned to the one
       // full stop, which never moves.
       // One size for all three — a parallel list — set by the widest line.
-      const target = portrait ? W - 220 * u : W * 0.8;
+      const target = portrait ? W - 200 * u : W * 0.8;
       const w0 = lines.map((l) => l.getBoundingClientRect().width);
       const k1 = Math.min(target / Math.max(...w0), 1.9);
       const k = w0.map(() => k1);
@@ -82,8 +82,8 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       if (portrait) {
         // 9:16: the three lines stack, filling the tall frame as they arrive;
         // the dot moves down to be the newest line's full stop.
-        const rowGap = big * 1.38;
-        const mid = H * 0.58 + big * 0.35;
+        const rowGap = big * 1.5;
+        const mid = H * 0.53 + big * 0.35;
         const base = [mid - rowGap, mid, mid + rowGap];
         geo.top = blTops.map((b, i) => base[i] - b);
         geo.left = geo.w.map(() => left);
@@ -137,7 +137,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     return { x, y, o };
   };
 
-  const pushAt = (t) => lerp(1, portrait ? 1.07 : 1.1, span(t, ...PUSH) ** 1.6);
+  const pushAt = (t) => lerp(1, portrait ? 1.05 : 1.1, span(t, ...PUSH) ** 1.6);
 
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {
@@ -166,8 +166,11 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       l.style.opacity = String(p.o);
       l.style.visibility = p.o > 0.001 ? 'visible' : 'hidden';
     });
-    // The ground thins as the words clear, revealing the terminal.
-    ground.style.opacity = String(clamp01(t < t0 + 0.07 ? (t - t0) / 0.07 : 1 - (t - LEAVE - 0.06) / 0.12));
+    // The ground is the same colour as the frame behind it, so fading it
+    // shows nothing — and a half-opaque copy of the ground rounds one level
+    // off, which the encoder spreads over the whole frame. It goes at once at
+    // 24.30, as the terminal window starts to appear.
+    ground.style.opacity = String(t < t0 + 0.07 ? clamp01((t - t0) / 0.07) : t < LEAVE + 0.175 ? 1 : 0);
     if (t < t0) ground.style.opacity = '0';
   });
 
