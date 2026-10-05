@@ -13,10 +13,11 @@ export function build({ el, tl, u, W, portrait, t0 }) {
   const line = el.querySelector('.line');
   // In from the right on the cut, as the plane starts to tilt (the lower
   // right stays clear of the diagram throughout the pull back), so the frame
-  // keeps a line through it; set by ~16.0 s; drifts; leaves fast (17.16–17.32),
-  // before any device icon moves towards the house.
+  // keeps a line through it; set by ~16.0 s; drifts; leaves fast (17.20–17.36)
+  // as the diagram lifts away above it, so the frame's brightness hands over
+  // to the house coming up underneath without a dip.
   tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0);
-  tl.to(line, { x: -30 * u, duration: 17.16 - (t0 + 0.5), ease: 'sine.inOut' }, t0 + 0.5);
-  tl.to(line, { y: -60 * u, opacity: 0, duration: 0.16, ease: 'power2.in' }, 17.16);
+  tl.to(line, { x: -30 * u, duration: 17.2 - (t0 + 0.5), ease: 'sine.inOut' }, t0 + 0.5);
+  tl.to(line, { y: -60 * u, opacity: 0, duration: 0.16, ease: 'power2.in' }, 17.2);
   void W;
 }
