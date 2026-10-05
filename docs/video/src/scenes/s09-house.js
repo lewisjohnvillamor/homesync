@@ -52,11 +52,11 @@ const HOUSE_D = 2.5;
 /** The partition between kitchen (−x) and bedroom (+x). */
 const PART_X = 0.1;
 /** The instant T: the plane of light, above the floor. */
-const T_HEIGHT = 2.0;
+const T_HEIGHT = 2.2;
 const T_Y = Y0 + T_HEIGHT;
 
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
-const RISE = 0.62;
+const RISE = 0.72;
 /** Bar radius, model units. */
 const BAR_R = 0.045;
 
@@ -142,8 +142,8 @@ function planeTexture() {
   const h = canvas.height;
   const grad = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
   // three.js reads an alpha map from its green channel: grey on black.
-  grad.addColorStop(0, 'rgb(58,58,58)');
-  grad.addColorStop(1, 'rgb(22,22,22)');
+  grad.addColorStop(0, 'rgb(40,40,40)');
+  grad.addColorStop(1, 'rgb(16,16,16)');
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
   // A glowing edge: a soft halo inside a bright line.
@@ -369,8 +369,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // without changing the camera's angle or distance.
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
-    ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.35, -0.02) }
-    : { distance: 9.3, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.85, -0.05) };
+    ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.45, -0.02) }
+    : { distance: 9.3, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 2.1, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -399,7 +399,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   plumbFade.width = 1; plumbFade.height = 64;
   const pf = plumbFade.getContext('2d');
   const pg = pf.createLinearGradient(0, 0, 0, 64);
-  pg.addColorStop(0, '#fff'); pg.addColorStop(0.55, '#fff'); pg.addColorStop(1, '#000');
+  pg.addColorStop(0, '#fff'); pg.addColorStop(0.2, '#fff'); pg.addColorStop(0.5, '#000'); pg.addColorStop(1, '#000');
   pf.fillStyle = pg; pf.fillRect(0, 0, 1, 64);
   const plumb = new THREE.Mesh(plumbGeo, accent(0));
   plumb.material.alphaMap = new THREE.CanvasTexture(plumbFade);
@@ -550,7 +550,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     'beforeend',
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
-     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 10 * u}px ${pad2[0] + 8 * u}px ${pad2[1]}px;
+     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 10 * u}px ${portrait ? pad2[0] + 8 * u : 8 * u}px ${pad2[1]}px;
         background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
@@ -610,7 +610,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.bar.scale.set(1, Math.max(0.0001, grown * d.len), 1);
       d.bar.rotation.y = Math.atan2(camera.position.x - d.anchor.x, camera.position.z - d.anchor.z);
       d.disc.visible = false;
-      d.guide.visible = t >= d.start - 0.3;
+      // The stalk appears with its bar, never as a stray stub before it.
+      d.guide.visible = t >= d.start;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
@@ -655,9 +656,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // One rule for all three: level with its bar's top, right of its ring.
       let lx = top.x + 34 * u;
       let ly = top.y - lh / 2;
-      // 9:16: the laptop's ring sits just right of the TV's, so the TV's label
-      // goes above its ring instead, over open ground.
-      if (portrait && d.kind === 'tv') { lx = Math.max(40 * u, top.x - lw / 2); ly = top.y - lh - 30 * u; }
+      // 9:16: the laptop's ring sits just right of the TV's ring, so the TV's
+      // label stays to the right but rides just above its ring's height.
+      if (portrait && d.kind === 'tv') ly = top.y - lh - 14 * u;
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
