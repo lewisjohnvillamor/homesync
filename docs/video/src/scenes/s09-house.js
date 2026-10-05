@@ -550,7 +550,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     'beforeend',
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
-     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 10 * u}px ${portrait ? pad2[0] + 8 * u : 8 * u}px ${pad2[1]}px;
+     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 10 * u}px ${portrait ? pad2[0] + 8 * u : 24 * u}px ${pad2[1]}px;
         background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
@@ -584,6 +584,15 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
+  /** A bar's grown fraction at t: the one shared speed, easing to rest over its last 0.15 s. */
+  const growAt = (d, t) => {
+    const g = clamp01((t - d.start) / d.late);
+    const tail = Math.min(1, 0.15 / d.late);
+    // Constant speed, then a constant deceleration to rest exactly at 1.
+    const v = 1 / (1 - tail / 2);
+    const a = 1 - tail;
+    return g <= a ? v * g : v * a + v * (g - a) - (v * (g - a) ** 2) / (2 * tail);
+  };
   const lightBase = [];
   scene.traverse((o) => { if (o.isLight) lightBase.push([o, o.intensity]); });
   const envBase = scene.environmentIntensity;
@@ -613,14 +622,20 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     ringMat.opacity = 0.9 * (1 - kr);
 
     for (const d of devices) {
-      const grown = clamp01((t - d.start) / d.late);
+      // Each bar still takes exactly its delay, so all three meet T together;
+      // they slow as they arrive rather than stopping dead.
+      const grown = growAt(d, t);
       const on = t >= d.start;
       d.bar.visible = on && grown > 0.002;
       d.bar.scale.set(1, Math.max(0.0001, grown * d.len), 1);
       d.bar.rotation.y = Math.atan2(camera.position.x - d.anchor.x, camera.position.z - d.anchor.z);
       d.disc.visible = false;
       // The stalk appears with its bar, never as a stray stub before it.
-      d.guide.visible = t >= d.start;
+      // The whole column rises: the dark stalk grows up from the device over
+      // the 0.25 s before its bar starts, then the bright bar carries on.
+      const sk = smooth(span(t, d.start - 0.25, d.start));
+      d.guide.visible = sk > 0;
+      d.stem.scale.set(1, Math.max(0.0001, (d.baseY - d.stemFrom) * sk), 1);
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
@@ -659,7 +674,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // left, or under its disc where the left would leave the frame.
       const lw = d.label.offsetWidth;
       // Rides on the bar's own top as it rises, and stays beside it at T.
-      const capY = d.baseY + clamp01((t - d.start) / d.late) * d.len;
+      const capY = d.baseY + growAt(d, t) * d.len;
       const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
       const lh = d.label.offsetHeight;
       // One rule for all three: level with its bar's top, right of its ring.
