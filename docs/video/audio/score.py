@@ -33,7 +33,11 @@ SCENE_BEATS = [0, 3, 6, 10, 13, 17, 21, 25, 29, 35, 39, 43, 48]
 # whoosh: 1→2 (the camera rises over the same floor) and 7→8 (the same
 # diagram pulls back).
 NO_WHOOSH = {3, 25}
-WHOOSH_BEATS = [b for b in SCENE_BEATS[1:-1] if b not in NO_WHOOSH]
+# The house is revealed as composition 8's sheet lifts off it, centred on
+# beat 28 (17.5 s), half a bar before composition 9's slot: its whoosh goes
+# with what the picture does.
+MOVED = {29: 28}
+WHOOSH_BEATS = [MOVED.get(b, b) for b in SCENE_BEATS[1:-1] if b not in NO_WHOOSH]
 # Real on-screen actions (seconds): all three play buttons pressed together,
 # the scan completing, the tap on "Enable audio & join", the room appearing
 # with "this device", Enter in the terminal.
