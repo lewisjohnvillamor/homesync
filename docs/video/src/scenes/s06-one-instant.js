@@ -55,40 +55,59 @@ const C8 = 15.625;
 const C9 = 18.125;
 /**
  * The hand-over into the house. Composition 9 is drawn underneath from 17.40,
- * a solid model brought up by its own lights over 17.40–17.80 (never by
- * opacity). Every place in the house is read live, each frame, from
- * composition 9 (handoff.houseScreensAt), never a constant.
+ * a solid model that emerges evenly from the ground colour over 17.40–17.80
+ * (every house pixel equals the ground at 17.40, ~30 % up at 17.55). Every
+ * place in the house is read live, each frame, from composition 9
+ * (handoff.houseScreensAt), never a constant.
  *
  *  17.30        The three pulses arrive on T together; T flashes.
- *  17.32–17.50  The sheet — lanes, bars, markers, T, one piece — lifts towards
+ *  17.30–17.45  All three icons fly at once. Each rises off the sheet as it
+ *               lifts and crosses the frame to a point straight above its own
+ *               model (on the camera's line through the model's screen), while
+ *               the house is still at the ground colour — so no icon is ever
+ *               seen crossing a wall, the bed or another device. Each keeps to
+ *               its own lane's side of the other lanes until they have gone,
+ *               and never meets another icon.
+ *  17.32–17.42  The sheet — lanes, bars, markers, T, one piece — lifts towards
  *               the camera: it grows about T (ease-in) and fades out, leaving
- *               through the lens before any icon has gone far. Nothing of it
- *               is drawn over the lit house.
+ *               through the lens before any icon crosses another lane.
  *  17.40        The sheet's own ground goes in one frame (1 → 0, nothing in
- *               between): the house under it is still dark, the same colour.
- *  17.40–17.70  Each icon flies off its place onto its own 3D model's screen
- *               (handoff.houseScreensAt; the bounding box handoff.houseDevicesAt
- *               if that is not published), at full size for most of the way and
- *               turning, skewing and scaling continuously to the model's
- *               on-screen outline as it arrives; it never crosses a lane still
- *               drawn, nor another icon.
- *  17.72–17.77  Each icon, on its model, dissolves into it (three frames).
+ *               between): the house under it is exactly the ground colour.
+ *  17.41–17.52  Each icon descends that line onto its model, shrinking to the
+ *               model's screen exactly (never smaller), over its model only.
+ *  17.52–17.55  On it — all four corners on the model's — it dissolves into
+ *               the model (two frames), before the house is ~30 % up.
  */
-const HAND = [17.32, 17.74];
-/** Per device: when its icon travels (within HAND), and how far its path bows (px, + = to the right of travel). */
-const HAND_PATH = {
-  landscape: { phone: [17.4, 17.64, 0], tv: [17.46, 17.66, 0], laptop: [17.52, 17.74, 150] },
-  portrait: { phone: [17.4, 17.64, 0], tv: [17.44, 17.65, 0], laptop: [17.52, 17.74, 0] },
+const HAND = [17.3, 17.555];
+/**
+ * Per format and device: when the icon crosses the frame ([start, end]), the
+ * points its path bends towards (frame px, in design units from the frame's
+ * top left), and how far above its model it is when the crossing ends (as a
+ * scale of the model's screen: seen along the camera's line, nearer is larger).
+ */
+const FLIGHT = {
+  landscape: {
+    phone: { k: [17.3, 17.44], via: [], hover: 1.3 },
+    tv: { k: [17.32, 17.46], via: [[620, 800]], hover: 1.15 },
+    laptop: { k: [17.3, 17.46], via: [[1070, 170]], hover: 1.3 },
+  },
+  portrait: {
+    phone: { k: [17.3, 17.44], via: [], hover: 1.3 },
+    tv: { k: [17.3, 17.43], via: [], hover: 1.15 },
+    laptop: { k: [17.3, 17.46], via: [[80, 960], [560, 960]], hover: 1.3 },
+  },
 };
-/** Each icon's cross-dissolve into its model, while the two coincide: three frames. */
-const DISSOLVE_AT = 17.76;
-const DISSOLVE = 0.05;
-/** The sheet's ground goes in one frame, here (the house underneath is still dark). */
+/** The descent onto the model ends here; the icon is then exactly on its model's screen. */
+const LAND = 17.52;
+/** Each icon's cross-dissolve into its model, once on it: two frames. */
+const DISSOLVE_AT = LAND;
+const DISSOLVE = 0.035;
+/** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
 const GROUND_OFF = 17.4;
-/** The lift: the camera freezes, and the sheet grows about T and leaves through the lens. */
+/** The lift: the camera freezes, and the sheet grows about T and leaves through the lens, faded out by LIFT_FADE. */
 const LIFT0 = 17.32;
-const LIFT_END = 17.5;
-const LIFT_GROW = 1.5;
+const LIFT_FADE = 17.4;
+const LIFT_GROW = 1.3;
 /** The camera's drift through composition 8's hold eases to rest here, as the lift takes over. */
 const DRIFT_END = LIFT0;
 /** The labels, the T label and the example tag leave before any icon moves. */
@@ -388,10 +407,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   };
   /** The lift at time t: how much the sheet has grown about T, and its opacity; null before it. */
   const liftAt = (t) => {
-    const k = span(t, LIFT0, LIFT_END);
+    const k = span(t, LIFT0, LIFT_FADE);
     if (k <= 0) return null;
     // Ease-in: it starts gently and accelerates out through the lens, fading
-    // as it goes (gone by LIFT_END), so it is seen leaving, not dissolving.
+    // as it goes (gone by LIFT_FADE), so it is seen leaving, not dissolving.
     return { g: 1 + (LIFT_GROW - 1) * k ** 2, o: 0.5 + 0.5 * Math.cos(Math.PI * k) };
   };
 
@@ -476,6 +495,27 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     const sn = Math.sin(th);
     return shape.map((p) => ({ x: cx + (p.x * cs - p.y * sn) * sz, y: cy + (p.x * sn + p.y * cs) * sz }));
   };
+  /**
+   * The flight: quad a carried to quad b with progress k. Its centre follows a
+   * Bézier from a's centre through the `via` points to b's; it turns by the
+   * shortest way and its shape blends (as tweenQuad); its size goes
+   * geometrically from a's (× rise) to b's (× above) with progress ks. `above`
+   * is how far up the camera's line through b it still is: b scaled about its
+   * own centre, so the descent moves nothing sideways.
+   */
+  const fly = (a, b, k, ks, via, rise, above) => {
+    const ctr = (q) => ({ x: q.reduce((s, p) => s + p.x, 0) / 4, y: q.reduce((s, p) => s + p.y, 0) / 4 });
+    const area = (q) => Math.abs(q.reduce((s, p, i) => s + p.x * q[(i + 1) % 4].y - q[(i + 1) % 4].x * p.y, 0)) / 2;
+    const ca = ctr(a);
+    const cb = ctr(b);
+    let pts = [ca, ...via, cb];
+    while (pts.length > 1) pts = pts.slice(1).map((p, i) => ({ x: lerp(pts[i].x, p.x, k), y: lerp(pts[i].y, p.y, k) }));
+    const q = tweenQuad(a, b, k, 0, 0);
+    const c = ctr(q);
+    const sz = Math.sqrt(area(a)) * rise * ((Math.sqrt(area(b)) * above) / (Math.sqrt(area(a)) * rise)) ** ks;
+    const m = sz / Math.sqrt(Math.max(area(q), 1e-6));
+    return q.map((p) => ({ x: pts[0].x + (p.x - c.x) * m, y: pts[0].y + (p.y - c.y) * m }));
+  };
   /** Where each icon's screen must end up: the model's screen, or (unpublished) the icon fitted upright inside the model's box. */
   const targetQuad = (kind, scr, box) => {
     if (scr?.[kind]) {
@@ -529,7 +569,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // underneath is unlit (the ground colour) then and comes up with light.
     ground.style.opacity = t >= ICON_LANDS && t < GROUND_OFF ? '1' : '0';
     // '' (inherit), never 'visible': an explicit 'visible' would show through the layer while the film hides it.
-    sheet.style.visibility = t < LIFT_END ? '' : 'hidden';
+    sheet.style.visibility = t < LIFT_FADE ? '' : 'hidden';
     persp2.style.visibility = t < DISSOLVE_AT + DISSOLVE + 0.02 ? '' : 'hidden';
     // Set at the end of the frame, after T has been measured on the resting plane.
     sheet.style.transform = 'none';
@@ -547,7 +587,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // composition 9 publishes them, else its bounding box).
     const houseBox = handing ? handoff.houseDevicesAt?.(t) ?? null : null;
     const houseScr = handing ? handoff.houseScreensAt?.(t) ?? null : null;
-    const paths = HAND_PATH[portrait ? 'portrait' : 'landscape'];
+    const flights = FLIGHT[portrait ? 'portrait' : 'landscape'];
     const lift = liftAt(t);
     /** Each lane's ends on the plane this frame (for the builder's overlap check only). */
     const planeSegs = {};
@@ -587,7 +627,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       const lit = Math.min(1, easeOut(span(t, reach, reach + 0.18)) * (1 - 0.45 * sine(span(t, reach + 0.3, C7))) + 0.8 * ack);
       // The device lights as its pulse arrives: a glow and a small lift.
       // At the hand-over the glow draws in, so the icon meets its unlit model.
-      const hk = easeInOut(span(t, paths[kind][0], paths[kind][1]));
+      const hk = sine(span(t, ...flights[kind].k));
       const glowPx = (6 + 22 * lit) * u * (1 - 0.7 * hk);
       // The phone keeps composition 5's glow as it lands (never a dip in brightness), easing to its lane glow.
       const carry = kind === 'phone' ? 1 - span(t, ICON_LANDS + 0.1, ICON_LANDS + 0.6) : 0;
@@ -650,7 +690,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       const pop = span(grow, 0.82, 1);
       // At the hand-over each marker goes with its device: it shrinks away as
       // the icon leaves the lane, so no marker is ever left beside the wrong model.
-      const gone = easeIn(span(t, paths[kind][0], paths[kind][0] + 0.12));
+      const gone = easeIn(span(t, flights[kind].k[0], flights[kind].k[0] + 0.08));
       l.start.style.transform = `translateX(${-l.w * grow}px) scale(${pop > 0 ? Math.max(0.0001, (0.4 + 0.6 * easeOut(pop) + 0.25 * Math.sin(Math.PI * pop)) * (1 - gone)) : 0.0001})`;
       l.start.style.opacity = String(pop > 0 ? 1 - gone : 0);
       const landed = kind === 'phone' ? C7 + 0.9 : GROW8[kind][1];
@@ -788,18 +828,27 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       // --- the hand-over: the icon leaves its lane for its model's screen ---
       const ax = kind === 'phone' ? ic.x : L.iconX;
       const [bw, bh] = iconBox(kind);
-      const [, , bow] = paths[kind];
-      const arrive = span(t, DISSOLVE_AT, DISSOLVE_AT + DISSOLVE);
+      const flight = flights[kind];
+      let arrive = 0;
       if (handing && houseBox) {
         // Where the icon's screen is now, on the plane (exactly what the
         // plane's projection drew on the frame before), and where the model's is.
         const sr = screenRect(kind);
         const onPlane = (ex, ey) => project(c, place.x + (ex - bw / 2) * place.m, place.y + (ey - bh / 2) * place.m);
         const q0 = [onPlane(sr[0], sr[1]), onPlane(sr[0] + sr[2], sr[1]), onPlane(sr[0] + sr[2], sr[1] + sr[3]), onPlane(sr[0], sr[1] + sr[3])];
-        // Full size for the first part of the flight, then scaling continuously
-        // to the model's true size as it arrives (never below it).
-        const q = tweenQuad(q0, targetQuad(kind, houseScr, houseBox), hk, span(hk, 0.3, 1) ** 1.4, bow * u);
+        // It rises off the sheet (a little nearer, so a little larger), crosses
+        // to a point straight above its model — the model's screen seen nearer,
+        // on the camera's line — then descends that line on to it. Its size
+        // goes geometrically from its own to the model's, never below it.
+        const goal = targetQuad(kind, houseScr, houseBox);
+        const rise = 1 + 0.06 * Math.sin(Math.PI * span(t, HAND[0], flight.k[1]));
+        const down = easeInOut(span(t, flight.k[1] - 0.04, LAND));
+        const above = 1 + (flight.hover - 1) * (1 - down);
+        const q = fly(q0, goal, hk, hk ** 0.7, flight.via.map(([x, y]) => ({ x: x * u, y: y * u })), rise, above);
         debug.screens[kind] = q;
+        // It dissolves into the model only once all four corners are on the model's (within 5 px).
+        const on = Math.max(...q.map((p, i) => Math.hypot(p.x - goal[i].x, p.y - goal[i].y))) <= 5 * u;
+        arrive = on ? span(t, DISSOLVE_AT, DISSOLVE_AT + DISSOLVE) : 0;
         l.icon.style.transformOrigin = '0 0';
         l.icon.style.transform = quadMatrix(sr, q, ax - bw / 2, L.lanes[kind] - bh / 2);
         // (The whole drawing's outline, for the builder's overlap check.)
