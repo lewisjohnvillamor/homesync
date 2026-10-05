@@ -55,40 +55,44 @@ const C8 = 15.625;
 const C9 = 18.125;
 /**
  * The hand-over into the house (composition 9 is drawn, fully lit, underneath
- * from 17.40). The diagram is one sheet: lanes, bars, markers and T stay
- * together on it throughout and never come apart.
+ * from 17.40). The diagram is one sheet: lanes, bars and T stay together on
+ * it throughout and never come apart. Every place in the house is read live,
+ * each frame, from composition 9 (handoff.houseScreensAt), never a constant.
  *
- *  17.40–17.70  The sheet holds (still drifting). Each icon eases off its lane
- *               onto its own 3D model's screen (handoff.houseScreensAt; the
- *               bounding box handoff.houseDevicesAt if that is not published),
- *               turning and skewing to the model's on-screen outline, on its
- *               own timing and path so no icon ever crosses another. On arrival
- *               it dissolves into the model over three frames.
- *  17.55        The sheet's ground opens: the lit house is there underneath,
- *               seen around and through the lanes, briefly a little dimmed.
- *  17.70–17.95  The sheet lifts towards the camera: it grows about T (ease-in)
+ *  17.29–17.55  Each icon eases off its lane onto its own 3D model's screen
+ *               (handoff.houseScreensAt; the bounding box handoff.houseDevicesAt
+ *               if that is not published), turning and skewing to the model's
+ *               on-screen outline, whole all the way (no fade in flight). Each
+ *               lane's start marker goes with its device as it leaves, so no
+ *               marker is ever left beside another device's model.
+ *  17.40–17.76  The sheet's ground opens on the lit house underneath, an
+ *               ease-in ramp: no step in brightness between two frames.
+ *  17.55–17.90  The sheet lifts towards the camera: it grows about T (ease-in)
  *               and fades only over its last third, leaving through the lens.
+ *  17.64–17.69  Each icon, sitting on its model since 17.55, dissolves into it
+ *               (three frames), once the house is half up.
  */
-const HAND = [17.4, 17.7];
+const HAND = [17.29, 17.55];
 /** Per device: when its icon travels (within HAND), and how far its path bows (px, + = to the right of travel). */
 const HAND_PATH = {
-  landscape: { phone: [17.4, 17.64, -40], tv: [17.42, 17.62, 0], laptop: [17.5, 17.7, 140] },
-  portrait: { phone: [17.4, 17.6, 0], tv: [17.42, 17.64, 0], laptop: [17.48, 17.7, 30] },
+  // The laptop goes last (its model is past the other two), so no icon ever crosses another.
+  landscape: { phone: [17.29, 17.48, -40], tv: [17.3, 17.5, 0], laptop: [17.36, 17.55, 180] },
+  portrait: { phone: [17.3, 17.49, 0], tv: [17.29, 17.47, 0], laptop: [17.36, 17.55, 30] },
 };
-/** Each icon's cross-dissolve into its model, from its arrival: three frames. */
+/** Each icon's cross-dissolve into its model, while the two coincide: three frames. */
+const DISSOLVE_AT = 17.64;
 const DISSOLVE = 0.05;
-/** The sheet's ground opens on the house, which is held a little dim until DIM_END. */
-const GROUND_OPEN = [17.55, 17.584];
-const DIM = 0.4;
-const DIM_END = 17.85;
+/** The sheet's ground opens on the house: an ease-in ramp (power OPEN_EASE). */
+const GROUND_OPEN = [17.4, 17.76];
+const OPEN_EASE = 1.7;
 /** The lift: the camera freezes, and the sheet grows about T and leaves through the lens. */
-const LIFT0 = 17.7;
-const LIFT_END = 17.95;
+const LIFT0 = 17.55;
+const LIFT_END = 17.9;
 const LIFT_GROW = 2.2;
-/** The camera's drift through composition 8's hold runs to here (it is frozen from LIFT0). */
-const DRIFT_END = 17.85;
+/** The camera's drift through composition 8's hold eases to rest here, as the lift takes over. */
+const DRIFT_END = LIFT0;
 /** The labels, the T label and the example tag leave before any icon moves. */
-const LABELS_OUT = [17.16, 17.3];
+const LABELS_OUT = [17.14, 17.29];
 /**
  * The dot stays where T was as the sheet lifts away about it (everything of
  * the diagram moves away from it, nothing crosses it), then is let go and the
@@ -495,14 +499,14 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     world2.style.transform = handing ? 'none' : camTf;
     persp2.style.perspective = handing ? 'none' : `${persp}px`;
     // The diagram's own opaque ground: transparent while composition 5's phone
-    // is still shrinking into its icon underneath, opaque after. At 17.55 it
-    // opens on the house (lit, underneath since 17.40) in two frames, leaving a
-    // light dim that lifts by DIM_END: no mask, no edge, no wipe.
-    const open = span(t, ...GROUND_OPEN);
-    ground.style.opacity = t < ICON_LANDS ? '0' : String(open < 1 ? lerp(1, DIM, open) : DIM * (1 - sine(span(t, GROUND_OPEN[1], DIM_END))));
+    // is still shrinking into its icon underneath, opaque after. From 17.40 it
+    // opens on the house (lit, underneath since then) on an ease-in ramp, so
+    // the house comes up gradually: no mask, no edge, no wipe, no pop.
+    const open = span(t, ...GROUND_OPEN) ** OPEN_EASE;
+    ground.style.opacity = t < ICON_LANDS ? '0' : String(1 - open);
     // '' (inherit), never 'visible': an explicit 'visible' would show through the layer while the film hides it.
     sheet.style.visibility = t < LIFT_END ? '' : 'hidden';
-    persp2.style.visibility = t < HAND[1] + DISSOLVE + 0.02 ? '' : 'hidden';
+    persp2.style.visibility = t < DISSOLVE_AT + DISSOLVE + 0.02 ? '' : 'hidden';
     // Set at the end of the frame, after T has been measured on the resting plane.
     sheet.style.transform = 'none';
     sheet.style.opacity = '1';
@@ -618,8 +622,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       // The start marker is never seen at T: it appears out at the bar's far end
       // as the bar reaches the device's own start, and pops in there.
       const pop = span(grow, 0.82, 1);
-      l.start.style.transform = `translateX(${-l.w * grow}px) scale(${pop > 0 ? 0.4 + 0.6 * easeOut(pop) + 0.25 * Math.sin(Math.PI * pop) : 0.0001})`;
-      l.start.style.opacity = String(pop > 0 ? 1 : 0);
+      // At the hand-over each marker goes with its device: it shrinks away as
+      // the icon leaves the lane, so no marker is ever left beside the wrong model.
+      const gone = easeIn(span(t, paths[kind][0], paths[kind][0] + 0.12));
+      l.start.style.transform = `translateX(${-l.w * grow}px) scale(${pop > 0 ? Math.max(0.0001, (0.4 + 0.6 * easeOut(pop) + 0.25 * Math.sin(Math.PI * pop)) * (1 - gone)) : 0.0001})`;
+      l.start.style.opacity = String(pop > 0 ? 1 - gone : 0);
       const landed = kind === 'phone' ? C7 + 1.0 : GROW8[kind][1];
       // The value comes in with its bar and holds (facts.md values only).
       const growFrom = kind === 'phone' ? C7 + 0.45 : GROW8[kind][0];
@@ -672,7 +679,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
         const ox = NAME_R - (kind === 'phone' ? NMS_W.phone : 0);
         const oy = nameY(kind) + NAME_FS;
         const left = NAME_R - textW[kind];
-        const P = { x: L.laneStart + close8 + (kind === 'tv' ? 40 : 8) * u, y: L.lanes[kind] - 34 * u };
+        // The laptop's and phone's names start a little left of their lanes'
+        // starts, so each "NN ms" ends ≥ 24 px clear of the T line.
+        const P = { x: L.laneStart + close8 + { tv: 40, laptop: -26, phone: -22 }[kind] * u, y: L.lanes[kind] - 34 * u };
         const dx = lerp(close8, P.x - ox - NAME_GROW * (left - ox), b8);
         const dy = lerp(0, P.y - oy, b8);
         tail = `translate(${dx}px, ${dy}px) rotate(${-c.rot * (1 - b8)}deg) scale(${g})`;
@@ -721,8 +730,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       // --- the hand-over: the icon leaves its lane for its model's screen ---
       const ax = kind === 'phone' ? ic.x : L.iconX;
       const [bw, bh] = iconBox(kind);
-      const [, pth1, bow] = paths[kind];
-      const arrive = span(t, pth1, pth1 + DISSOLVE);
+      const [, , bow] = paths[kind];
+      const arrive = span(t, DISSOLVE_AT, DISSOLVE_AT + DISSOLVE);
       if (handing && houseBox) {
         // Where the icon's screen is now, on the plane (exactly what the
         // plane's projection drew on the frame before), and where the model's is.
@@ -791,7 +800,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // on screen throughout): out of 7's place by 15.62, into 8's by 15.75.
     // Through the pull back it sits over "phone · 90 ms", the figure on screen
     // then: in 7's place to 15.47, over the phone's name 15.49–15.65, in 8's from 15.68.
-    const in7 = easeOut(span(t, C7 + 0.6, C7 + 0.8)) * (1 - span(back, 0, 0.12));
+    // 9:16: only once the bar has nearly landed, so the tag (which rides under
+    // the sliding start marker) is never drawn across the T line.
+    const in7 = easeOut(span(t, C7 + (portrait ? 0.9 : 0.6), C7 + (portrait ? 1.1 : 0.8))) * (1 - span(back, 0, 0.12));
     const inP = span(back, 0.14, 0.24) * (1 - span(back, 0.42, 0.52));
     const in8 = span(back, 0.55, 0.7) * (1 - span(t, ...LABELS_OUT));
     let tagAt = null;

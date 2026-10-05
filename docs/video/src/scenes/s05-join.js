@@ -380,9 +380,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
     // It goes as soon as the brackets have flashed, before the phone has moved far, so no ghost of it trails over the real code.
     viewfinder.style.opacity = String(1 - span(t, 8.78, 8.835));
     join.style.opacity = String(span(t, 8.84, 8.93) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
-    // The room's card comes in as the pressed button leaves (no dead beat);
+    // The room's card comes in over the pressed button as it leaves (the two
+    // overlap, so tap → new state reads as one action, never an empty screen);
     // on the 10.0 beat the dot lands in it and it turns accent — joined.
-    room.style.opacity = String(span(t, 9.8, 9.95));
+    room.style.opacity = String(span(t, 9.64, 9.84));
     meRow.style.borderColor = t >= JOINED - 0.03 ? 'var(--accent)' : 'var(--line-strong)';
     // The press: the dot (solid throughout) shrinks a little, the button sinks
     // 3 px and darkens to its pressed state — its label turning light so it
