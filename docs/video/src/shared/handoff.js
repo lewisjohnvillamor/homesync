@@ -37,4 +37,12 @@ export const handoff = {
    * @type {((t:number) => {x:number,y:number,d:number}) | null}
    */
   liftDotAt: null,
+  /**
+   * Composition 9's three 3D devices on screen at time t: set by composition
+   * 9 (projected with its own camera, a pure function of t), read by
+   * composition 8 so its flat icons can land on the models before the lift.
+   * Each is the screen rectangle of the device's bounding box.
+   * @type {((t:number) => Record<'tv'|'laptop'|'phone',{x:number,y:number,w:number,h:number}>) | null}
+   */
+  houseDevicesAt: null,
 };

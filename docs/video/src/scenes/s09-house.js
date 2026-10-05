@@ -52,11 +52,11 @@ const HOUSE_D = 2.5;
 /** The partition between kitchen (−x) and bedroom (+x). */
 const PART_X = 0.1;
 /** The instant T: the plane of light, above the floor. */
-const T_HEIGHT = 1.4;
+const T_HEIGHT = 2.0;
 const T_Y = Y0 + T_HEIGHT;
 
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
-const RISE = 0.45;
+const RISE = 0.62;
 /** Bar radius, model units. */
 const BAR_R = 0.045;
 
@@ -158,7 +158,7 @@ function planeTexture() {
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   /** Where the dot hovers on T, in plan: over open floor (16:9: the kitchen's
    * front corner; 9:16: the doorway), never over furniture. */
-  const DOT_XZ = portrait ? [1.2, 0.45] : [0.6, -0.45];
+  const DOT_XZ = portrait ? [1.45, 0.05] : [0.6, -0.45];
   // Underneath composition 6's diagram, which lifts away to reveal the house.
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
@@ -355,8 +355,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // without changing the camera's angle or distance.
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
-    ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.05, -0.02) }
-    : { distance: 9.3, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.22, -0.05) };
+    ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.35, -0.02) }
+    : { distance: 9.3, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.85, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -382,6 +382,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   plumbGeo.translate(0, (T_Y - Y0) / 2, 0);
   const plumb = new THREE.Mesh(plumbGeo, accent(0));
   plumb.position.set(DOT_XZ[0], Y0, DOT_XZ[1]);
+  // A hairline down to the floor, so the dot plainly hangs at T's height.
+  if (portrait) scene.add(plumb);
   const spot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
   spot.rotation.x = -Math.PI / 2;
   spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
@@ -392,15 +394,26 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // take exactly their delay to grow, so they meet T together.
   // Calibrated mid-hold, where the bars are read; the slow orbit changes it by < 2 %.
   poseCamera(probe, 20.9);
-  const pxPerUnit = (d) => {
-    const a = toScreen(new THREE.Vector3(d.anchor.x, T_Y, d.anchor.z), probe, W, H);
-    const b = toScreen(new THREE.Vector3(d.anchor.x, T_Y - 0.1, d.anchor.z), probe, W, H);
-    return Math.hypot(a.x - b.x, a.y - b.y) / 0.1;
+  // The whole bar's projected length (not the scale at its top: the bars
+  // are long enough for perspective to change along them).
+  const screenLen = (d, len) => {
+    const p0 = toScreen(new THREE.Vector3(d.anchor.x, T_Y, d.anchor.z), probe, W, H);
+    const p1 = toScreen(new THREE.Vector3(d.anchor.x, T_Y - len, d.anchor.z), probe, W, H);
+    return Math.hypot(p0.x - p1.x, p0.y - p1.y);
   };
   const tv = devices.find((d) => d.kind === 'tv');
-  const pxPerSecond = (tv.late * RISE * pxPerUnit(tv)) / tv.late;
+  const pxPerSecond = screenLen(tv, tv.late * RISE) / tv.late;
   for (const d of devices) {
-    d.len = (pxPerSecond * d.late) / pxPerUnit(d);
+    // Bisect for the 3D length whose projection is this bar's share.
+    const want = pxPerSecond * d.late;
+    let lo = 0;
+    let hi = T_HEIGHT;
+    for (let i = 0; i < 40; i += 1) {
+      const mid = (lo + hi) / 2;
+      if (screenLen(d, mid) < want) lo = mid;
+      else hi = mid;
+    }
+    d.len = (lo + hi) / 2;
     d.baseY = T_Y - d.len;
     d.bar.position.y = d.baseY;
     d.disc.position.y = d.baseY;
@@ -433,6 +446,23 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const a = t - HOUSE_TOUCH;
     if (a < 0 || a > 0.4) return 0;
     return a < 0.12 ? smooth(a / 0.12) : 1 - smooth((a - 0.12) / 0.32);
+  };
+
+  // Where each 3D device sits on screen, for composition 8's icons to land on.
+  const deviceBoxes = devices.map((d) => ({ kind: d.kind, box: new THREE.Box3().setFromObject(d.group) }));
+  handoff.houseDevicesAt = (t) => {
+    poseCamera(probe, t);
+    const out = {};
+    for (const { kind, box } of deviceBoxes) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < 8; i += 1) {
+        const c = new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+        const q = toScreen(c, probe, W, H);
+        x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y);
+      }
+      out[kind] = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+    }
+    return out;
   };
 
   hostDot(HOST[0], HOST[1], (t) => {
@@ -580,8 +610,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const capY = d.baseY + clamp01((t - d.start) / d.late) * d.len;
       const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
       const lh = d.label.offsetHeight;
-      let lx = d.kind === 'tv' ? top.x - lw - 56 * u : top.x + 56 * u;
-      let ly = top.y - lh - 22 * u;
+      // One rule for all three: level with its bar's top, beside its ring
+      // (the TV's to the left, clear of T; the others to the right).
+      let lx = d.kind === 'tv' ? top.x - lw - 44 * u : top.x + 44 * u;
+      let ly = top.y - lh / 2;
       // No room on the left (9:16): above the bar's top, clear of its ring.
       if (lx < 40 * u) { lx = Math.max(40 * u, top.x - lw / 2); ly = top.y - lh - 56 * u; }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
