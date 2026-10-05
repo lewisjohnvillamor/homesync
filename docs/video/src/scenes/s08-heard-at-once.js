@@ -3,21 +3,56 @@
  * its lanes rising to the right, which leaves the lower right of the frame
  * open: the line is set there, right-aligned on plain ground, and only after
  * the tilt has settled, so no line of the diagram ever passes through it.
+ * At the hand-over it rides composition 8's sheet (s06's lift): it grows and
+ * rises out of the top with the lanes, one piece, never fading in place over
+ * the house. It is text, so it is never cut round the dot as the lanes are:
+ * as the sheet carries it up towards the dot it fades out whole, gone before
+ * it comes within ~60 px of the dot's rim (rule: nothing flies through text).
  */
 
-export function build({ el, tl, u, W, portrait, t0 }) {
+import { sheetLift } from './s06-one-instant.js';
+
+export function build({ el, tl, u, W, portrait, t0, onFrame }) {
   const right = portrait ? 70 * u : 110 * u;
   el.innerHTML = `
-    <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1480 * u : 860 * u}px;text-align:right;
-         font:700 ${portrait ? 86 * u : 80 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);white-space:nowrap">Scheduled to be heard<br>at one agreed instant.</div>`;
+    <div class="clear" style="position:absolute;inset:0">
+      <div class="lift" style="position:absolute;inset:0">
+        <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1480 * u : 860 * u}px;text-align:right;
+             font:700 ${portrait ? 86 * u : 80 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);white-space:nowrap">Scheduled to be heard<br>at one agreed instant.</div>
+      </div>
+    </div>`;
   const line = el.querySelector('.line');
+  const clear = el.querySelector('.clear');
+  const lift = el.querySelector('.lift');
   // In from the right on the cut, as the plane starts to tilt (the lower
   // right stays clear of the diagram throughout the pull back), so the frame
-  // keeps a line through it; set by ~16.0 s; drifts; leaves fast (17.20–17.36)
-  // as the diagram lifts away above it, so the frame's brightness hands over
-  // to the house coming up underneath without a dip.
+  // keeps a line through it; set by ~16.0 s; drifts until the sheet lifts.
   tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0);
   tl.to(line, { x: -30 * u, duration: 17.2 - (t0 + 0.5), ease: 'sine.inOut' }, t0 + 0.5);
-  tl.to(line, { y: -60 * u, opacity: 0, duration: 0.16, ease: 'power2.in' }, 17.2);
+  // From 17.20 it leaves with the sheet: the same growth about T, the same
+  // rise and the same fade; and it fades out whole as it nears the dot.
+  /** How far before the clear disc round the dot the line starts to fade (px). */
+  const NEAR = (portrait ? 420 : 280) * u;
+  onFrame((t) => {
+    const s = sheetLift.at?.(t) ?? null;
+    if (!s) {
+      lift.style.transform = 'none';
+      lift.style.opacity = '1';
+      clear.style.maskImage = 'none';
+      clear.style.webkitMaskImage = 'none';
+      return;
+    }
+    lift.style.transformOrigin = `${s.ox}px ${s.oy}px`;
+    clear.style.maskImage = s.mask;
+    clear.style.webkitMaskImage = s.mask;
+    // Its box on screen before the lift (the lift's transform is set after
+    // this read), and how near the lift carries it to the dot: it fades out
+    // whole before the clear disc round the dot, and stays out once past it.
+    lift.style.transform = 'none';
+    const r = line.getBoundingClientRect();
+    const near = sheetLift.nearFade(t, [{ x: r.left, y: r.top }, { x: r.right, y: r.top }, { x: r.right, y: r.bottom }, { x: r.left, y: r.bottom }], NEAR);
+    lift.style.transform = `translateY(${s.dy}px) scale(${s.g})`;
+    lift.style.opacity = String(s.o * near);
+  });
   void W;
 }
