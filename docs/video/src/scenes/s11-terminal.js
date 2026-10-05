@@ -130,7 +130,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
       <div class="l1" style="position:absolute;left:${g.textX}px;top:${g.textY + g.lineH}px;display:flex;align-items:center;gap:${g.f * 0.55}px">
         ${
           portrait
-            ? `<span><span style="color:var(--text-dim)">${LABEL.trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
+            ? `<span><span style="color:var(--text-dim)">${LABEL.replace(/ +:/, ':').trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${Math.round(g.f * 0.62)}px;position:absolute;left:${(URL.length + 1) * g.cw}px;top:${g.lineH * 1.5}px;transform:translateY(-50%)">example</span>`
             : `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
@@ -165,11 +165,11 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     // The printed line: appears whole, as terminal output does, with the
     // briefest settle; then collapses into the cursor below its first cell.
     const shown = t >= PRINT;
-    const kc = span(t, COLLAPSE, COLLAPSE + 0.16) ** 2;
+    // Shrinks into the cursor's cell — the dot — and is gone as the dot sets off (26.74).
+    const kc = span(t, COLLAPSE - 0.04, COLLAPSE + 0.1) ** 1.5;
     const settle = 1 - expoOut(span(t, PRINT, PRINT + 0.25));
     l1.style.visibility = shown && kc < 1 ? 'visible' : 'hidden';
-    // Gone (kc 0.35, ~26.735) before the dot sets off, so it never crosses the line.
-    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01(kc / 0.35)));
+    l1.style.opacity = String(clamp01((t - PRINT) / 0.05) * (1 - clamp01((kc - 0.55) / 0.4)));
     l1.style.transformOrigin = `${g.d / 2}px ${g.lineH * g.outRows + g.lineH / 2}px`;
     l1.style.transform = `translate(${-6 * u * settle}px, 0px) scale(${1 - kc})`;
 

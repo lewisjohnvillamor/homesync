@@ -82,9 +82,13 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       if (portrait) {
         // 9:16: the three lines stack, filling the tall frame as they arrive;
         // the dot moves down to be the newest line's full stop.
-        const rowGap = big * 1.5;
-        const mid = H * 0.53 + big * 0.35;
-        const base = [mid - rowGap, mid, mid + rowGap];
+        // The size is set by "Your machine." filling the width, so the block
+        // fills the height with open leading instead — one line per beat.
+        const lead = 1.75;
+        const rel = [0, geo.sz[1] * lead, geo.sz[1] * lead + geo.sz[2] * lead];
+        const capTop = -geo.sz[0] * 0.72;
+        const shift = H * 0.52 - (capTop + rel[2]) / 2;
+        const base = rel.map((r) => r + shift);
         geo.top = blTops.map((b, i) => base[i] - b);
         geo.left = geo.w.map(() => left);
         geo.rows = geo.w.map((w, i) => ({ x: left + w + geo.gap + geo.d / 2, y: base[i] - geo.d * 0.5 }));

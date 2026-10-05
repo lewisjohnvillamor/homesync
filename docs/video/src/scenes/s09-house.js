@@ -329,7 +329,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.disc.renderOrder = 7;
     scene.add(d.disc);
     // Where its top meets T: marked on the plane the moment it arrives.
-    d.contact = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.075, 48), accent(1));
+    d.contact = new THREE.Mesh(new THREE.RingGeometry(0.052, 0.066, 48), accent(1));
     d.contact.rotation.x = -Math.PI / 2;
     d.contact.position.set(ax, T_Y + 0.003, az);
     d.contact.renderOrder = 8;
@@ -380,7 +380,15 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const DOT_HOME = new THREE.Vector3(DOT_XZ[0], T_Y, DOT_XZ[1]);
   const plumbGeo = new THREE.CylinderGeometry(0.008, 0.008, T_Y - Y0, 8);
   plumbGeo.translate(0, (T_Y - Y0) / 2, 0);
+  // Fades out on its way down, so it never lands on the furniture below.
+  const plumbFade = document.createElement('canvas');
+  plumbFade.width = 1; plumbFade.height = 64;
+  const pf = plumbFade.getContext('2d');
+  const pg = pf.createLinearGradient(0, 0, 0, 64);
+  pg.addColorStop(0, '#fff'); pg.addColorStop(0.55, '#fff'); pg.addColorStop(1, '#000');
+  pf.fillStyle = pg; pf.fillRect(0, 0, 1, 64);
   const plumb = new THREE.Mesh(plumbGeo, accent(0));
+  plumb.material.alphaMap = new THREE.CanvasTexture(plumbFade);
   plumb.position.set(DOT_XZ[0], Y0, DOT_XZ[1]);
   // A hairline down to the floor, so the dot plainly hangs at T's height.
   if (portrait) scene.add(plumb);
@@ -572,7 +580,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
-      d.contact.material.opacity = met ? 1 - smooth(span(t, 21.38, 21.5)) : 0;
+      // The rings stay with their bars until the house leaves.
+      d.contact.material.opacity = met ? 1 : 0;
       
       const pop = smooth(span(t, d.start, d.start + 0.15));
       d.disc.scale.setScalar(Math.max(0.0001, pop * (1 + 0.5 * Math.exp(-Math.max(0, t - d.start) * 8))));
@@ -586,9 +595,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const show = smooth(span(t, 18.45, 18.75)) * (1 - smooth(span(t, 21.38, 21.5)));
     label.style.opacity = String(show);
     // 16:9: the T label sits left of the dot, away from the laptop's bar.
-    label.style.transform = portrait
-      ? `translate(${s.x + dd / 2 + 40 * u}px, ${s.y - 22 * u}px)`
-      : `translate(${s.x - dd / 2 - 40 * u - label.offsetWidth}px, ${s.y - 22 * u}px)`;
+    // Right of the dot in both formats.
+    label.style.transform = `translate(${s.x + dd / 2 + 40 * u}px, ${s.y - 22 * u}px)`;
 
     // The push-through: the whole model rushes past the camera and the layer
     // is gone before composition 10 sets any type.
@@ -610,12 +618,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const capY = d.baseY + clamp01((t - d.start) / d.late) * d.len;
       const top = toScreen(new THREE.Vector3(d.anchor.x, capY, d.anchor.z), camera, W, H);
       const lh = d.label.offsetHeight;
-      // One rule for all three: level with its bar's top, beside its ring
-      // (the TV's to the left, clear of T; the others to the right).
-      let lx = d.kind === 'tv' ? top.x - lw - 44 * u : top.x + 44 * u;
+      // One rule for all three: level with its bar's top, right of its ring.
+      let lx = top.x + 34 * u;
       let ly = top.y - lh / 2;
-      // No room on the left (9:16): above the bar's top, clear of its ring.
-      if (lx < 40 * u) { lx = Math.max(40 * u, top.x - lw / 2); ly = top.y - lh - 56 * u; }
+      // 9:16: the laptop's ring sits just right of the TV's, so the TV's label
+      // goes above its ring instead, over open ground.
+      if (portrait && d.kind === 'tv') { lx = Math.max(40 * u, top.x - lw / 2); ly = top.y - lh - 30 * u; }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
