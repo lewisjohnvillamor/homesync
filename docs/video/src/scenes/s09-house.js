@@ -142,8 +142,8 @@ function planeTexture() {
   const h = canvas.height;
   const grad = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.6);
   // three.js reads an alpha map from its green channel: grey on black.
-  grad.addColorStop(0, 'rgb(40,40,40)');
-  grad.addColorStop(1, 'rgb(16,16,16)');
+  grad.addColorStop(0, 'rgb(22,22,22)');
+  grad.addColorStop(1, 'rgb(10,10,10)');
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
   // A glowing edge: a soft halo inside a bright line.
@@ -210,12 +210,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const zF = HOUSE_D / 2 - WALL_T / 2;
   const innerD = HOUSE_D - 2 * WALL_T;
   // Back wall.
-  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zB, { radius: 0.018 }));
+  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zB, { radius: 0.03 }));
   // Front wall.
-  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zF, { radius: 0.018 }));
+  house.add(box(HOUSE_W, wh, WALL_T, wall, 0, PLINTH_TOP, zF, { radius: 0.03 }));
   // Side walls.
-  house.add(box(WALL_T, wh, innerD, wall, xL, PLINTH_TOP, 0, { radius: 0.018 }));
-  house.add(box(WALL_T, wh, innerD, wall, xR, PLINTH_TOP, 0, { radius: 0.018 }));
+  house.add(box(WALL_T, wh, innerD, wall, xL, PLINTH_TOP, 0, { radius: 0.03 }));
+  house.add(box(WALL_T, wh, innerD, wall, xR, PLINTH_TOP, 0, { radius: 0.03 }));
   // Partition, with a doorway near the front.
   const pd = [0.35, 0.8];
   const zIn0 = -HOUSE_D / 2 + WALL_T;
@@ -371,7 +371,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // without changing the camera's angle or distance.
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
-    ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.45, -0.02) }
+    ? { distance: 18.5, elevation: 48, target: new THREE.Vector3(0.1, 0.45, -0.02) }
     : { distance: 9.9, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.95, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
@@ -586,15 +586,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
-  /** A bar's grown fraction at t: the one shared speed, easing to rest over its last 0.3 s. */
-  const growAt = (d, t) => {
-    const g = clamp01((t - d.start) / d.late);
-    const tail = Math.min(1, 0.3 / d.late);
-    // Constant speed, then a constant deceleration to rest exactly at 1.
-    const v = 1 / (1 - tail / 2);
-    const a = 1 - tail;
-    return g <= a ? v * g : v * a + v * (g - a) - (v * (g - a) ** 2) / (2 * tail);
-  };
+  /** A bar's grown fraction at t: never linear — each eases out over its
+   * whole rise (sine), so all three slow into T together. */
+  const growAt = (d, t) => Math.sin((Math.PI / 2) * clamp01((t - d.start) / d.late));
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
   onFrame((t) => {
     if (t < RENDER[0] || t > RENDER[1]) return;
@@ -605,7 +599,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (no see-through walls), never darker than the ground. Fog in the ground
     // colour does it: with `near` far behind the camera, its blend is the same
     // (1 − emerge) at every depth across the model.
-    const emerge = smooth(span(t, 17.4, 17.8));
+    const emerge = smooth(span(t, 17.32, 17.8));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
