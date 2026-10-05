@@ -101,8 +101,8 @@ export function cursorAt(t, g) {
   // Swallowing the printed line, it swells a little and glows.
   const swell = 1 + 0.2 * cubicOut(span(t, COLLAPSE + 0.06, COLLAPSE + 0.24));
   const drift = Math.sin(t * 2.2) * 1.2 * g.u;
-  // One soft blink before Enter: dims to about half and back, never gone.
-  const off = 1 - 0.45 * Math.sin(Math.PI * span(t, 24.64, 24.77));
+  // Solid while typing: the cursor is the film's one carried object.
+  const off = 1;
   // As the window rushes past, the cursor already heads for the frame's
   // centre, where composition 12 builds the mark around it.
   const toC = (k => k * k * (3 - 2 * k))(span(t, GONE, 26.875));
@@ -148,7 +148,8 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
 
   onFrame((t) => {
     const s = windowScale(t, portrait);
-    const fade = 1 - clamp01((t - 26.77) / 0.1);
+    // Gone a little before the dot crosses under the command line on its way out.
+    const fade = 1 - clamp01((t - 26.74) / 0.07);
     const appear = clamp01((t - 24.3) / 0.1);
     // The window waits under the leaving words; its text comes up once
     // they have cleared, so no word passes over another.
