@@ -74,8 +74,12 @@ function radialTexture(stops) {
  * appears round it — armed — and once this device's sound actually starts
  * (its marker lands) an accent progress arc runs round that track and the
  * progress line moves: playing.
+ *
+ * `shear` slants the glyph within the screen so that, seen through the
+ * camera, its vertical strokes stand upright in the frame (a screen near the
+ * edge of a wide shot otherwise leans them over, and "II" reads as a backslash).
  */
-function paintPlayer(screen, { lit = 0, press = 0, dip = 1, play = 1, pause = 0, armed = 0, played = 0 }) {
+function paintPlayer(screen, { lit = 0, press = 0, dip = 1, play = 1, pause = 0, armed = 0, played = 0, shear = 0 }) {
   const { ctx, canvas, texture } = screen;
   const w = canvas.width;
   const h = canvas.height;
@@ -136,6 +140,7 @@ function paintPlayer(screen, { lit = 0, press = 0, dip = 1, play = 1, pause = 0,
     const k = play;
     ctx.save();
     ctx.translate(0, sink);
+    ctx.transform(1, 0, shear, 1, 0, 0);
     ctx.scale(k, k);
     ctx.beginPath();
     ctx.moveTo(-r * 0.36, -r * 0.5);
@@ -150,6 +155,7 @@ function paintPlayer(screen, { lit = 0, press = 0, dip = 1, play = 1, pause = 0,
   if (pause > 0) {
     ctx.save();
     ctx.translate(0, sink);
+    ctx.transform(1, 0, shear, 1, 0, 0);
     ctx.scale(pause, pause);
     const bw = r * 0.2;
     const bh = r * 0.95;
@@ -198,8 +204,8 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const CAM = portrait
     ? {
         fov: 40,
-        c1: { el: 46, tg: [0.0, 0.15, -0.28], d0: 3.95, d1: 3.66, orb0: 0.06, orb1: 0.0 },
-        c2: { el: 55, tg: [0.02, 0.0, -0.43], d: 4.1, push: 0.978, orbDrift: 0.035 },
+        c1: { el: 46, tg: [0.0, 0.15, -0.26], d0: 4.62, d1: 4.32, orb0: 0.06, orb1: 0.0 },
+        c2: { el: 55, tg: [0.02, 0.0, -0.42], d: 4.82, push: 0.978, orbDrift: 0.035 },
       }
     : {
         fov: 30,
@@ -239,13 +245,13 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
         // lies on the floor directly in front of its own device, running
         // across from one shared press line at the left. No bar points at
         // or ends at any device. Each row sits just in front of its own
-        // device's front edge (TV legs −1.12, laptop 0.19, phone stand 0.83),
+        // device's front edge (TV legs −1.02, laptop 0.19, phone stand 0.83),
         // so on screen every bar is far nearer its own device than the next.
         shared: true,
         x0: -0.42,
         tvBar: 0.44 * LATE.tv,
-        place: { tv: [0.26, -1.2, 1.5], laptop: [0.26, -0.02, 1.8], phone: [0.26, 0.74, 2.9] },
-        rows: { tv: -1.02, laptop: 0.23, phone: 0.88 },
+        place: { tv: [0.26, -1.1, 1.5], laptop: [0.26, -0.02, 1.8], phone: [0.26, 0.74, 2.9] },
+        rows: { tv: -0.92, laptop: 0.255, phone: 0.88 },
         turn: 0,
       }
     : {
@@ -299,9 +305,35 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     d.group.scale.setScalar(s);
     d.group.rotation.y = LAYOUT.turn;
     scene.add(d.group);
+    d.group.updateMatrixWorld(true);
+    let panel = null;
+    d.group.traverse((o) => {
+      if (o.material === d.screen.material) panel = o;
+    });
     const { bx0, lane } = laneOf(kind);
-    return { ...d, kind, late: LATE[kind], full: solveLength(kind), x, z, s, bx0, lane };
+    return { ...d, kind, late: LATE[kind], full: solveLength(kind), x, z, s, bx0, lane, panel };
   });
+
+  /**
+   * The canvas shear that makes a screen's glyph stand upright in the frame:
+   * a canvas step straight up, (k·−1, −1), must project to a vertical step on
+   * screen. Measured at the screen's centre, where the glyph is, from this
+   * frame's camera — so it is a function of t like everything else.
+   */
+  function uprightShear(d, cam) {
+    const { panel, screen } = d;
+    const { width: pw, height: ph } = panel.geometry.parameters;
+    const at = (x, y) => toScreen(panel.localToWorld(new THREE.Vector3(x, y, 0)), cam, W, H);
+    const c = at(0, 0);
+    const step = 0.01;
+    const ux = (at(step, 0).x - c.x) / step;
+    const vx = (at(0, step).x - c.x) / step;
+    // Metres per canvas pixel, across and up.
+    const mx = pw / screen.canvas.width;
+    const my = ph / screen.canvas.height;
+    const sx = -(my * vx) / (mx * ux);
+    return Math.max(-0.5, Math.min(0.5, -sx));
+  }
 
   const accent = (opacity = 1) =>
     new THREE.MeshBasicMaterial({ color: BRAND.accent, transparent: true, opacity, depthWrite: false, toneMapped: false, fog: false });
@@ -360,7 +392,9 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   // all three drawn at the same instant.
   const zs = devices.map((d) => d.lane);
   const zMin = Math.min(...zs) - 0.16;
-  const zMax = Math.max(...zs) + 0.1;
+  /** 9:16: a row tick's length along the line; the line stops just past the last one. */
+  const TICK = LAYOUT.shared ? 0.1 : 0.13;
+  const zMax = Math.max(...zs) + TICK / 2 + 0.02;
   /** Half the length of a 16:9 start line, across its bar. */
   const STUB = 0.11;
   const pressLines = (LAYOUT.shared ? [{ bx0: LAYOUT.x0, from: zMin, len: zMax - zMin }] : devices.map((d) => ({ bx0: d.bx0, from: d.lane - STUB, len: 2 * STUB }))).map((p) => {
@@ -376,7 +410,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     return { ...p, line, base };
   });
   const ticks = devices.map((d) => {
-    const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.13), accent(0));
+    const tick = new THREE.Mesh(new THREE.PlaneGeometry(0.03, TICK), accent(0));
     tick.rotation.x = -Math.PI / 2;
     tick.position.set(d.bx0, 0.0025, d.lane);
     tick.renderOrder = 3;
@@ -384,15 +418,21 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     return tick;
   });
 
-  // The rings never cross a label: each label's rounded rect (with generous
-  // padding) is cut out of every ring, with a soft edge. The rects are in
-  // frame pixels, set each frame from the same projection the labels use.
+  // The rings never cross a label, a caption, a bar or a marker: each one's
+  // rounded rect (with padding) is cut out of every ring, with a soft edge,
+  // so a ring fades out before it reaches them. The rects are in frame
+  // pixels, set each frame from the same projection the labels use.
+  // Slots: 0–2 the "starts" tags, 3 "pressed", 4 composition 1's line,
+  // 5 composition 2's line, 6–8 the bars, 9–11 the markers.
   /** A tag's cut-out is its own backing plus a hair; "pressed", which has no backing, keeps a wide margin. */
   const MASK_PAD = 2 * u;
   const PRESS_PAD = 12 * u;
+  /** Clear floor kept round a bar or a marker before a ring may show. */
+  const LAG_PAD = 10 * u;
+  const SLOTS = 12;
   const ringMask = {
-    uBox: { value: Array.from({ length: 4 }, () => new THREE.Vector4(-1e5, -1e5, 0, 0)) },
-    uOn: { value: [0, 0, 0, 0] },
+    uBox: { value: Array.from({ length: SLOTS }, () => new THREE.Vector4(-1e5, -1e5, 0, 0)) },
+    uOn: { value: Array(SLOTS).fill(0) },
     uFeather: { value: 12 * u },
     uRad: { value: 10 * u },
     uFrameH: { value: H },
@@ -400,14 +440,15 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const maskRing = (material) => {
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, ringMask);
-      shader.fragmentShader = `uniform vec4 uBox[4];\nuniform float uOn[4];\nuniform float uFeather;\nuniform float uRad;\nuniform float uFrameH;\n${shader.fragmentShader}`.replace(
+      shader.fragmentShader = `uniform vec4 uBox[${SLOTS}];\nuniform float uOn[${SLOTS}];\nuniform float uFeather;\nuniform float uRad;\nuniform float uFrameH;\n${shader.fragmentShader}`.replace(
         '#include <dithering_fragment>',
         `#include <dithering_fragment>
         vec2 fp = vec2(gl_FragCoord.x, uFrameH - gl_FragCoord.y);
         float keep = 1.0;
-        for (int i = 0; i < 4; i++) {
-          vec2 q = abs(fp - uBox[i].xy) - uBox[i].zw + uRad;
-          float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRad;
+        for (int i = 0; i < ${SLOTS}; i++) {
+          float rad = min(uRad, min(uBox[i].z, uBox[i].w));
+          vec2 q = abs(fp - uBox[i].xy) - uBox[i].zw + rad;
+          float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
           keep *= mix(1.0, smoothstep(0.0, 1.0, dist / uFeather), uOn[i]);
         }
         gl_FragColor.a *= keep;`,
@@ -435,13 +476,16 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     });
   }
 
+  /** Label type: 22 px at 1080; 1.4× in 9:16, where it is read on a phone. */
+  const LS = portrait ? 1.4 : 1;
+  const LBL = 22 * LS * u;
   /** The "starts" tag's height, fixed so placing it never reads layout. */
-  const TAG_H = 32 * u;
+  const TAG_H = 32 * LS * u;
   /** …and its width: six JetBrains Mono cells (0.6 em + 0.04 em tracking) plus padding — no layout read. */
-  const TAG_W = 6 * 0.64 * 22 * u + 2 * 11 * u;
+  const TAG_W = 6 * 0.64 * LBL + 2 * 11 * LS * u;
   /** "pressed": seven cells, no backing. */
-  const PRESS_W = 7 * 0.64 * 22 * u;
-  const PRESS_H = 22 * u;
+  const PRESS_W = 7 * 0.64 * LBL;
+  const PRESS_H = LBL;
   /** The marker's radius in metres, and its largest scale (the landing overshoot). */
   const MARKER_R = 0.045;
   const OVERSHOOT = 1.6;
@@ -449,10 +493,10 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   const TAG_GAP = 16 * u;
   el.insertAdjacentHTML(
     'beforeend',
-    `<div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
-     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${22 * u}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap;box-sizing:border-box;width:${TAG_W}px;height:${TAG_H}px;padding:${5 * u}px 0;text-align:center;border-radius:${6 * u}px;background:rgba(11,14,19,0.88)">starts</div>`).join('')}
+    `<div class="lbl lbl-press" style="position:absolute;left:0;top:0;font:500 ${LBL}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap">pressed</div>
+     ${devices.map(() => `<div class="lbl lbl-start" style="position:absolute;left:0;top:0;font:500 ${LBL}px/1 var(--mono);letter-spacing:0.04em;color:var(--text-dim);white-space:nowrap;box-sizing:border-box;width:${TAG_W}px;height:${TAG_H}px;padding:${5 * LS * u}px 0;text-align:center;border-radius:${6 * LS * u}px;background:rgba(11,14,19,0.88)">starts</div>`).join('')}
      <div class="dim" style="position:absolute;inset:0;background:var(--bg);opacity:0"></div>
-     <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;${portrait ? `top:${150 * u}px` : `bottom:${104 * u}px`};
+     <div class="headline" style="position:absolute;left:${portrait ? 80 * u : 128 * u}px;${portrait ? `top:${200 * u}px` : `bottom:${104 * u}px`};
        font:700 ${portrait ? 88 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text)">Press play on all three.</div>`,
   );
   const headline = el.querySelector('.headline');
@@ -462,7 +506,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
   // Never still while it is read: the line drifts with the camera's ease-in.
   tl.fromTo(headline, { x: 0 }, { x: 18 * u, duration: 1.5, ease: 'sine.out' }, 0);
   // It leaves fast, out to the left, accelerating; composition 2's line
-  // chases it in from the right (s02-echo.js, from 1.68 s), so text is on
+  // chases it in from the right (s02-echo.js, from 1.68–1.725 s), so text is on
   // screen throughout and the two boxes never meet (checked every frame).
   tl.fromTo(headline, { x: 18 * u }, { x: (18 - 1100) * u, duration: 0.22, ease: 'power3.in', immediateRender: false }, 1.56);
   tl.fromTo(headline, { opacity: 1 }, { opacity: 0, duration: 0.05, ease: 'none', immediateRender: false }, 1.73);
@@ -482,6 +526,71 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       const pxPerMetre = H / (2 * Math.tan((ask.fov * Math.PI) / 360) * ask.position.distanceTo(world));
       return { x: p.x, y: p.y, d: 0.09 * pxPerMetre };
     });
+  };
+
+  /**
+   * A caption's box in frame pixels and its rendered opacity, or null when it
+   * is not shown: the text itself for a bare line, the whole band for a band.
+   */
+  function captionBox(node) {
+    let o = 1;
+    for (let n = node; n && n !== document.body; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+      o *= Number(cs.opacity);
+    }
+    if (o <= 0) return null;
+    let q = node.getBoundingClientRect();
+    if (!node.classList.contains('band')) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      q = range.getBoundingClientRect();
+    }
+    if (q.width <= 0) return null;
+    return { x0: q.left, y0: q.top, x1: q.right, y1: q.bottom, o };
+  }
+
+  /** Screen box of a set of floor points, at this frame's camera. */
+  const boxOf = (pts) => {
+    const s = pts.map((p) => toScreen(p, camera, W, H));
+    return { x0: Math.min(...s.map((p) => p.x)), y0: Math.min(...s.map((p) => p.y)), x1: Math.max(...s.map((p) => p.x)), y1: Math.max(...s.map((p) => p.y)) };
+  };
+  const BAR_W = 0.05;
+  /**
+   * A device's bar (with its start tick and start line) and its marker, as
+   * boxes in frame pixels at this frame's camera; null while not drawn.
+   */
+  function lagBoxes(d, t) {
+    if (t < PRESS || t >= LIFT) return { bar: null, barBody: null, marker: null };
+    const len = barLength(d, t);
+    const half = LAYOUT.shared ? TICK / 2 : STUB;
+    const V = (x, z) => new THREE.Vector3(x, 0, z);
+    const body = [V(d.bx0, d.lane - BAR_W / 2), V(d.bx0 + len, d.lane - BAR_W / 2), V(d.bx0 + len, d.lane + BAR_W / 2), V(d.bx0, d.lane + BAR_W / 2)];
+    const bar = boxOf([V(d.bx0 - 0.015, d.lane - half), V(d.bx0 + 0.015, d.lane + half), ...body]);
+    const barBody = boxOf(body);
+    let marker = null;
+    if (t >= PRESS + d.late) {
+      const r = MARKER_R * (1 + (OVERSHOOT - 1) * Math.exp(-(t - PRESS - d.late) * 9));
+      const c = markerWorld(d, t);
+      marker = boxOf(Array.from({ length: 16 }, (_, k) => V(c.x + r * Math.cos((k * Math.PI) / 8), c.z + r * Math.sin((k * Math.PI) / 8))));
+    }
+    return { bar, barBody, marker };
+  }
+
+  // For the checking scripts only (never called by the film): this frame's
+  // bars, markers and device outlines in frame pixels.
+  el.__probe = (t) => {
+    const tt = Math.min(t, LIFT);
+    return {
+      lag: devices.map((d) => ({ kind: d.kind, ...lagBoxes(d, tt) })),
+      devices: devices.map((d) => {
+        const b = new THREE.Box3().setFromObject(d.group);
+        const pts = [];
+        for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) pts.push(toScreen(new THREE.Vector3(x, y, z), camera, W, H));
+        return { kind: d.kind, x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y)) };
+      }),
+      shear: devices.map((d) => uprightShear(d, camera)),
+    };
   };
 
   onFrame((t) => {
@@ -513,10 +622,11 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       ringMask.uOn.value[i] = Math.min(1, 4 * tagOn);
     });
     if (LAYOUT.shared) {
-      // "pressed" at the far end of the shared start line.
+      // "pressed" at the far end of the shared start line, centred on it.
       const head = toScreen(new THREE.Vector3(LAYOUT.x0, 0, zMin), camera, W, H);
-      lblPress.style.transform = `translate(${head.x - 50 * u}px, ${head.y - 40 * u}px)`;
-      ringMask.uBox.value[3].set(head.x - 50 * u + PRESS_W / 2, head.y - 40 * u + PRESS_H / 2, PRESS_W / 2 + PRESS_PAD, PRESS_H / 2 + PRESS_PAD);
+      const top = head.y - 18 * u - PRESS_H;
+      lblPress.style.transform = `translate(${head.x - PRESS_W / 2}px, ${top}px)`;
+      ringMask.uBox.value[3].set(head.x, top + PRESS_H / 2, PRESS_W / 2 + PRESS_PAD, PRESS_H / 2 + PRESS_PAD);
     } else {
       // 16:9: centred under the TV's start line, the first of the three.
       const tv = devices[0];
@@ -527,6 +637,23 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
     const pressOn = smooth(span(t, PRESS, PRESS + 0.2)) * labelsOut;
     lblPress.style.opacity = String(pressOn);
     ringMask.uOn.value[3] = Math.min(1, 4 * pressOn);
+    // No ring is ever drawn under a caption, at any opacity: each line's box
+    // (read after the timeline is seeked, so a function of t) is cut out.
+    [headline, document.querySelector('.echo-band')].forEach((node, n) => {
+      const slot = 4 + n;
+      const r = node ? captionBox(node) : null;
+      ringMask.uOn.value[slot] = r ? Math.min(1, 20 * r.o) : 0;
+      if (r) ringMask.uBox.value[slot].set((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, (r.x1 - r.x0) / 2 + 14 * u, (r.y1 - r.y0) / 2 + 14 * u);
+    });
+    // …nor under a bar or a marker: the bar and its marker stay crisp where
+    // a ring (its own device's included) passes beneath them.
+    devices.forEach((d, i) => {
+      const lag = lagBoxes(d, t);
+      for (const [slot, b] of [[6 + i, lag.barBody], [9 + i, lag.marker]]) {
+        ringMask.uOn.value[slot] = b ? 1 : 0;
+        if (b) ringMask.uBox.value[slot].set((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.x1 - b.x0) / 2 + LAG_PAD, (b.y1 - b.y0) / 2 + LAG_PAD);
+      }
+    });
     // The floor stays at ~40 % until the beat; the incoming words sweep it away.
     dim.style.opacity = String(0.6 * sink);
 
@@ -564,7 +691,7 @@ export function build({ el, tl, u, W, H, portrait, onFrame, waitFor }) {
       // Playing: the progress arc runs from this device's own start — so the
       // three arcs are visibly out of step.
       const played = t >= start ? 0.06 + 0.42 * (t - start) : 0;
-      paintPlayer(d.screen, { lit, press, dip, play, pause, armed, played });
+      paintPlayer(d.screen, { lit, press, dip, play, pause, armed, played, shear: uprightShear(d, camera) });
 
       // The lag bar: grows from the press line until this device's sound starts.
       const length = barLength(d, t);
