@@ -487,6 +487,26 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     return out;
   };
 
+  // Each device's screen panel, as four world-space corners (as the picture
+  // is seen: tl, tr, br, bl), for composition 8's icons to turn onto.
+  const screenCorners = devices.map((d) => {
+    let panel = null;
+    d.group.traverse((o) => { if (o.isMesh && o.material === d.screen.material) panel = o; });
+    panel.updateWorldMatrix(true, false);
+    const { width: pw, height: ph } = panel.geometry.parameters;
+    const at = (x, y) => panel.localToWorld(new THREE.Vector3(x, y, 0));
+    return { kind: d.kind, c: { tl: at(-pw / 2, ph / 2), tr: at(pw / 2, ph / 2), br: at(pw / 2, -ph / 2), bl: at(-pw / 2, -ph / 2) } };
+  });
+  handoff.houseScreensAt = (t) => {
+    poseCamera(probe, t);
+    const out = {};
+    for (const { kind, c } of screenCorners) {
+      const q = (v) => { const p = toScreen(v, probe, W, H); return { x: p.x, y: p.y }; };
+      out[kind] = { tl: q(c.tl), tr: q(c.tr), br: q(c.br), bl: q(c.bl) };
+    }
+    return out;
+  };
+
   hostDot(HOST[0], HOST[1], (t) => {
     poseCamera(probe, t);
     const p = dotWorld(t, probe);
