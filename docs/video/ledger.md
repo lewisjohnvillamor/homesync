@@ -314,3 +314,14 @@ Measured on r17: flicker 0; windowed frozen 0.117 s (16:9) and 0.067 s (9:16); c
 | C 18.1–21.9 | The black slab (as above); bars still effectively linear, stopping together after a 0.08 s ease; 9:16 210 chip above its ring; 90 chip over the plane's edge; recurring items (laptop bar short on a long stalk, fill, rim, 9:16 camera). | Lead: the bars ease to rest over their last 0.3 s (all three still meet T together); the entry as above. Recorded limits unchanged. |
 
 The house's whoosh now sits on the reveal (beat 28, 17.5 s) rather than composition 9's slot boundary; every effect measures 10–20 dB under the music over its own span.
+
+## Component round 18 — full render r18 (B and C)
+
+Measured on r18: flicker 0; windowed frozen 0.033 s (16:9) and 0.05 s (9:16); contrast ≥ 4.5:1; 3D colours within 2 levels; bar ratio passes (TV/phone within 2 % everywhere; the 9:16 laptop measured up to 8 % off on a ~35 px bar, where ±1.5 px is ±4 %). Findings: `work/round18/b.md`, `c.md`. Both: one more pass.
+
+| Range | Main findings | Fixed by |
+| --- | --- | --- |
+| B 8.1–18.1 | Black slab, wall crossings and doubling: **fixed**. New: **an empty beat at 17.38–17.47** — the lanes dimmed in place, then dim icons wandered over bare ground before the house appeared; the landing frame half empty (fifth round); a quiet 0.43 s at the cut. | Lead: the house emerges from 17.15, under the lanes; **the headline opens at 17.95** (lines from 18.0) into the space left for it, so the landing frame is full and the quiet beat at the cut is gone. Builder B: ground off in one frame at 17.15 (seamless — the house is exactly the ground colour then); the sheet grows to 1.6× and rises out of the top with an ease-in, gone by 17.45; the three icons leave together at 17.22 on eased paths onto their models (16:9 laptop and phone arc around the TV model), within 5 px by 17.45, dissolved by 17.515; brightness dips at most 1.9 levels, largest frame step 2.2; no lane or bar near a wrong model once the house is above 10 %. Builder B also found **composition 9's layer was still hidden until 17.40**, so the earlier emergence had not played; its padding now starts at 17.145. Not met: icons must cross the outer wall (they start outside the house), done while it is 19–42 % up. |
+| C 18.1–21.9 | Black slab: **fixed**. Laptop bar short on a long stalk; bars linear for ~1.4 s before easing; 9:16 210 chip above its ring; 90 chip over the plane edge; 16:9 fill; not premium. | Lead: bars ease out over their whole rise (sine); **9:16 camera lowered 54° → 48°**; plane fill over the rooms about half; wider wall bevels. Recorded limits: the 40 ms bar's length at this scale; chip placement where the rings sit close together. |
+
+Ground colour: the brand ground (11,14,19) has no exact code in 8-bit limited-range BT.709; it decodes as (9,13,19) (3 levels off in sum); the best achievable input decodes to (13,14,19) (2 levels off). Left as is and noted for the human check.
