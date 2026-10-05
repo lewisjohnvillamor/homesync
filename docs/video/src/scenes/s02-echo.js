@@ -4,7 +4,7 @@
 
 export function build({ el, tl, u, portrait, t1 }) {
   el.innerHTML = `
-    <div class="band" style="${portrait ? `left:${60 * u}px;top:${120 * u}px` : `right:${96 * u}px;bottom:${72 * u}px`};
+    <div class="band" style="${portrait ? `left:${60 * u}px;top:${120 * u}px` : `left:${96 * u}px;bottom:${72 * u}px`};
          padding:${22 * u}px ${32 * u}px;background:rgba(11,14,19,0.86)">
       <div class="line" style="font:700 ${portrait ? 84 * u : 80 * u}px/1.05 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">…and you still<br>get an echo.</div>
     </div>`;

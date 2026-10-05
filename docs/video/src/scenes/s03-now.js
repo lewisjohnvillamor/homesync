@@ -20,7 +20,9 @@ import { handoff } from '../shared/handoff.js';
 export const pad = [0.35, 0];
 
 const easeOut = (k) => 1 - (1 - k) ** 3;
-const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
+/** Leaves already moving (slope V0 at 0), lands slowly (slope 0 at 1). */
+const V0 = 0.7;
+const sweepEase = (k) => V0 * (k * k * k - 2 * k * k + k) + (3 * k * k - 2 * k * k * k);
 
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor }) {
   // 16:9: two lines across the frame. 9:16: four lines at about twice the
@@ -79,7 +81,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Times.
   const LIFT = t0 - 0.35; // 3.40: the markers lift off the floor
-  const SWEEP = t0 - 0.17; // 3.58: they sweep under the sentence…
+  const SWEEP = t0 - 0.17; // 3.58: the lift has settled…
+  /** 3.46: …but the sweep under the sentence has already begun, so the row never stops. */
+  const SWEEP_IN = t0 - 0.29;
   const MERGED = t0 + 0.65; // 4.40: …and merge into the full stop, once every line has stopped
   const EXIT = 5.9;
 
@@ -107,15 +111,19 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
 
   // Held, never still: a 6 % push on the whole sentence, and its two lines
   // drifting slowly apart. Computed here so the full stop can follow exactly.
-  const PUSH = portrait ? 1.04 : 1.05;
-  // In 9:16 the four lines nearly fill the width: no sideways drift there,
-  // only the push.
+  const PUSH = portrait ? 1.08 : 1.05;
+  // In 9:16 the lines nearly fill the width: no sideways drift there; the
+  // lines drift apart vertically instead, under a stronger push.
   const DRIFT = (portrait ? 0 : 24) * u;
+  const DRIFT_Y = (portrait ? 26 : 0) * u;
   // The push starts just before the dot lands (the dot follows it exactly);
   // the lines only start drifting once it has landed.
   // A steady push (linear, as a slow push may be): no stretch of it is still.
   const pushAt = (t) => lerp(1, PUSH, span(t, MERGED - 0.3, EXIT));
   const driftAt = (t) => span(t, MERGED, EXIT) * DRIFT;
+  /** 9:16: the first line drifts up, the last down (the middle stays), about the block's centre. */
+  const driftYOf = (i) => (lines.length === 1 ? 0 : (i / (lines.length - 1)) * 2 - 1);
+  const driftYAt = (t) => span(t, MERGED, EXIT) * DRIFT_Y;
 
   /**
    * Where the full stop is at time t. The hold's push is about the
@@ -128,7 +136,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     const p = pushAt(tt);
     return {
       x: W / 2 + (geo.stop.x + driftAt(tt) - W / 2) * p,
-      y: H / 2 + (geo.stop.y - H / 2) * p,
+      y: H / 2 + (geo.stop.y + driftYAt(tt) * driftYOf(lines.length - 1) - H / 2) * p,
       d: geo.d * p,
     };
   };
@@ -153,39 +161,41 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot, wai
     // Quick enough to be in the row below before the words arrive over it.
     const lift = easeOut(span(t, LIFT, SWEEP));
     // Lifted: larger, lower, a little closer together, inside the margins.
-    // Spread evenly about where they were, laptop to the left, TV to the
-    // right, so no two ever overlap.
+    // Spread evenly about where they were, each keeping its left-to-right
+    // place in the frame, so no two paths ever cross or overlap.
     const ms = markers();
     const mean = ms.reduce((acc, q) => acc + q.x, 0) / Math.max(1, ms.length);
     const spacing = (portrait ? 150 : 190) * u;
+    const slot = ms.filter((q, j) => q.x < m.x || (q.x === m.x && j < i)).length;
     const lifted = {
       // Drifting all the way to the merge, so the markers never stop dead.
-      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (i - 1) * spacing)) + 110 * u * (Math.min(t, MERGED) - LIFT),
-      y: rowY() + (i - 1) * 14 * u,
+      x: Math.min(W - margin, Math.max(margin, lerp(mean, W / 2, 0.2) + (slot - 1) * spacing)) + 110 * u * (Math.min(t, MERGED) - LIFT),
+      y: rowY() + (slot - 1) * 14 * u,
       d: m.d * 1.7,
     };
-    if (t < SWEEP) {
-      return { x: lerp(m.x, lifted.x, lift), y: lerp(m.y, lifted.y, lift), d: lerp(m.d, lifted.d, lift) };
-    }
+    // Lifting (to SWEEP), and already sweeping (from SWEEP_IN): the sweep
+    // starts from wherever the lift has got to, so the row is never still.
+    const from = { x: lerp(m.x, lifted.x, lift), y: lerp(m.y, lifted.y, lift), d: lerp(m.d, lifted.d, lift) };
+    if (t < SWEEP_IN) return from;
     // Sweep along under the sentence, past the end of it, and curl up into
     // the stop from below-right, so the last stretch never crosses a letter.
-    const k = easeInOut(span(t, SWEEP, MERGED));
+    const k = sweepEase(span(t, SWEEP_IN, MERGED));
     const s = stopAt(t);
     const c = { x: Math.min(s.x + 150 * u, W - 40 * u), y: lifted.y };
     const a = (1 - k) * (1 - k);
     const b = 2 * (1 - k) * k;
     const cc = k * k;
     return {
-      x: a * lifted.x + b * c.x + cc * s.x,
-      y: a * lifted.y + b * c.y + cc * s.y,
-      d: lerp(lifted.d, s.d, k),
+      x: a * from.x + b * c.x + cc * s.x,
+      y: a * from.y + b * c.y + cc * s.y,
+      d: lerp(from.d, s.d, k),
     };
   };
 
   onFrame((t) => {
     if (t < LIFT || t >= t1) return;
     lines.forEach((l, i) => {
-      l.style.translate = `${side(i) * driftAt(t)}px 0`;
+      l.style.translate = `${side(i) * driftAt(t)}px ${driftYOf(i) * driftYAt(t)}px`;
     });
     pushEl.style.scale = String(pushAt(Math.min(t, EXIT)));
     const o = stopAt(EXIT);

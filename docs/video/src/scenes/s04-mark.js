@@ -183,20 +183,26 @@ export function build({ el, u, W, H, portrait, t0, t1, hostDot, onFrame, waitFor
       glow: lerp(from().glow ?? 0.4, 0.14, span(t, START, HOME)) + 0.12 * b * (0.5 + 0.5 * pulse),
     };
   };
+  /** The shrink starts in place as the arcs lift (7.80), before the fall, so it is spread over 0.325 s. */
+  const SHRINK = [LEAVE, t1];
+  const sineInOut = (k) => 0.5 - 0.5 * Math.cos(Math.PI * k);
   hostDot(START, DROP[1], (t) => {
-    const h = held(Math.min(t, DROP[0]));
-    if (t <= DROP[0]) return held(t);
+    const h = held(Math.min(t, SHRINK[0]));
+    if (t <= SHRINK[0]) return held(t);
+    // Size: from the mark's centre to composition 5's dot at an even rate
+    // to the eye — geometric, not linear — over 0.325 s.
+    const ks = sineInOut(span(t, ...SHRINK));
+    const d = h.d * (pick().d / h.d) ** ks;
+    const glow = lerp(h.glow, pick().glow ?? PICKUP.glow, span(t, ...SHRINK));
+    if (t <= DROP[0]) return { x: h.x, y: h.y, d, glow };
     const k = span(t, ...DROP);
     const fall = easeInOut(k);
     // Straight down out of the mark first, then across: it never crosses an arc.
     return {
       x: lerp(h.x, pick().x, fall * fall),
       y: lerp(h.y, pick().y, fall),
-      // Ease-in: it lets go of the mark slowly, then shrinks to its new size.
-      // Smooth at both ends, so the last frames before the cut shrink gently
-      // into composition 5's size rather than in one step.
-      d: lerp(h.d, pick().d, easeInOut(k)),
-      glow: lerp(h.glow, pick().glow ?? PICKUP.glow, k),
+      d,
+      glow,
     };
   });
 }
