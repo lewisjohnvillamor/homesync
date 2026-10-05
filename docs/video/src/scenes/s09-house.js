@@ -593,6 +593,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     const a = 1 - tail;
     return g <= a ? v * g : v * a + v * (g - a) - (v * (g - a) ** 2) / (2 * tail);
   };
+  const LIT0 = 0.05;
   const lightBase = [];
   scene.traverse((o) => { if (o.isLight) lightBase.push([o, o.intensity]); });
   const envBase = scene.environmentIntensity;
@@ -603,9 +604,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // The house comes up with light, never with opacity: solid from its first
     // frame (a dark model on the dark ground), lit over 17.40–17.80 as
     // composition 8's sheet lifts off it.
-    const lit = smooth(span(t, 17.4, 17.8));
+    // It starts just above the ground's level — never a black hole — and the
+    // screens come up with it.
+    const lit = LIT0 + (1 - LIT0) * smooth(span(t, 17.4, 17.8));
     for (const [light, base] of lightBase) light.intensity = base * lit;
     scene.environmentIntensity = envBase * lit;
+    for (const d of devices) d.screen.material.emissiveIntensity = lit;
 
     const progress = 0.46 + 0.012 * (t - t0);
     for (const d of devices) paintPlaying(d.screen, progress);
