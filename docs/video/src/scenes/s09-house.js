@@ -176,7 +176,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // No fog: the model sits in a seamless brand-coloured room. The floor only
   // takes the plinth's shadow, so everything around the model is exactly the
   // background colour.
-  scene.fog = null;
+  // Fog in the ground colour, used only for the house's entry (see the frame
+  // hook); far past everything once it has emerged.
+  scene.fog = new THREE.Fog(BRAND.bg.clone(), 1000, 2000);
   ground.material = new THREE.ShadowMaterial({ opacity: 0.32 });
   key.shadow.camera.left = -4;
   key.shadow.camera.right = 4;
@@ -584,32 +586,30 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
-  /** A bar's grown fraction at t: the one shared speed, easing to rest over its last 0.15 s. */
+  /** A bar's grown fraction at t: the one shared speed, easing to rest over its last 0.3 s. */
   const growAt = (d, t) => {
     const g = clamp01((t - d.start) / d.late);
-    const tail = Math.min(1, 0.15 / d.late);
+    const tail = Math.min(1, 0.3 / d.late);
     // Constant speed, then a constant deceleration to rest exactly at 1.
     const v = 1 / (1 - tail / 2);
     const a = 1 - tail;
     return g <= a ? v * g : v * a + v * (g - a) - (v * (g - a) ** 2) / (2 * tail);
   };
-  const LIT0 = 0.05;
-  const lightBase = [];
-  scene.traverse((o) => { if (o.isLight) lightBase.push([o, o.intensity]); });
-  const envBase = scene.environmentIntensity;
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
   onFrame((t) => {
     if (t < RENDER[0] || t > RENDER[1]) return;
     poseCamera(camera, t);
-    // The house comes up with light, never with opacity: solid from its first
-    // frame (a dark model on the dark ground), lit over 17.40–17.80 as
-    // composition 8's sheet lifts off it.
-    // It starts just above the ground's level — never a black hole — and the
-    // screens come up with it.
-    const lit = LIT0 + (1 - LIT0) * smooth(span(t, 17.4, 17.8));
-    for (const [light, base] of lightBase) light.intensity = base * lit;
-    scene.environmentIntensity = envBase * lit;
-    for (const d of devices) d.screen.material.emissiveIntensity = lit;
+    // The house emerges from the ground colour, never with opacity: at 17.40
+    // every pixel of it is exactly the background, and over 0.4 s, as
+    // composition 8's sheet lifts off, it comes up evenly — solid throughout
+    // (no see-through walls), never darker than the ground. Fog in the ground
+    // colour does it: with `near` far behind the camera, its blend is the same
+    // (1 − emerge) at every depth across the model.
+    const emerge = smooth(span(t, 17.4, 17.8));
+    const camD = camera.position.distanceTo(frame.target);
+    const A = 1e4;
+    scene.fog.near = -A;
+    scene.fog.far = emerge < 1 ? (camD + A) / Math.max(1e-6, 1 - emerge) - A : 1e12;
 
     const progress = 0.46 + 0.012 * (t - t0);
     for (const d of devices) paintPlaying(d.screen, progress);
