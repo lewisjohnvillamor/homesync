@@ -33,6 +33,11 @@ const LABEL = 'Open on the LAN      : ';
 const URL = 'http://192.168.1.50:8080';
 const CW = 0.6; // JetBrains Mono advance, in em
 
+/** The command types itself out between the window's arrival and Enter. */
+const TYPE = [24.47, 24.92];
+/** Characters of the command typed by time t. */
+export const typedAt = (t) => Math.min(CMD.length, Math.max(0, Math.floor(((t - TYPE[0]) / (TYPE[1] - TYPE[0])) * CMD.length + 1e-6)));
+
 const expoOut = (k) => (k >= 1 ? 1 : 1 - 2 ** (-10 * k));
 const cubicOut = (k) => 1 - (1 - k) ** 3;
 const cubicIn = (k) => k * k * k;
@@ -56,9 +61,11 @@ export function terminalGeo(W, H, u, portrait) {
 }
 
 /** The window's scale about the frame centre at time t: arrives, pushes, falls away. */
-export function windowScale(t) {
+export function windowScale(t, portrait = false) {
   const arrive = lerp(0.93, 1, expoOut(span(t, T0 - 0.18, T0 + 0.45)));
-  const push = lerp(1, 1.09, span(t, T0, COLLAPSE));
+  // 9:16's window and type are smaller, so the same push moves fewer pixels:
+  // it starts a little further back and moves fastest before Enter.
+  const push = portrait ? lerp(0.9, 1.09, span(t, T0, COLLAPSE) ** 0.6) : lerp(1, 1.09, span(t, T0, COLLAPSE));
   const leave = lerp(1, 2.8, cubicIn(span(t, GONE, 26.875)));
   return arrive * push * leave;
 }
@@ -71,9 +78,9 @@ function cell(g, row, col) {
 /** The cursor (the film's dot) at time t, in frame px. */
 export function cursorAt(t, g) {
   const tt = Math.min(t, GONE);
-  // The command ends at column 21 ("$ " + 19 characters); the cursor sits
-  // one space after it.
-  const a = cell(g, 0, 2 + CMD.length + 0.6);
+  // The cursor follows the typing ("$ " + the characters typed so far) and
+  // sits one space after the command once it is all there.
+  const a = cell(g, 0, 2 + typedAt(tt) + 0.6);
   const b = cell(g, 1, 0);
   const c = cell(g, 1 + g.outRows, 0);
   const k1y = cubicOut(span(tt, ENTER + 0.02, ENTER + 0.14));
@@ -81,7 +88,7 @@ export function cursorAt(t, g) {
   const k2 = cubicOut(span(tt, PRINT - 0.12, PRINT + 0.04));
   let x = lerp(a.x, b.x, k1x);
   let y = lerp(lerp(a.y, b.y, k1y), c.y, k2);
-  const s = windowScale(tt);
+  const s = windowScale(tt, g.portrait);
   x = g.W / 2 + (x - g.W / 2) * s;
   y = g.H / 2 + (y - g.H / 2) * s;
   // The key press: a dip on Enter, a smaller one as the line prints.
@@ -118,7 +125,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
       <div style="position:absolute;left:0;right:0;top:0;height:${g.bar}px;background:var(--surface-2);border-bottom:${1.5 * u}px solid var(--line)">${dots}</div>
     </div>
     <div class="txt" style="position:absolute;left:0;top:0;font:400 ${g.f}px/${g.lineH}px var(--mono);white-space:pre;color:var(--text)">
-      <div class="l0" style="position:absolute;left:${g.textX}px;top:${g.textY}px"><span style="color:var(--text-dim)">$ </span>${CMD}</div>
+      <div class="l0" style="position:absolute;left:${g.textX}px;top:${g.textY}px"><span style="color:var(--text-dim)">$ </span><span class="cmd" style="display:inline-block">${CMD}</span></div>
       <div class="l1" style="position:absolute;left:${g.textX}px;top:${g.textY + g.lineH}px;display:flex;align-items:center;gap:${g.f * 0.55}px">
         ${
           portrait
@@ -136,9 +143,10 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
   const txt = el.querySelector('.txt');
   const l1 = el.querySelector('.l1');
   const cap = el.querySelector('.cap');
+  const cmd = el.querySelector('.cmd');
 
   onFrame((t) => {
-    const s = windowScale(t);
+    const s = windowScale(t, portrait);
     const fade = 1 - clamp01((t - 26.77) / 0.1);
     const appear = clamp01((t - 24.3) / 0.1);
     // The window waits under the leaving words; its text comes up once
@@ -151,6 +159,7 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
     const grow = expoOut(span(t, PRINT - 0.12, PRINT + 0.3));
     win.style.height = `${g.winH * lerp(portrait ? 0.78 : 0.8, 1, grow)}px`;
     txt.style.transform = `scale(${s})`;
+    cmd.style.clipPath = `inset(-20% ${(CMD.length - typedAt(t)) * g.cw}px -20% 0)`;
 
     // The printed line: appears whole, as terminal output does, with the
     // briefest settle; then collapses into the cursor below its first cell.
