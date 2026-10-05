@@ -177,13 +177,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // takes the plinth's shadow, so everything around the model is exactly the
   // background colour.
   scene.fog = null;
-  ground.material = new THREE.ShadowMaterial({ opacity: 0.55 });
+  ground.material = new THREE.ShadowMaterial({ opacity: 0.32 });
   key.shadow.camera.left = -4;
   key.shadow.camera.right = 4;
   key.shadow.camera.top = 4;
   key.shadow.camera.bottom = -4;
   key.shadow.mapSize.set(2048, 2048);
-  key.shadow.radius = 4;
+  key.shadow.radius = 9;
 
   const house = new THREE.Group();
   scene.add(house);
@@ -370,7 +370,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   if (portrait) camera.setViewOffset(W, H, -36 * u, -200 * u, W, H);
   const frame = portrait
     ? { distance: 18.5, elevation: 54, target: new THREE.Vector3(0.1, 0.45, -0.02) }
-    : { distance: 9.3, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 2.1, -0.05) };
+    : { distance: 9.9, elevation: HOUSE_VIEW.elevation, target: new THREE.Vector3(-0.62, 1.95, -0.05) };
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
@@ -584,10 +584,19 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
+  const lightBase = [];
+  scene.traverse((o) => { if (o.isLight) lightBase.push([o, o.intensity]); });
+  const envBase = scene.environmentIntensity;
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
   onFrame((t) => {
     if (t < RENDER[0] || t > RENDER[1]) return;
     poseCamera(camera, t);
+    // The house comes up with light, never with opacity: solid from its first
+    // frame (a dark model on the dark ground), lit over 17.40–17.80 as
+    // composition 8's sheet lifts off it.
+    const lit = smooth(span(t, 17.4, 17.8));
+    for (const [light, base] of lightBase) light.intensity = base * lit;
+    scene.environmentIntensity = envBase * lit;
 
     const progress = 0.46 + 0.012 * (t - t0);
     for (const d of devices) paintPlaying(d.screen, progress);
