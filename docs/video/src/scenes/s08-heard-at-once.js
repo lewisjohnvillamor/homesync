@@ -11,9 +11,12 @@ export function build({ el, tl, u, W, portrait, t0 }) {
     <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1480 * u : 860 * u}px;text-align:right;
          font:700 ${portrait ? 86 * u : 80 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);white-space:nowrap">Scheduled to be heard<br>at one agreed instant.</div>`;
   const line = el.querySelector('.line');
-  // In from the right as the tilt settles, set by ~16.3 s, starting 15.9 s; drifts; leaves upwards with the plane as it lifts (17.40–17.60), before the lift so it is never over the house.
-  tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0 + 0.27);
-  tl.to(line, { x: -30 * u, duration: 17.4 - (t0 + 0.77), ease: 'sine.inOut' }, t0 + 0.77);
-  tl.to(line, { y: -60 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 17.4);
+  // In from the right on the cut, as the plane starts to tilt (the lower
+  // right stays clear of the diagram throughout the pull back), so the frame
+  // keeps a line through it; set by ~16.0 s; drifts; leaves fast (17.16–17.32),
+  // before any device icon moves towards the house.
+  tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0);
+  tl.to(line, { x: -30 * u, duration: 17.16 - (t0 + 0.5), ease: 'sine.inOut' }, t0 + 0.5);
+  tl.to(line, { y: -60 * u, opacity: 0, duration: 0.16, ease: 'power2.in' }, 17.16);
   void W;
 }

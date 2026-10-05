@@ -150,7 +150,7 @@ export function joinTrack(W, H, u, portrait) {
 
   // Screen coordinates within the phone (fractions of the glass).
   const button = { x: 0.03, y: 0.5, w: 0.94, h: 0.11 };
-  const face = { fx: 0.91, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end
+  const face = { fx: 0.885, fy: button.y + button.h / 2 }; // where the dot presses: the button's free right end, its own space beside the label
   const wait = { fx: portrait ? 0.955 : 0.895, fy: portrait ? 0.72 : 0.84 }; // where it rides in, below where the button will be
   const indicator = { fx: 0.83, fy: 0.43 };
   const fs = phoneW * 0.088;
@@ -222,7 +222,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const roomScale = portrait ? 1 : 1.12;
   /** The press ring's circle: around the dot, inside the button's free right end. */
   // 9:16: no wider than the button's free end, so it never overhangs its edge or nears the label.
-  const well = portrait ? Math.min(button.h * glassH * 0.62, 2 * (button.x + button.w - face.fx) * glassW * 0.8) : button.h * glassH * 0.62;
+  // Both formats: a tenth of the glass across, so it sits ~3 % of the glass
+  // inside the button's right end and ~6 % clear of the label's last letter.
+  const well = 0.1 * glassW;
 
   // --- the laptop ----------------------------------------------------------
   const lid = 14 * u;
@@ -262,8 +264,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
           <div style="position:absolute;left:10%;top:9%;width:38%;height:${fs * 0.5}px;border-radius:${fs}px;background:var(--line-strong)"></div>
           <div style="position:absolute;left:10%;top:16%;width:62%;height:${fs * 0.36}px;border-radius:${fs}px;background:var(--line)"></div>
           <div class="btn" style="position:absolute;left:${button.x * 100}%;top:${button.y * 100}%;width:${button.w * 100}%;height:${button.h * 100}%;
-               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-right:${glassW * (button.x + button.w - face.fx + 0.04)}px;justify-content:center;
-               display:flex;align-items:center;font:600 ${fs * 0.92 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
+               border-radius:${fs * 0.5}px;background:var(--accent);color:var(--accent-ink);box-sizing:border-box;padding-left:${glassW * 0.035}px;justify-content:flex-start;
+               display:flex;align-items:center;font:600 ${fs * 0.88 * tScale}px/1 var(--sans);white-space:nowrap;letter-spacing:-0.03em;overflow:hidden">Enable audio &amp; join
           <div class="pressed" style="position:absolute;inset:0;background:var(--accent-ink);opacity:0"></div>
           <div class="sweep" style="position:absolute;left:0;bottom:0;height:12%;width:100%;background:var(--text);opacity:0;transform-origin:0 50%"></div>
           <div class="socket" style="display:none;position:absolute;left:${((face.fx - button.x) / button.w) * 100}%;top:50%;width:${42 * u}px;height:${42 * u}px;margin:${-21 * u}px 0 0 ${-21 * u}px;

@@ -19,10 +19,13 @@
  *     exactly the house camera's angle (HOUSE_VIEW: elevation, and the same
  *     turn about the vertical). The laptop's bar lands, then the TV's; then
  *     every start marker fires, the longest first, and the three pulses
- *     arrive on T together. Three lanes stay three lanes. The labels go; the
- *     plane — lanes and its own opaque ground, one card — lifts towards the
- *     camera and away, uncovering the house waiting underneath at the same
- *     angle, while the dot is let go and flies down to its place over it.
+ *     arrive on T together. Three lanes stay three lanes. The labels go; each
+ *     device icon travels onto its own 3D model in the house (whose screen
+ *     rectangles composition 9 publishes) and stands up to face the camera;
+ *     then the plane — lanes and its own opaque ground, one sheet — comes up
+ *     towards the camera and drops out of the frame, uncovering the lit house
+ *     underneath, each icon dissolving into its model as it is uncovered,
+ *     while the dot is let go and flies down to its place over it.
  *
  * s07 and s08 add only their lines. This module owns the picture and the dot.
  */
@@ -48,13 +51,19 @@ const C7 = 13.125;
 const C8 = 15.625;
 const C9 = 18.125;
 /**
- * The lift: the plane — lanes and its own opaque ground together, one card —
- * rises towards the camera and away over LIFT_SPAN, uncovering the house
- * that waits underneath from the bottom of the frame up. Nothing of the
- * diagram is ever seen through or over the house; it only moves off it.
+ * The hand-over into the house (composition 9 is drawn, fully lit, underneath
+ * from 17.40). Over HAND each flat device icon travels across the plane onto
+ * its own 3D model's place on screen (handoff.houseDevicesAt) and stands up
+ * to face the camera, its lane's start running with it. Then, over LIFT_SPAN,
+ * the plane (lanes and its own opaque ground, one sheet) comes up towards the
+ * camera and drops out of the frame; its leading edge uncovers the house, and
+ * each icon dissolves into its model only as the edge passes it.
  */
+const HAND = [17.3, 17.68];
 const LIFT = 17.85;
-const LIFT_SPAN = [17.62, 17.92];
+const LIFT_SPAN = [17.64, 17.94];
+/** The labels, the T label and the example tag leave before any icon moves. */
+const LABELS_OUT = [17.16, 17.3];
 /**
  * The dot stays where T was as the plane drops away beneath it (everything of
  * the diagram moves away from it, nothing crosses it), then is let go and the
@@ -84,9 +93,6 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   const label = { laptop: 'laptop', phone: 'phone', tv: 'TV' };
   const barH = 18 * u;
   const ruleH = 14 * u;
-  /** How far the lift card reaches above T: just past the top of the frame in composition 8. */
-  // Just above T: the house is never above the diagram, so the edge sits on plain ground at the start.
-  const CARD_TOP = 140 * u;
   const ic = L.phoneIcon;
   const devW = 180 * u * L.iconScale;
   const devH = 116 * u * L.iconScale;
@@ -100,35 +106,44 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   /** 9:16: every name (the phone's too) is right-aligned, ending here, left of its lane's start. */
   const NAME_R = L.laneStart + 20 * u;
   const NAME_FS = 30 * u;
+  /** 9:16, composition 8: how much the names grow, and how far each steps sideways (screen px) to stay clear of its lane. */
+  const NAME_GROW = 1.4;
+  const NAME_DX = { laptop: 0, phone: 0, tv: 0 };
   /** Width of each name's " · NN ms" (JetBrains Mono advances 0.6 em): computed, never read from the layout. */
   const NMS_W = Object.fromEntries(Object.entries(DELAY_MS).map(([k, v]) => [k, ` · ${v} ms`.length * 0.6 * NAME_FS]));
   // Above the lane, like its ms label, so a name and its delay share one side of one lane.
   const nameY = (kind) => L.lanes[kind] - (portrait ? 118 : 66) * u;
   const ackD = devW * 0.72;
+  /**
+   * The device icons live on their own copy of the plane (same camera, drawn
+   * above it), so at the hand-over they can stay on the house's models while
+   * the plane itself lifts away.
+   */
+  const iconHtml = (kind) => {
+    const y = L.lanes[kind];
+    return kind === 'phone'
+      ? `<div class="icon icon-${kind}" style="position:absolute;left:${ic.x - ic.w / 2}px;top:${y - ic.h / 2}px;width:${ic.w}px;height:${ic.h}px;transform-origin:50% 50%">${phoneHtml(
+          ic.w,
+          ic.h,
+          roomHtml(ic.w, false),
+        )}</div>`
+      : `<div class="icon icon-${kind}" style="position:absolute;left:${L.iconX - devW / 2}px;top:${y - devH / 2}px;width:${devW}px;height:${devH}px;transform-origin:50% 50%">${
+          kind === 'laptop' ? laptopSvg() : tvSvg()
+        }</div>`;
+  };
   const lane = (kind) => {
     const y = L.lanes[kind];
-    const icon =
-      kind === 'phone'
-        ? `<div class="icon" style="position:absolute;left:${ic.x - ic.w / 2}px;top:${y - ic.h / 2}px;width:${ic.w}px;height:${ic.h}px;transform-origin:50% 50%">${phoneHtml(
-            ic.w,
-            ic.h,
-            roomHtml(ic.w, false),
-          )}</div>`
-        : `<div class="icon" style="position:absolute;left:${L.iconX - devW / 2}px;top:${y - devH / 2}px;width:${devW}px;height:${devH}px;transform-origin:50% 50%">${
-            kind === 'laptop' ? laptopSvg() : tvSvg()
-          }</div>`;
     const w = DELAY_MS[kind] * L.pxPerMs;
     return `
       <div class="lane lane-${kind}">
         <div class="rule" style="position:absolute;left:${L.laneStart}px;top:${y - ruleH / 2}px;width:${L.laneEnd - L.laneStart}px;height:${ruleH}px;
-             background:var(--text-faint);opacity:0.7;border-radius:${ruleH / 2}px"></div>
-        ${icon}
+             background:var(--text-faint);opacity:0.7;border-radius:${ruleH / 2}px;transform-origin:0 50%"></div>
         <div class="ackring" style="position:absolute;left:${L.iconX - ackD / 2}px;top:${y - ackD / 2}px;width:${ackD}px;height:${ackD}px;border-radius:50%;
              border:${5 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
         <div class="name" style="position:absolute;${portrait
           ? `left:${L.laneStart + 40 * u - 620 * u}px;width:${600 * u}px;text-align:right;transform-origin:calc(100% - ${kind === 'phone' ? NMS_W.phone : 0}px) 100%;`
           : `left:${NAME_X}px;transform-origin:0 100%;`}top:${nameY(kind)}px;
-             font:600 ${30 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap">${label[kind]}<span class="nms" style="font:500 ${30 * u}px/1 var(--mono);opacity:0"> · ${DELAY_MS[kind]} ms</span></div>
+             font:600 ${30 * u}px/1 var(--sans);color:var(--text-dim);white-space:nowrap"><span class="nin" style="display:inline-block;transform-origin:0 100%">${label[kind]}<span class="nms" style="font:500 ${30 * u}px/1 var(--mono);opacity:0"> · ${DELAY_MS[kind]} ms</span></span></div>
         <div class="tick" style="position:absolute;left:${L.tX - 5 * u}px;top:${y - 34 * u}px;width:${10 * u}px;height:${68 * u}px;border-radius:${5 * u}px;background:var(--accent)"></div>
         <div class="flash" style="position:absolute;left:${L.tX - 30 * u}px;top:${y - 30 * u}px;width:${60 * u}px;height:${60 * u}px;border-radius:50%;
              border:${4 * u}px solid var(--accent);box-sizing:border-box;opacity:0"></div>
@@ -149,26 +164,42 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
 
   // The camera: perspective matching the house camera's field of view, so
   // the tilted plane foreshortens the way the model does.
-  const persp = (H / 2) / Math.tan((HOUSE_VIEW.fov / 2) * (Math.PI / 180));
+  // 16:9 is drawn with a longer lens than the house's (10° against 30°): at
+  // this tilt and turn the TV's bar runs towards the camera and otherwise
+  // reads ~25 % long against the laptop's.
+  // The hand-over no longer depends on the two lenses matching: the icons are
+  // placed on the models' measured screen rectangles.
+  const persp = (H / 2) / Math.tan(((portrait ? HOUSE_VIEW.fov : 10) / 2) * (Math.PI / 180));
+  /** The ground's soft leading edge, drawn above the frame until the plane lifts. */
+  const FEATHER = 90 * u;
   el.innerHTML = `
     <style>.scene-6 .icon svg [stroke]{stroke:var(--text-faint)}</style>
-    <div class="ground" style="position:absolute;inset:0;background:var(--bg)"></div>
-    <div class="exv example-tag" style="position:absolute;z-index:3;left:0;top:0;--tag-size:${(portrait ? 22 : 24) * u}px;opacity:0">example values</div>
-    <div class="line6" style="position:absolute;z-index:2;left:${portrait ? 70 * u : 128 * u}px;top:${portrait ? 150 * u : 96 * u}px;
-         font:700 ${portrait ? 84 * u : 76 * u}px/1.08 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${portrait ? 'Every device is told<br>one instant…' : 'Every device is told one instant…'}</div>
-    <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
-      <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
-        <div class="card" style="position:absolute;left:${-2600 * u}px;top:${L.tTop - CARD_TOP}px;width:${5200 * u + W}px;height:${CARD_TOP + 2600 * u}px;display:none;
-             background:linear-gradient(to bottom, transparent, var(--bg) ${240 * u}px)"></div>
-        ${order.map(lane).join('')}
+    <div class="sheet" style="position:absolute;inset:0">
+      <div class="ground" style="position:absolute;left:${-40 * u}px;right:${-40 * u}px;top:${-FEATHER}px;bottom:${-40 * u}px;
+           background:linear-gradient(to bottom, transparent, var(--bg) ${FEATHER}px)"></div>
+      <div class="persp" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
+        <div class="world" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
+          ${order.map(lane).join('')}
         <div class="tline" style="position:absolute;left:${L.tX - 3 * u}px;top:${L.tTop}px;width:${6 * u}px;height:${L.lanes.tv + 70 * u - L.tTop}px;
              background:var(--accent);transform-origin:50% 0;border-radius:${3 * u}px"></div>
         <div class="tlabel" style="position:absolute;left:${L.tX + 30 * u}px;top:${L.tTop - 30 * u}px;transform-origin:${-30 * u}px ${30 * u}px;font:700 ${56 * u}px/1 var(--sans);color:var(--accent)">T</div>
         <div class="anchor" style="position:absolute;left:${L.tX - 13 * u}px;top:${L.tTop - 13 * u}px;width:${26 * u}px;height:${26 * u}px"></div>
+        </div>
       </div>
-    </div>`;
+    </div>
+    <div class="persp2" style="position:absolute;inset:0;perspective:${persp}px;perspective-origin:50% 50%">
+      <div class="world2" style="position:absolute;inset:0;transform-style:preserve-3d;transform-origin:0 0">
+        ${order.map(iconHtml).join('')}
+      </div>
+    </div>
+    <div class="exv example-tag" style="position:absolute;z-index:3;left:0;top:0;--tag-size:${(portrait ? 22 : 24) * u}px;opacity:0">example values</div>
+    <div class="line6" style="position:absolute;z-index:2;left:${portrait ? 70 * u : 128 * u}px;top:${portrait ? 150 * u : 96 * u}px;
+         font:700 ${portrait ? 84 * u : 76 * u}px/1.08 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${portrait ? 'Every device is told<br>one instant…' : 'Every device is told one instant…'}</div>`;
 
   const perspEl = el.querySelector('.persp');
+  const persp2 = el.querySelector('.persp2');
+  const world2 = el.querySelector('.world2');
+  const sheet = el.querySelector('.sheet');
   const line6 = el.querySelector('.line6');
   // The diagram's own ground. Transparent while composition 5's phone is
   // still shrinking into its icon underneath; opaque after, so the house
@@ -178,15 +209,15 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   const tline = el.querySelector('.tline');
   const tlabel = el.querySelector('.tlabel');
   const anchor = el.querySelector('.anchor');
-  const card = el.querySelector('.card');
   const exv = el.querySelector('.exv');
   const lanes = Object.fromEntries(
     order.map((kind) => {
       const root = el.querySelector(`.lane-${kind}`);
       const q = (c) => root.querySelector(c);
+      const icon = el.querySelector(`.icon-${kind}`);
       return [kind, {
-        icon: q('.icon'), ackring: q('.ackring'), name: q('.name'), nms: q('.nms'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
-        screen: q('.screen'), start: q('.start'), fire: q('.fire'), pulse: q('.pulse'), ms: q('.ms'),
+        icon, ackring: q('.ackring'), name: q('.name'), nin: q('.nin'), nms: q('.nms'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
+        screen: icon.querySelector('.screen'), start: q('.start'), fire: q('.fire'), pulse: q('.pulse'), ms: q('.ms'),
         w: DELAY_MS[kind] * L.pxPerMs,
       }];
     }),
@@ -225,7 +256,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     fx: L.tX,
     fy: L.lanes.phone,
     px: (portrait ? W - 125 * u : 1650 * u) - 24 * u * sine(span(t, C7 + 0.6, C8)),
-    py: portrait ? 800 * u : 470 * u,
+    // 9:16 sits lower, so the group and the line below it share the frame's height.
+    py: portrait ? 900 * u : 470 * u,
     tilt: 0,
     rot: 0,
   });
@@ -238,7 +270,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       fx: portrait ? (L.iconX + SHIFT8 - devW / 2 + L.tX + 40 * u) / 2 : (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
       px: W / 2 + (portrait ? 0 : 50 * u) + (portrait ? 0 : 30) * u * k,
-      py: (portrait ? H * 0.41 : H * 0.45) + 10 * u * k,
+      py: (portrait ? H * 0.41 - 120 * u : H * 0.45) + 10 * u * k,
       tilt: 90 - elevation,
       // 9:16: the house's turn (−70°) would stand the lanes on end, so the plane
       // is held at −30° (lanes within ~25° of horizontal) and turns to the
@@ -308,30 +340,77 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     elx.style.transform = `translate(${wx - ax}px, ${wy - ay}px) scale(${k * pop}) ${tail}`.trim();
   };
 
+  // --- the plane on screen ------------------------------------------------------
+  // The same projection the browser applies to .world (CSS perspective about
+  // the frame centre), so a point on the plane can be placed at a screen point
+  // by arithmetic alone.
+  const project = (c, x, y) => {
+    const X = (x - c.fx) * c.s;
+    const Y = (y - c.fy) * c.s;
+    const r = (c.rot * Math.PI) / 180;
+    const a = (c.tilt * Math.PI) / 180;
+    const X1 = X * Math.cos(r) - Y * Math.sin(r);
+    const Y1 = X * Math.sin(r) + Y * Math.cos(r);
+    const Z = Y1 * Math.sin(a);
+    const k = persp / (persp - Z);
+    return { x: W / 2 + (X1 + c.px - W / 2) * k, y: H / 2 + (Y1 * Math.cos(a) + c.py - H / 2) * k, k };
+  };
+  /** The plane point drawn at screen point (sx, sy), and the depth scale there. */
+  const unproject = (c, sx, sy) => {
+    const r = (c.rot * Math.PI) / 180;
+    const a = (c.tilt * Math.PI) / 180;
+    const Y1 = (persp * (sy - c.py)) / (persp * Math.cos(a) + (sy - H / 2) * Math.sin(a));
+    const k = persp / (persp - Y1 * Math.sin(a));
+    const X1 = (sx - W / 2) / k + W / 2 - c.px;
+    const X = X1 * Math.cos(r) + Y1 * Math.sin(r);
+    const Y = -X1 * Math.sin(r) + Y1 * Math.cos(r);
+    return { x: X / c.s + c.fx, y: Y / c.s + c.fy, k };
+  };
+  /** The lift at time t: the sheet's transform and its leading (top) edge on screen; null before it. */
+  const liftAt = (t) => {
+    const k = span(t, ...LIFT_SPAN);
+    if (k <= 0) return null;
+    // Leaves fast: it is already moving on its first frame and accelerates out.
+    const e = 0.5 * k + 0.5 * k * k;
+    const o = project(cam(LIFT_SPAN[0]), L.tX, L.tTop);
+    const g = 1 + 1.4 * e;
+    // At the end the feathered top edge is below the frame's bottom.
+    const D = e * (H + 10 * u - o.y + (FEATHER + o.y) * (1 + 1.4));
+    // Where the ground becomes solid (its feather ends) and where it starts.
+    return { o, g, D, solid: o.y - o.y * g + D, top: o.y - (FEATHER + o.y) * g + D };
+  };
+
+  /** As `pin`, but returns where the anchor lands on the plane and its scale there, instead of writing a transform. */
+  const pinAt = (c, c6, ax, ay, sx, sy, scr, w) => {
+    if (w <= 0) return { x: ax, y: ay, m: 1 };
+    const ux = c.px + (ax - c.fx) * c.s;
+    const uy = c.py + (ay - c.fy) * c.s;
+    const u6 = c6.px + (ax - c6.fx) * c6.s;
+    const x = Math.max(lerp(ux, sx, w), lerp(u6, sx, w));
+    const y = lerp(uy, sy, w);
+    return { x: c.fx + (x - c.px) / c.s, y: c.fy + (y - c.py) / c.s, m: lerp(c.s, scr, w) / c.s };
+  };
+
   /** Where the dot (T) sits once the camera is frozen for the lift; set each frame, the same value from LIFT_SPAN[0] on. */
   let restDot = null;
 
   const frame = (t) => {
     // The camera holds still for the lift, so the lift alone moves the plane.
     const c = cam(Math.min(t, LIFT_SPAN[0]));
-    world.style.transform =
-      `translate(${c.px}px, ${c.py}px) rotateX(${c.tilt}deg) rotateZ(${c.rot}deg) scale(${c.s}) translate(${-c.fx}px, ${-c.fy}px)`;
-    // The flat ground covers the frame until the plane's own card takes over
-    // for the lift; after the lift nothing of this layer is left.
-    // The ground fades fast as the plane lifts, onto the lit house underneath (no mask, no wipe).
-    // Plane and ground fade together over the whole lift (0.3 s) onto the lit house: it never darkens first.
-    // The ground opens as the plane starts to lift, so the lit house is already
-    // there as the lanes fly off it — never a dip through empty ground.
-    ground.style.opacity = t >= ICON_LANDS ? String(1 - sine(span(t, LIFT_SPAN[0], LIFT_SPAN[0] + 0.18))) : '0';
-    // Only drawn for the lift (it is large; the flat ground covers the frame before).
-    card.style.display = 'none';
+    // scale3d, not scale: the icons stand up off the plane at the hand-over,
+    // and a 2D scale would leave their depth unscaled.
+    const camTf = `translate(${c.px}px, ${c.py}px) rotateX(${c.tilt}deg) rotateZ(${c.rot}deg) scale3d(${c.s}, ${c.s}, ${c.s}) translate(${-c.fx}px, ${-c.fy}px)`;
+    world.style.transform = camTf;
+    world2.style.transform = camTf;
+    // The diagram's own opaque ground: transparent while composition 5's phone
+    // is still shrinking into its icon underneath, opaque after. It never
+    // fades: at the lift it leaves with the plane, uncovering the lit house.
+    ground.style.opacity = t >= ICON_LANDS ? '1' : '0';
     // '' (inherit), never 'visible': an explicit 'visible' would show through the layer while the film hides it.
-    perspEl.style.visibility = t < LIFT_SPAN[1] + 0.02 ? '' : 'hidden';
-    // The lift: the plane — its own opaque card under the lanes — grows
-    // (≥ 2×) about the point where T is and falls away down the frame
-    // towards the camera, uncovering the house from the top down. Every part
-    // of the diagram moves away from the dot, so nothing crosses it.
-    perspEl.style.transform = 'none';
+    sheet.style.visibility = t < LIFT_SPAN[1] + 0.02 ? '' : 'hidden';
+    persp2.style.visibility = t < LIFT_SPAN[1] + 0.06 ? '' : 'hidden';
+    // Set at the end of the frame, after T has been measured on the resting plane.
+    sheet.style.transform = 'none';
     // While composition 5's phone shrinks into its icon, the lanes and names
     // draw in behind it: none of them is drawn left of the phone's edge. (The
     // camera is still flat and unmoved then, so world x is frame x.) The laptop
@@ -341,6 +420,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       elx.style.clipPath = clipX === null ? 'none' : `inset(0 0 0 ${Math.max(0, clipX - left)}px)`;
     };
     perspEl.style.clipPath = 'none';
+    // The hand-over: where each house model is on screen, as a point on this plane.
+    const hand = easeInOut(span(t, ...HAND));
+    const house = hand > 0 ? handoff.houseDevicesAt?.(t) ?? null : null;
+    const lift = liftAt(t);
 
     // Composition 6's line: set by 11.30 s, drifting, gone before the rush.
     const in6 = expoOut(span(t, t0 + 0.1, t0 + 0.6));
@@ -361,9 +444,12 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       const iconIn = kind === 'phone' ? (t >= ICON_LANDS ? 1 : 0) : easeOut(span(t, 10.62 + i * 0.03, 10.86 + i * 0.03));
       // In the close-up the laptop and TV are out of shot; they come back only
       // once the phone has shrunk back into its slot, so no two icons overlap.
-      const iconAway = kind === 'phone' ? 0 : easeInOut(span(rush, 0.05, 0.4)) * (1 - easeInOut(span(back, 0.4, 0.75)));
+      // They return as the pull back starts — at 60 % at once (15.42–15.56),
+      // so the stack is there as the plane tilts — and fully once the phone has
+      // shrunk back into its slot.
+      const iconBack = 0.6 * easeInOut(span(back, 0.06, 0.3)) + 0.4 * easeInOut(span(back, 0.4, 0.75));
+      const iconAway = kind === 'phone' ? 0 : easeInOut(span(rush, 0.05, 0.4)) * (1 - iconBack);
       const iconK = iconIn * (1 - iconAway);
-      l.icon.style.opacity = String(iconK);
       const reach = REACH[kind];
       // The device lights the moment T crosses its lane, and stays lit, dimming a little.
       // In the hold each device answers in turn: it pops, its screen floods, a ring opens round it.
@@ -388,21 +474,25 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       // Composition 8: 16:9's laptop and TV a little smaller, so the three icons
       // stand clear of each other; 9:16's icons a little larger (its plane is framed wider).
       const size8 = lerp(1, kind === 'phone' ? (portrait ? 1.15 : 1) : portrait ? 1.15 : 0.86, easeInOut(span(back, 0.3, 1)));
-      if (kind !== 'phone') l.icon.style.transform = `translateX(${(1 - iconIn) * -30 * u + close8}px) scale(${(1 + 0.06 * lit + (portrait ? 0.08 : 0.16) * ack) * size8})`;
+      /** The icon's centre on the plane and its scale, before the hand-over (the phone's is set below). */
+      let place = kind === 'phone' ? null : { x: L.iconX + (1 - iconIn) * -30 * u + close8, y: L.lanes[kind], m: (1 + 0.06 * lit + (portrait ? 0.08 : 0.16) * ack) * size8 };
       // The other lanes step aside during the close-up, so no word is ever cut
       // by the frame edge: their names go first (12.30–12.55, before the rush
       // moves anything), then their lanes as the rush begins.
-      const aside = kind === 'phone' ? 0 : easeInOut(span(rush, 0.03, 0.3)) * (1 - easeInOut(span(back, 0.25, 0.75)));
-      const nameAway = kind === 'phone' ? 0 : easeInOut(span(t, 12.3, 12.55)) * (1 - easeInOut(span(back, 0.4, 0.8)));
-      l.name.style.opacity = String(easeOut(span(t, 10.68, 10.95)) * (1 - nameAway) * (1 - span(t, 17.32, 17.5)));
+      const aside = kind === 'phone' ? 0 : easeInOut(span(rush, 0.03, 0.3)) * (1 - easeInOut(span(back, 0.06, 0.5)));
+      const nameAway = kind === 'phone' ? 0 : easeInOut(span(t, 12.3, 12.55)) * (1 - easeInOut(span(back, 0.35, 0.7)));
+      l.name.style.opacity = String(easeOut(span(t, 10.68, 10.95)) * (1 - nameAway) * (1 - span(t, ...LABELS_OUT)));
       clipFrom(l.name, portrait ? NAME_R - 600 * u : NAME_X);
       clipFrom(l.rule, L.laneStart);
-      l.rule.style.opacity = String((0.7 + 0.3 * ack) * (1 - aside));
+      // At the hand-over the lanes recede (to a fifth) so the travelling icons lead.
+      l.rule.style.opacity = String((0.7 + 0.3 * ack) * (1 - aside) * (1 - 0.8 * easeInOut(span(t, ...HAND))));
       l.rule.style.background = ack > 0.01 ? `color-mix(in srgb, var(--accent) ${Math.round(55 * ack)}%, var(--text-faint))` : 'var(--text-faint)';
       // 9:16, tilted: the lanes stop just past T, so nothing runs to the frame's edge.
       const trimTo = (L.tX + 16 * u - L.laneStart) / (L.laneEnd - L.laneStart);
-      l.rule.style.transformOrigin = '0 50%';
-      l.rule.style.transform = `translateX(${close8}px) scaleX(${lerp(1, trimTo, back) - close8 / (L.laneEnd - L.laneStart)})`;
+      const len0 = L.laneEnd - L.laneStart;
+      /** The lane's two ends on the plane (set below, once the icon's place is known). */
+      const ruleS = { x: L.laneStart + close8, y: L.lanes[kind] };
+      const ruleE = { x: L.laneStart + len0 * lerp(1, trimTo, back), y: L.lanes[kind] };
       l.name.style.color = lit > 0.5 ? 'var(--text)' : 'var(--text-dim)';
       // A tick and a ring flash where T crosses the lane — on the line, never travelling along it.
       const tk = span(t, reach, reach + 0.18);
@@ -440,7 +530,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       // Composition 7: the phone's figure over its bar. Composition 8: each
       // figure joins its device's name ("TV · 210 ms") as its bar lands, so no
       // figure is ever nearer another device, and no label sits by T or a bar.
-      const nmsOn = easeOut(span(t, growFrom + 0.12, growFrom + 0.35)) * span(back, 0.6, 1);
+      // The phone's figure never leaves: as the pull back starts, the "90 ms"
+      // over its bar hands over to "phone · 90 ms" beside it (15.40–15.50).
+      const nmsOn = easeOut(span(t, growFrom + 0.12, growFrom + 0.35)) * (kind === 'phone' ? easeInOut(span(back, 0.03, 0.2)) : span(back, 0.6, 1));
       l.nms.style.opacity = String(nmsOn);
       // Tilted, the labels foreshorten; they grow so they read at ≥ 24 px.
       // 9:16 labels are counter-turned so they read screen-horizontal on the turned plane.
@@ -448,7 +540,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
         ? `scale(${lerp(1, 1.5, back)}) rotate(${-c.rot}deg)`
         : `translate(${-24 * u * back}px, ${-22 * u * back}px) scale(${lerp(1, 1.5, back)})`;
       // Gone before the plane lifts, so no label is ever seen over the house.
-      l.ms.style.opacity = String(msOn * (1 - span(back, 0, 0.35)));
+      l.ms.style.opacity = String(msOn * (1 - easeInOut(span(back, 0.03, 0.2))));
 
       // The start fires, and the bar fills from the device's start to T —
       // the bar itself lighting up, never a separate object travelling.
@@ -466,6 +558,11 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       // In composition 7 the phone stays in shot, pinned enlarged at the lane's left edge.
       // 9:16: every name is counter-turned so it reads screen-horizontal on the
       // turned plane (no-op while the plane is flat), and closes up with its icon.
+      // 9:16, composition 8: the names (with their figures) grow to read on a
+      // phone screen (~1.4×, from the left), stepping up clear of their lanes.
+      const b8 = portrait ? easeInOut(span(back, 0.55, 1)) : 0;
+      // (On an inner box that grows from its left, so the name's own turn is untouched.)
+      l.nin.style.transform = b8 > 0 ? `translate(${NAME_DX[kind] * b8}px, ${-40 * u * b8}px) scale(${lerp(1, NAME_GROW, b8)})` : '';
       const tail = portrait ? `translateX(${close8}px) rotate(${-c.rot}deg)` : '';
       if (kind === 'phone') {
         // The phone is pinned only by the rush itself (not composition 6's
@@ -478,7 +575,19 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
         const sx = portrait ? 160 * u : 140 * u;
         const c6 = camA(t);
         const iy = c.py;
-        pin(l.icon, c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin, (1 + 0.16 * ack) * size8, portrait ? `translateX(${close8 / ((1 + 0.16 * ack) * size8)}px)` : '');
+        const pa = pinAt(c, c6, ic.x, L.lanes.phone, sx, iy, iconScr, wPin);
+        place = { x: pa.x + pa.m * close8, y: pa.y, m: pa.m * (1 + 0.16 * ack) * size8 };
+        // The lane stays attached to the phone as it shrinks back: it starts at
+        // the phone's edge wherever that is left of the lane's own start.
+        // (Only from the rush on; once the phone is back in its slot the lane
+        // draws back to its own start, 15.65–15.9.)
+        const attach = rushOnly(t) * (1 - easeInOut(span(back, 0.5, 0.85)));
+        const edge = place.x + (ic.w / 2) * place.m + 4 * u;
+        if (attach > 0 && edge < ruleS.x) {
+          const kk = Math.min(1, (ruleS.x - edge) / (40 * u));
+          ruleS.y = lerp(ruleS.y, place.y, kk * attach);
+          ruleS.x = lerp(ruleS.x, edge, attach);
+        }
         const ns = portrait ? 1.6 : 1.45;
         if (portrait) {
           // 9:16: over the phone, ending at its right edge (the name's anchor is the end of "phone").
@@ -489,6 +598,33 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
           pin(l.name, c, c6, NAME_X, nameY('phone') + NAME_FS, sx + (ic.w * iconScr) / 2 + 36 * u, iy - 78 * u, ns, wPin);
         }
       } else l.name.style.transform = tail;
+
+      // --- the hand-over: the icon travels onto its model and stands up ---
+      const bw = kind === 'phone' ? ic.w : devW;
+      const bh = kind === 'phone' ? ic.h : devH;
+      let stand = 0;
+      let uncover = 0;
+      if (house && house[kind]) {
+        const R = house[kind];
+        const P = unproject(c, R.x, R.y);
+        // Fitted inside the model's screen rectangle, facing the camera.
+        const m1 = Math.min(R.w / bw, R.h / bh) / (c.s * P.k);
+        place = { x: lerp(place.x, P.x, hand), y: lerp(place.y, P.y, hand), m: place.m * (m1 / place.m) ** hand };
+        stand = hand;
+        // Its lane's start runs with it; its end draws in to the start marker.
+        ruleS.x = lerp(ruleS.x, P.x, hand);
+        ruleS.y = lerp(ruleS.y, P.y, hand);
+        ruleE.x = lerp(ruleE.x, L.tX - l.w, hand);
+        // The icon dissolves into its model only as the lifting plane's edge uncovers it.
+        if (lift) uncover = easeInOut(span(lift.top, R.y - R.h / 2 - 0.5 * FEATHER, R.y + R.h / 2));
+      }
+      const ax = kind === 'phone' ? ic.x : L.iconX;
+      l.icon.style.transform =
+        `translate(${place.x - ax}px, ${place.y - L.lanes[kind]}px) rotateZ(${-c.rot * stand}deg) rotateX(${-c.tilt * stand}deg) scale(${place.m})`;
+      l.icon.style.opacity = String(iconK * (1 - uncover));
+      const rl = Math.hypot(ruleE.x - ruleS.x, ruleE.y - ruleS.y);
+      const ra = Math.atan2(ruleE.y - ruleS.y, ruleE.x - ruleS.x);
+      l.rule.style.transform = `translate(${ruleS.x - L.laneStart}px, ${ruleS.y - L.lanes[kind]}px) rotate(${ra}rad) scaleX(${Math.max(0.0001, rl / len0)})`;
       // (Built fresh each frame — never read back — so nothing accumulates between frames.)
       void i;
     });
@@ -517,24 +653,32 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       }
     }
     const tk7 = lerp(1, 1.25 / c.s, rush * flat);
-    tlabel.style.opacity = String(span(t, 11.05, 11.3) * (1 - span(t, 17.32, 17.5)));
+    tlabel.style.opacity = String(span(t, 11.05, 11.3) * (1 - span(t, ...LABELS_OUT)));
     // The T line starts at the (held) dot, so nothing of it runs above T.
     const shift = dy + dy2;
     tline.style.transform = `translateY(${shift}px) scaleY(${Math.max(0, fallK(t) * tTrim - shift / tLen)})`;
     // Tilted (8), the label steps a little further from the dot, clear of its glow.
-    tlabel.style.transform = `translateY(${dy + dy2}px) scale(${Math.max(tk7, 1 / c.s * 0.9)})${portrait ? ` rotate(${-c.rot}deg)` : ''} translate(${16 * u * back}px, ${-6 * u * back}px)`;
+    tlabel.style.transform = `translateY(${dy + dy2}px) scale(${Math.max(tk7, 1 / c.s * 0.9)})${portrait ? ` rotate(${-c.rot}deg)` : ''} translate(${28 * u * back}px, ${-10 * u * back}px)`;
     // One "example values" tag for the figures: in 7 under the phone's start
     // marker (clear of T and the bar); in 8 just above the column of
     // "device · ms" names. It fades between the two, never slides.
-    const in7 = easeOut(span(t, C7 + 0.6, C7 + 0.8)) * (1 - span(back, 0, 0.3));
-    const in8 = span(back, 0.85, 1) * easeOut(span(t, GROW8.laptop[0] + 0.12, GROW8.laptop[0] + 0.35)) * (1 - span(t, 17.32, 17.5));
+    // It stays with the figures through the pull back (the phone's "90 ms" is
+    // on screen throughout): out of 7's place by 15.62, into 8's by 15.75.
+    // Through the pull back it sits over "phone · 90 ms", the figure on screen
+    // then: in 7's place to 15.47, over the phone's name 15.49–15.65, in 8's from 15.68.
+    const in7 = easeOut(span(t, C7 + 0.6, C7 + 0.8)) * (1 - span(back, 0, 0.12));
+    const inP = span(back, 0.14, 0.24) * (1 - span(back, 0.42, 0.52));
+    const in8 = span(back, 0.55, 0.7) * (1 - span(t, ...LABELS_OUT));
     let tagAt = null;
     if (in7 > 0) {
       const r = lanes.phone.start.getBoundingClientRect();
       tagAt = { x: r.left - 10 * u, y: r.bottom + 30 * u, o: in7 };
+    } else if (inP > 0) {
+      const n = lanes.phone.nin.getBoundingClientRect();
+      tagAt = { x: n.left, y: n.top - exv.offsetHeight - 14 * u, o: inP };
     } else if (in8 > 0) {
       const r = lanes.laptop.nms.getBoundingClientRect();
-      const n = lanes.laptop.name.getBoundingClientRect();
+      const n = lanes.laptop.nin.getBoundingClientRect();
       tagAt = portrait
         ? { x: r.right - exv.offsetWidth, y: Math.min(r.top, n.top) - exv.offsetHeight - 22 * u, o: in8 }
         : { x: n.left, y: n.top - exv.offsetHeight - 18 * u, o: in8 };
@@ -553,19 +697,14 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // the camera is frozen, so this is the same point on every later frame.
     const ar = anchor.getBoundingClientRect();
     restDot = { x: ar.left + ar.width / 2, y: ar.top + ar.height / 2, d: Math.min(46 * u, Math.max(24 * u, (ar.width + ar.height) / 2)) };
-    const lift = span(t, ...LIFT_SPAN);
-    // The lift: the plane scales up towards the camera (about the frame's
-    // centre) and leaves through the top, fading out fast — gone in 0.23 s,
-    // so it is never seen over the house at another scale.
-    // The diagram leaves in the first ~60 % of the lift, the ground over all of it: never lanes over the house for long.
-    // Shortened (17.66–17.74) now the ground opens from 17.62: the lanes are
-    // only briefly over the lit house as they fly off it.
-    perspEl.style.opacity = String(1 - sine(span(t, LIFT_SPAN[0] + 0.04, LIFT_SPAN[0] + 0.12)));
-    if (lift > 0) {
-      const e = easeIn(span(t, LIFT_SPAN[0], LIFT_SPAN[0] + 0.2));
-      const g = 1 + 2.2 * e;
-      perspEl.style.transformOrigin = '50% 50%';
-      perspEl.style.transform = `translate(0, ${-0.8 * H * e}px) scale(${g})`;
+    // The lift: the plane — lanes and its own opaque ground, one sheet —
+    // comes up towards the camera (growing about T) and falls away out of the
+    // bottom of the frame, its leading edge uncovering the lit house from the
+    // top down. It never fades. The icons are not on it: they stay on the
+    // models.
+    if (lift) {
+      sheet.style.transformOrigin = `${lift.o.x}px ${lift.o.y}px`;
+      sheet.style.transform = `translate(0, ${lift.D}px) scale(${lift.g})`;
     }
   };
   onFrame(frame);
