@@ -429,7 +429,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const pxPerSecond = screenLen(tv, tv.late * RISE) / tv.late;
   for (const d of devices) {
     // Bisect for the 3D length whose projection is this bar's share.
-    const want = pxPerSecond * d.late;
+    // Measured on screen, a bar's ends read about a pixel either way of its
+    // true projection depending on where the ring's centre is taken — a
+    // constant that only matters on the 40 ms bar; take 1 px off each.
+    const want = pxPerSecond * d.late - 1 * u;
     let lo = 0;
     let hi = T_HEIGHT;
     for (let i = 0; i < 40; i += 1) {
@@ -579,7 +582,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 17.95);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 70 * u }, { x: 0, duration: 0.42, ease: 'power3.out' }, 18.0);
+    tl.fromTo(ln, { x: from * 180 * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, 18.0);
     tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, 18.0);
   });
   // Held, never still: a slow push on the whole band.
@@ -668,7 +671,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // Each bar's delay, by its start disc: the example values of F8.
     for (const d of devices) {
       const sp = toScreen(new THREE.Vector3(d.anchor.x, d.baseY, d.anchor.z), camera, W, H);
-      const o = smooth(span(t, d.start + 0.45, d.start + 0.7)) * (1 - smooth(span(t, 21.38, 21.5)));
+      // Each figure appears as its bar arrives at T, not while it is still rising.
+      const o = smooth(span(t, HOUSE_TOUCH - 0.15, HOUSE_TOUCH + 0.15)) * (1 - smooth(span(t, 21.38, 21.5)));
       d.label.style.opacity = String(o);
       // Right of its disc; the TV's (leftmost, beside the T label) to the
       // left, or under its disc where the left would leave the frame.
@@ -682,7 +686,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       let ly = top.y - lh / 2;
       // 9:16: the laptop's ring sits just right of the TV's ring, so the TV's
       // label stays to the right but rides just above its ring's height.
+      // 9:16: the TV's and laptop's rings sit side by side, so the laptop's
+      // figure goes just below its ring, keeping the two figures apart.
+      if (portrait && d.kind === 'laptop') ly = top.y + 20 * u;
       if (portrait && d.kind === 'tv') ly = top.y - lh - 14 * u;
+      // The phone's ring sits at the plane's back edge: its figure goes above
+      // it, clear of the plane's outline.
+      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x + 30 * u; ly = top.y - lh - 40 * u; } }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
