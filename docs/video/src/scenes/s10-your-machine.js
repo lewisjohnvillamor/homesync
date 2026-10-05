@@ -108,7 +108,7 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
       const from = i === 1 ? 1 : -1;
       const dist = i === 1 ? W - geo.left[i] + 60 * u : geo.left[i] + geo.w[i] + 60 * u;
       x = from * dist * (1 - cubicOut(span(t, IN[i], IN[i] + 0.42)));
-      o = clamp01((t - IN[i]) / 0.06) * (1 - clamp01((t - LEAVE - 0.04) / 0.14));
+      o = clamp01((t - IN[i]) / 0.06) * (1 - clamp01((t - LEAVE - 0.02) / 0.1));
       if (t < IN[i]) o = 0;
       return { x, y, o };
     }
@@ -131,13 +131,13 @@ export function build({ el, u, W, H, portrait, t0, t1, onFrame, hostDot, waitFor
     } else {
       // The last line rushes past the camera with the whole sentence (see
       // the frame hook), fading only at the very end.
-      o *= 1 - clamp01((t - LEAVE - 0.04) / 0.14);
+      o *= 1 - clamp01((t - LEAVE - 0.02) / 0.1);
     }
     if (t < IN[i]) o = 0;
     return { x, y, o };
   };
 
-  const pushAt = (t) => lerp(1, portrait ? 1.04 : 1.1, span(t, ...PUSH) ** 1.6);
+  const pushAt = (t) => lerp(1, portrait ? 1.07 : 1.1, span(t, ...PUSH) ** 1.6);
 
   /** The full stop at time t (it moves only with the push). */
   const stopAt = (t) => {

@@ -57,6 +57,8 @@ const T_Y = Y0 + T_HEIGHT;
 
 /** Model units of bar per second of (slowed) delay — one speed for all three. */
 const RISE = 0.45;
+/** Bar radius, model units. */
+const BAR_R = 0.045;
 
 /** Warm matte off-white, like a card or plaster model. */
 const wallMat = () => new THREE.MeshStandardMaterial({ color: '#d8d1c4', roughness: 0.93, metalness: 0 });
@@ -156,7 +158,7 @@ function planeTexture() {
 export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   /** Where the dot hovers on T, in plan: over open floor (16:9: the kitchen's
    * front corner; 9:16: the doorway), never over furniture. */
-  const DOT_XZ = portrait ? [0.1, 0.1] : [0.6, -0.45];
+  const DOT_XZ = portrait ? [1.2, 0.45] : [0.6, -0.45];
   // Underneath composition 6's diagram, which lifts away to reveal the house.
   el.style.zIndex = '-1';
   const renderer = makeRenderer(W, H);
@@ -306,9 +308,16 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.start = HOUSE_TOUCH - d.late;
     d.baseY = T_Y - d.len;
     // A bar whose top rises; geometry has its origin at the bottom.
-    const geo = new THREE.CylinderGeometry(0.05, 0.05, 1, 24);
+    // A flat ribbon turned to face the camera: square ends, so what shows on
+    // screen is exactly the bar's length — a round cylinder's foot would add
+    // the same few pixels to every bar and flatten the ratio.
+    const geo = new THREE.PlaneGeometry(BAR_R * 2, 1);
     geo.translate(0, 0.5, 0);
     d.bar = new THREE.Mesh(geo, accent(1));
+    d.bar.material.side = THREE.DoubleSide;
+    // Drawn over the model: a device must never hide part of its own bar,
+    // or the bar would read shorter than its delay.
+    d.bar.material.depthTest = false;
     const { x: ax, y: ay, z: az } = d.anchor;
     d.bar.position.set(ax, d.baseY, az);
     d.bar.renderOrder = 6;
@@ -320,7 +329,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.disc.renderOrder = 7;
     scene.add(d.disc);
     // Where its top meets T: marked on the plane the moment it arrives.
-    d.contact = new THREE.Mesh(new THREE.RingGeometry(0.11, 0.15, 48), accent(1));
+    d.contact = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.075, 48), accent(1));
     d.contact.rotation.x = -Math.PI / 2;
     d.contact.position.set(ax, T_Y + 0.003, az);
     d.contact.renderOrder = 8;
@@ -381,7 +390,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   // camera at the touch, is in the true 40 : 90 : 210 ratio — perspective
   // would otherwise lengthen the bar nearest the camera. All three still
   // take exactly their delay to grow, so they meet T together.
-  poseCamera(probe, HOUSE_TOUCH);
+  // Calibrated mid-hold, where the bars are read; the slow orbit changes it by < 2 %.
+  poseCamera(probe, 20.9);
   const pxPerUnit = (d) => {
     const a = toScreen(new THREE.Vector3(d.anchor.x, T_Y, d.anchor.z), probe, W, H);
     const b = toScreen(new THREE.Vector3(d.anchor.x, T_Y - 0.1, d.anchor.z), probe, W, H);
@@ -480,9 +490,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       'beforeend',
       `<div class="ms ms-${d.kind}" style="position:absolute;left:0;top:0;opacity:0;display:flex;align-items:center;gap:${10 * u}px;
           padding:${6 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.86);
-          font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">${MS[d.kind]} ms${
-            d.kind === 'tv' ? `<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span>` : ''
-          }</div>`,
+          font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">${MS[d.kind]} ms<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span></div>`,
     );
     d.label = el.querySelector(`.ms-${d.kind}`);
   }
@@ -528,6 +536,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const on = t >= d.start;
       d.bar.visible = on && grown > 0.002;
       d.bar.scale.set(1, Math.max(0.0001, grown * d.len), 1);
+      d.bar.rotation.y = Math.atan2(camera.position.x - d.anchor.x, camera.position.z - d.anchor.z);
       d.disc.visible = false;
       d.guide.visible = t >= d.start - 0.3;
       const met = t >= HOUSE_TOUCH;

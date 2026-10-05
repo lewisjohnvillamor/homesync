@@ -39,16 +39,16 @@ const cubicIn = (k) => k * k * k;
 
 /** The terminal's layout in frame px, unscaled. */
 export function terminalGeo(W, H, u, portrait) {
-  const winW = portrait ? 900 * u : 1680 * u;
-  const winH = portrait ? 900 * u : 560 * u;
+  const winW = portrait ? 960 * u : 1680 * u;
+  const winH = portrait ? 620 * u : 560 * u;
   const winX = (W - winW) / 2;
   const winY = (H - winH) / 2 + (portrait ? -40 * u : 8 * u);
   const bar = portrait ? 64 * u : 72 * u;
-  // In 9:16 the address wraps on to its own line, as it would in a narrow
-  // terminal, so the type can be large enough to fill the frame.
-  const f = portrait ? 54 * u : 48 * u;
-  const padX = portrait ? 48 * u : 72 * u;
-  const lineH = f * (portrait ? 2.5 : 1.7);
+  // In 9:16 the README's line is kept whole, padding and all (F21), so the
+  // type is set to fit it on one line; the example tag goes under the address.
+  const f = portrait ? 30.5 * u : 48 * u;
+  const padX = portrait ? 42 * u : 72 * u;
+  const lineH = f * (portrait ? 2.4 : 1.7);
   const textX = winX + padX;
   const textY = winY + bar + (portrait ? (winH - bar - 4 * lineH) / 2 : 64 * u);
   // The cursor is about the text's cap height, not a blob beside it.
@@ -93,7 +93,8 @@ export function cursorAt(t, g) {
   // Swallowing the printed line, it swells a little and glows.
   const swell = 1 + 0.2 * cubicOut(span(t, COLLAPSE + 0.06, COLLAPSE + 0.24));
   const drift = Math.sin(t * 2.2) * 1.2 * g.u;
-  const off = t > 24.66 && t < 24.75 ? 0.12 : 1;
+  // One soft blink before Enter: dims to about half and back, never gone.
+  const off = 1 - 0.45 * Math.sin(Math.PI * span(t, 24.64, 24.77));
   // As the window rushes past, the cursor already heads for the frame's
   // centre, where composition 12 builds the mark around it.
   const toC = (k => k * k * (3 - 2 * k))(span(t, GONE, 26.875));
@@ -121,8 +122,8 @@ export function build({ el, u, W, H, portrait, t0, hostDot, onFrame }) {
       <div class="l1" style="position:absolute;left:${g.textX}px;top:${g.textY + g.lineH}px;display:flex;align-items:center;gap:${g.f * 0.55}px">
         ${
           portrait
-            ? `<span><span style="color:var(--text-dim)">${LABEL.replace(/ +:/, ' :').trimEnd()}</span><br><span style="color:var(--accent)">${URL}</span></span>
-               <span class="example-tag" style="--tag-size:${tagSize}px;position:absolute;left:${(LABEL.replace(/ +:/, ' :').trimEnd().length + 1) * g.cw}px;top:${g.lineH * 0.5}px;transform:translateY(-50%)">example</span>`
+            ? `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
+               <span class="example-tag" style="--tag-size:${Math.round(g.f * 0.8)}px;position:absolute;right:0;top:${g.lineH * 1.4}px;transform:translateY(-50%)">example</span>`
             : `<span><span style="color:var(--text-dim)">${LABEL}</span><span style="color:var(--accent)">${URL}</span></span>
                <span class="example-tag" style="--tag-size:${tagSize}px">example</span>`
         }
