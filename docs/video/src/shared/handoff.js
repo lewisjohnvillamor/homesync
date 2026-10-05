@@ -45,4 +45,14 @@ export const handoff = {
    * @type {((t:number) => Record<'tv'|'laptop'|'phone',{x:number,y:number,w:number,h:number}>) | null}
    */
   houseDevicesAt: null,
+  /**
+   * Composition 9's three device screens on screen at time t: set by
+   * composition 9 (each screen panel's four corners, projected with its own
+   * camera, a pure function of t), read by composition 8 so each flat icon's
+   * screen turns and skews onto its model's screen before it dissolves into
+   * it. Corners are as the picture on the screen is seen: tl, tr, br, bl.
+   * While unset, composition 8 fits its icons upright inside houseDevicesAt.
+   * @type {((t:number) => Record<'tv'|'laptop'|'phone',{tl:{x:number,y:number},tr:{x:number,y:number},br:{x:number,y:number},bl:{x:number,y:number}}>) | null}
+   */
+  houseScreensAt: null,
 };
