@@ -56,6 +56,9 @@ export function laneLayout(W, H, u, portrait) {
   // 9:16 is not re-centred: it keeps a margin on the left for the icons through the push.
   const dx = portrait ? 0 : W / 2 - (left + right) / 2;
   const iconX = iconX0 + dx;
+  // 9:16: the lanes spread down the frame, so its lower quarter is not left empty.
+  // 16:9: a little further apart than the shared layout, so the icons never crowd each other.
+  const lanes = portrait ? { laptop: H * 0.38, phone: H * 0.62, tv: H * 0.86 } : { laptop: H * 0.405, phone: H * 0.6, tv: H * 0.795 };
   return {
     ...L,
     iconX,
@@ -63,9 +66,13 @@ export function laneLayout(W, H, u, portrait) {
     tX: tX0 + dx,
     laneStart: (portrait ? 370 * u : 390 * u) + dx,
     laneEnd: laneEnd0 + dx,
-    // 9:16: the lanes spread down the frame, so its lower quarter is not left empty.
-    ...(portrait ? { lanes: { laptop: H * 0.38, phone: H * 0.62, tv: H * 0.86 }, tTop: H * 0.38 - 150 * u } : {}),
-    phoneIcon: { x: iconX, y: portrait ? H * 0.62 : L.lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
+    lanes,
+    tTop: lanes.laptop - (portrait ? 150 : 120) * u,
+    // 9:16: the bars are shorter in the world (2 px per ms), so composition 7
+    // can come in closer (thicker bar, larger figure) and composition 8's plane
+    // is narrower and framed larger. Bars only show in 7 and 8; the ratio is the same.
+    ...(portrait ? { pxPerMs: 2.0 * u } : {}),
+    phoneIcon: { x: iconX, y: lanes.phone, w: 48 * u * iconScale, h: 96 * u * iconScale },
   };
 }
 
@@ -214,7 +221,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
   const tScale = 1;
   const roomScale = portrait ? 1 : 1.12;
   /** The press ring's circle: around the dot, inside the button's free right end. */
-  const well = button.h * glassH * 0.62;
+  // 9:16: no wider than the button's free end, so it never overhangs its edge or nears the label.
+  const well = portrait ? Math.min(button.h * glassH * 0.62, 2 * (button.x + button.w - face.fx) * glassW * 0.8) : button.h * glassH * 0.62;
 
   // --- the laptop ----------------------------------------------------------
   const lid = 14 * u;
@@ -367,8 +375,9 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot }) {
 
     // Screens, on their beats.
     // The code leaves the viewfinder before the button arrives, so the label is never over it.
-    viewfinder.style.opacity = String(1 - span(t, 8.83, 8.95));
-    join.style.opacity = String(span(t, 8.92, 9.03) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
+    // It goes as soon as the brackets have flashed, before the phone has moved far, so no ghost of it trails over the real code.
+    viewfinder.style.opacity = String(1 - span(t, 8.78, 8.835));
+    join.style.opacity = String(span(t, 8.84, 8.93) * (1 - span(t, JOINED - 0.08, JOINED + 0.06)));
     // The room's card comes in as the pressed button leaves (no dead beat);
     // on the 10.0 beat the dot lands in it and it turns accent — joined.
     room.style.opacity = String(span(t, 9.8, 9.95));

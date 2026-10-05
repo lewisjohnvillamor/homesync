@@ -8,7 +8,7 @@
 export function build({ el, tl, u, W, portrait, t0 }) {
   const right = portrait ? 70 * u : 110 * u;
   el.innerHTML = `
-    <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1560 * u : 860 * u}px;text-align:right;
+    <div class="line" style="position:absolute;right:${right}px;top:${portrait ? 1480 * u : 860 * u}px;text-align:right;
          font:700 ${portrait ? 86 * u : 80 * u}px/1.08 var(--sans);letter-spacing:-0.03em;color:var(--text);white-space:nowrap">Scheduled to be heard<br>at one agreed instant.</div>`;
   const line = el.querySelector('.line');
   // In from the right as the tilt settles, set by ~16.3 s, starting 15.9 s; drifts; leaves upwards with the plane as it lifts (17.40–17.60), before the lift so it is never over the house.
