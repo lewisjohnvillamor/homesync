@@ -13,7 +13,8 @@
  *   node render.mjs --page src/film.html --w 1920 --h 1080 --out out/film.mp4
  *   node render.mjs --page src/film.html --stills 0,1.5,3 --out work/stills
  *
- * Options: --fps (60) --from (0) --to (page duration) --workers (4) --resume 1 (keep frames already rendered)
+ * Options: --fps (60) --from (0) --to (page duration) --workers (4) --resume 1 (keep frames already rendered —
+ *   only for retrying the SAME code after an interruption; after any code change use a new --out or omit it)
  *          --param key=value (repeatable; passed to the page as query string)
  */
 
