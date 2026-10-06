@@ -363,7 +363,15 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // Very faint, so only the bright bar carries length.
     // A faint accent hairline — a guide tying the bar to its device, plainly
     // not part of the measured bar.
-    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: BRAND.accent, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+    // Dashed, so it reads as a guide and never as part of the measured bar,
+    // and strong enough to hold over the white walls and the duvet.
+    const dash = document.createElement('canvas');
+    dash.width = 1; dash.height = 8;
+    { const g = dash.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, 1, 8); g.fillStyle = '#fff'; g.fillRect(0, 0, 1, 5); }
+    const dashTex = new THREE.CanvasTexture(dash);
+    dashTex.wrapS = dashTex.wrapT = THREE.RepeatWrapping;
+    dashTex.magFilter = THREE.NearestFilter;
+    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: BRAND.accent, alphaMap: dashTex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
     stem.position.set(ax, from, az);
     d.stem = stem;
     d.stemFrom = from;
@@ -663,7 +671,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // solid bar alone is the measure.
       d.stem.scale.set(1, Math.max(0.0001, T_Y - d.stemFrom), 1);
       d.guide.visible = sk > 0;
-      d.stem.material.opacity = 0.25 * sk;
+      d.stem.material.opacity = 0.7 * sk;
+      d.stem.material.alphaMap.repeat.set(1, (T_Y - d.stemFrom) / 0.07);
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, easeOut(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.12))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
@@ -723,7 +732,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // it, clear of the plane's outline.
       // 9:16: left of its ring, over the dark outside the plane's back corner,
       // clear of the plane's lit edge and of the headline.
-      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x - lw - 80 * u; ly = top.y - lh / 2; } }
+      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 41 * u; if (portrait) { lx = top.x - lw - 105 * u; ly = top.y - lh / 2; } }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
