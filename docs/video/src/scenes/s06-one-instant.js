@@ -53,51 +53,71 @@ const C7 = 13.125;
 const C8 = 15.625;
 const C9 = 18.125;
 /**
- * The hand-over into the house. Composition 9 is drawn underneath, a solid
- * model that emerges evenly from the ground colour from 17.15 (every house
- * pixel equals the ground then; ~10 % at 17.27, ~38 % at 17.40, full at
- * 17.75). Nothing of the diagram travels into the house: any path from
- * outside it to a model inside would cross a wall on screen. The dot is what
- * carries across; the icons belong to the diagram and leave with it.
+ * The hand-over into the house, on the beat grid. Composition 8's finished
+ * picture (all three bars on T, T bright, the line set) holds, drifting, to
+ * the beat at 17.5. Composition 9 is drawn underneath, a solid model that is
+ * exactly the ground colour until 17.65 and emerges evenly over 17.65–18.10
+ * (~13 % at 17.75, ~40 % at 17.85). Nothing of the diagram travels into the
+ * house: any path from outside it to a model inside would cross a wall on
+ * screen. The dot is what carries across; the icons belong to the diagram and
+ * leave with it.
  *
- *  17.06–17.21  The names, figures, T label and example tag leave.
- *  17.15        The sheet's own ground goes in one frame (1 → 0, nothing in
- *               between): the house under it is exactly the ground colour, so
- *               from here it comes up under the lanes.
- *  17.15–17.42  The sheet — icons, lanes, bars, markers and T, one piece,
+ *  16.95        T brightens as the TV's bar lands (swelling in over 0.12 s,
+ *               never switching on); the three pulses arrive on T together
+ *               at 17.3 (swelling in too). The finished picture then holds,
+ *               drifting, to the beat.
+ *  17.50–17.62  The names, figures, T label and example tag leave.
+ *  17.50–17.72  Composition 8's line (s08) pushes towards the camera on its
+ *               own, to 1.15× about its centre, gone before the sheet reaches
+ *               its box: the sheet's ease-in is steep (≤ 1.15× until 17.717),
+ *               so the TV's bar, the nearest, stays ≥ 18 px clear of it.
+ *  17.55        The camera comes to rest (its drift eases out here) and the
+ *               sheet's own ground goes in one frame (1 → 0, nothing in
+ *               between): the house under it is still exactly the ground
+ *               colour, so nothing changes on screen.
+ *  17.55–17.85  The sheet — icons, lanes, bars, markers and T, one piece,
  *               nothing on it moving on its own — leaves towards the camera:
- *               it grows 1 → 3.2× about T (where the dot stays) with an ease-in
- *               and no sideways or upward travel, so every point of it moves
- *               straight out from the dot and it rushes past the lens, off the
- *               frame's edges. It holds full brightness for the first half and
- *               fades (cosine) to 0 by 17.42. Whatever of it passes within
- *               ~44 px of the dot is cleared there (a soft disc round the dot,
- *               opening over the lift's first frames), so nothing crosses it;
- *               and each lane (rule, bar and start marker, one piece) fades
- *               out whole as it nears that disc, so no lane is ever seen
- *               running on either side of the dot like a bead on a bar.
- *               Composition 8's line (s08) is not on the sheet: it leaves on
- *               its own, growing towards the camera about its centre over
- *               17.04–17.20 (≤ 1.12×), gone before the sheet reaches its box.
+ *               it grows 1 → LIFT_GROW× about T (where the dot stays) with a
+ *               steep ease-in and no sideways or upward travel, so every point
+ *               of it moves straight out from the dot and it rushes past the
+ *               lens, off the frame's edges. It holds full brightness for the
+ *               first half and fades (cosine) to 0 by 17.85. Whatever of it
+ *               passes within ~44 px of the dot is cleared there (a soft disc
+ *               round the dot, opening over the lift's first frames), so
+ *               nothing crosses it; and each lane (rule, bar and start marker,
+ *               one piece) fades out whole as it nears that disc, so no lane is
+ *               ever seen running on either side of the dot like a bead on a
+ *               bar.
+ *  17.72–17.765 Every lane and icon fades out whole (OFF_HOUSE): none is left
+ *               when the house passes ~15 % (17.76). Only the T line, which
+ *               never lies over the house, rushes on to 17.85.
+ *  17.90        The dot is let go to composition 9 (liftDotAt).
  */
 /** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
-const GROUND_OFF = 17.15;
+const GROUND_OFF = 17.55;
 /** The lift: the sheet grows 1 → LIFT_GROW× about T (progress k^LIFT_EASE, an ease-in), with no translation; gone by LIFT[1]. */
-const LIFT = [17.15, 17.42];
-const LIFT_GROW = 3.2;
-const LIFT_EASE = 1.7;
+const LIFT = [17.55, 17.85];
+const LIFT_GROW = 6;
+const LIFT_EASE = 6;
 /** It holds full opacity to this fraction of the lift, then falls (cosine) to 0 at LIFT[1]. */
 const LIFT_HOLD = 0.5;
+/**
+ * Every lane (rule, bar and start marker, one piece) and every icon has faded
+ * out whole by the time the house passes ~15 % (17.76): the lift cannot carry
+ * them off it that soon without reaching the caption first. The T line, which
+ * never lies over the house, leaves with the sheet as a whole.
+ */
+const OFF_HOUSE = [17.72, 17.765];
 /** The clear disc round the dot: past its rim by this much (design px), soft over CLEAR_F; it opens over CLEAR_IN. */
 const CLEAR_R = 44;
 const CLEAR_F = 16;
-const CLEAR_IN = [17.15, 17.21];
-/** The camera freezes here (composition 9's liftDotAt is read from this frozen camera: unchanged). */
-const LIFT0 = 17.32;
+const CLEAR_IN = [17.55, 17.61];
+/** The camera comes to rest here, as the sheet lifts (its drift ends on the same pose as before, so liftDotAt's point is unchanged). */
+const LIFT0 = 17.55;
 /** The camera's drift through composition 8's hold eases to rest here. */
 const DRIFT_END = LIFT0;
 /** The labels, the T label and the example tag leave before the sheet or any icon moves. */
-const LABELS_OUT = [17.06, 17.21];
+const LABELS_OUT = [17.5, 17.62];
 /**
  * The dot stays where T was as the sheet lifts away about it (everything of
  * the diagram moves away from it, nothing crosses it), then is let go and the
@@ -119,7 +139,7 @@ const FIRE7 = 14.2;
 const RUN7 = 0.72;
 /** Composition 8: the bars land one after another, then all three pulses arrive on T together. */
 const GROW8 = { laptop: [15.95, 16.3], tv: [16.32, 16.95] };
-// (The dot's pulse on T is seen as the sheet starts to leave; the TV fires just after its bar lands at 16.95.)
+// (The TV fires just after its bar lands at 16.95; the three pulses arrive on T inside the finished hold, before 17.5.)
 const ARRIVE8 = 17.3;
 /**
  * The arrival on T in 8 swells in rather than jumping on: it rises (sine)
@@ -132,6 +152,17 @@ const arrive8 = (t, rate) => {
   if (t < a) return 0;
   if (t < a + ARRIVE8_RISE) return sine((t - a) / ARRIVE8_RISE);
   return Math.exp(-(t - a - ARRIVE8_RISE) * rate);
+};
+/**
+ * T brightening as the TV's bar lands on it (GROW8.tv[1]) swells in the same
+ * way, centred where it falls (16.95), never switching on in one frame.
+ */
+const LAND8_RISE = 0.12;
+const land8 = (t, rate) => {
+  const a = GROW8.tv[1] - LAND8_RISE / 2;
+  if (t < a) return 0;
+  if (t < a + LAND8_RISE) return sine((t - a) / LAND8_RISE);
+  return Math.exp(-(t - a - LAND8_RISE) * rate);
 };
 const RUN8 = (kind) => (DELAY_MS[kind] / 1000) * 1.4;
 /** The pull back from the close-up starts just after the phone's pulse lands on T. */
@@ -325,8 +356,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       py: (portrait ? H * 0.41 - 120 * u : H * 0.45) + 10 * u * k,
       tilt: 90 - elevation,
       // 9:16: the house's turn (−70°) would stand the lanes on end, so the plane
-      // is held at −30° (lanes within ~25° of horizontal) and turns to the
-      // house's angle just before the lift (17.5–17.8).
+      // is held at −30° (lanes within ~25° of horizontal) through the lift.
       rot: portrait ? PORTRAIT_ROT : VIEW.azimuth,
     };
   };
@@ -859,7 +889,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     const flash = (at) => (t >= at ? Math.exp(-(t - at) * 4) : 0);
     // Composition 6's hold: T gathers (11.55–12.1) and all three lanes answer it together at 12.1.
     const charge = sine(span(t, 11.45, ACK)) * (1 - span(t, ACK + 0.3, ACK + 1.0));
-    const home = Math.max(1.4 * flash(FIRE7 + RUN7), arrive8(t, 4), 0.9 * flash(GROW8.tv[1]), 0.35 * span(t, GROW8.tv[1], GROW8.tv[1] + 0.2), 0.9 * charge);
+    const home = Math.max(1.4 * flash(FIRE7 + RUN7), arrive8(t, 4), 0.9 * land8(t, 4), 0.35 * sine(span(t, GROW8.tv[1], GROW8.tv[1] + 0.2)), 0.9 * charge);
     tline.style.boxShadow = `0 0 ${home * 34 * u}px ${home * 6 * u}px #5aa9ffaa`;
 
     // Read where T is before the lift moves the plane; from LIFT0 on the
@@ -884,6 +914,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // sheet carries every lane up past the dot, and each fades out whole
     // before it reaches the clear disc, staying out once past it (nearFade).
     const laneNear = {};
+    const offHouse = 1 - sine(span(t, ...OFF_HOUSE));
     for (const kind of order) {
       const g = planeSegs[kind];
       const y = L.lanes[kind];
@@ -893,6 +924,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       const hh = Math.max(barH / 2, 15 * u, ruleH / 2) + Math.abs(g.ruleS.y - y);
       const q0 = [[x0, y - hh], [x1, y - hh], [x1, y + hh], [x0, y + hh]].map(([x, yy]) => project(c, x, yy));
       laneNear[kind] = nearFade(t, q0, LANE_NEAR);
+      laneNear[kind] *= offHouse;
       lanes[kind].root.style.opacity = laneNear[kind] < 1 ? String(laneNear[kind]) : '';
     }
     // Each icon's outline on screen; an icon the sheet carries towards the
@@ -901,7 +933,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       const P = iconPlace[kind];
       const q0 = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => project(c, P.x + sx * P.hw, P.y + sy * P.hh));
       const q = q0.map((p) => lifted(lift, p));
-      const near = nearFade(t, q0, ICON_NEAR);
+      const near = nearFade(t, q0, ICON_NEAR) * offHouse;
       lanes[kind].icon.style.opacity = String(P.o * near);
       P.q = q;
       P.near = near;
@@ -962,11 +994,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   const dotAt = (t) => {
     const r = t >= LIFT0 && frozenDot ? frozenDot : restDot;
     const ex = (at) => (t >= at ? Math.exp(-(t - at) * 5) : 0);
-    const pulse = Math.max(ex(FIRE7 + RUN7), arrive8(t, 5), 0.6 * ex(GROW8.tv[1]));
+    const pulse = Math.max(ex(FIRE7 + RUN7), arrive8(t, 5), 0.6 * land8(t, 5));
     // As the plane lifts away the dot starts to sink — still moving at the
     // release, so the house's drop continues one motion (never a stop).
-    const sinkY = 220 * u * easeInOut(span(t, 17.45, 18.4));
-    return { x: r.x, y: r.y + sinkY, d: r.d * (1 + 0.6 * pulse), glow: 0.2 + 0.9 * pulse };
+    const sinkY = 220 * u * easeInOut(span(t, 17.5, 18.3));
+    // Its glow eases over the lift to composition 9's hover glow (0.35), so nothing steps at the release.
+    const glow = lerp(0.2 + 0.9 * pulse, 0.35, sine(span(t, LIFT[0], DOT_RELEASE)));
+    return { x: r.x, y: r.y + sinkY, d: r.d * (1 + 0.6 * pulse), glow };
   };
   hostDot(11.0, DOT_RELEASE, dotAt);
   // Composition 9 starts its dot from here: a pure function of t (from the
