@@ -78,7 +78,7 @@ const C9 = 18.125;
  *               running on either side of the dot like a bead on a bar.
  *               Composition 8's line (s08) is not on the sheet: it leaves on
  *               its own, growing towards the camera about its centre over
- *               17.10–17.26, gone before the sheet sweeps through its place.
+ *               17.04–17.20 (≤ 1.12×), gone before the sheet reaches its box.
  */
 /** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
 const GROUND_OFF = 17.15;
@@ -121,6 +121,18 @@ const RUN7 = 0.72;
 const GROW8 = { laptop: [15.95, 16.3], tv: [16.32, 16.95] };
 // (The dot's pulse on T is seen as the sheet starts to leave; the TV fires just after its bar lands at 16.95.)
 const ARRIVE8 = 17.3;
+/**
+ * The arrival on T in 8 swells in rather than jumping on: it rises (sine)
+ * over ARRIVE8_RISE centred on ARRIVE8, then decays as before. Never a step
+ * in the dot's size or glow, nor in T's flash.
+ */
+const ARRIVE8_RISE = 0.2;
+const arrive8 = (t, rate) => {
+  const a = ARRIVE8 - ARRIVE8_RISE / 2;
+  if (t < a) return 0;
+  if (t < a + ARRIVE8_RISE) return sine((t - a) / ARRIVE8_RISE);
+  return Math.exp(-(t - a - ARRIVE8_RISE) * rate);
+};
 const RUN8 = (kind) => (DELAY_MS[kind] / 1000) * 1.4;
 /** The pull back from the close-up starts just after the phone's pulse lands on T. */
 const BACK0 = 15.3;
@@ -847,7 +859,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     const flash = (at) => (t >= at ? Math.exp(-(t - at) * 4) : 0);
     // Composition 6's hold: T gathers (11.55–12.1) and all three lanes answer it together at 12.1.
     const charge = sine(span(t, 11.45, ACK)) * (1 - span(t, ACK + 0.3, ACK + 1.0));
-    const home = Math.max(1.4 * flash(FIRE7 + RUN7), flash(ARRIVE8), 0.9 * flash(GROW8.tv[1]), 0.35 * span(t, GROW8.tv[1], GROW8.tv[1] + 0.2), 0.9 * charge);
+    const home = Math.max(1.4 * flash(FIRE7 + RUN7), arrive8(t, 4), 0.9 * flash(GROW8.tv[1]), 0.35 * span(t, GROW8.tv[1], GROW8.tv[1] + 0.2), 0.9 * charge);
     tline.style.boxShadow = `0 0 ${home * 34 * u}px ${home * 6 * u}px #5aa9ffaa`;
 
     // Read where T is before the lift moves the plane; from LIFT0 on the
@@ -950,7 +962,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   const dotAt = (t) => {
     const r = t >= LIFT0 && frozenDot ? frozenDot : restDot;
     const ex = (at) => (t >= at ? Math.exp(-(t - at) * 5) : 0);
-    const pulse = Math.max(ex(FIRE7 + RUN7), ex(ARRIVE8), 0.6 * ex(GROW8.tv[1]));
+    const pulse = Math.max(ex(FIRE7 + RUN7), arrive8(t, 5), 0.6 * ex(GROW8.tv[1]));
     // As the plane lifts away the dot starts to sink — still moving at the
     // release, so the house's drop continues one motion (never a stop).
     const sinkY = 220 * u * easeInOut(span(t, 17.45, 18.4));
