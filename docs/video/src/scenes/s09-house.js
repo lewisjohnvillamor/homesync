@@ -353,11 +353,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // A solid, dim stem from the device up to its disc, so each bar plainly
     // stands on its own device rather than floating.
     const from = ay + 0.03;
-    const stemGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 12);
+    const stemGeo = new THREE.CylinderGeometry(0.006, 0.006, 1, 8);
     stemGeo.translate(0, 0.5, 0);
     d.guide = new THREE.Group();
     // Very faint, so only the bright bar carries length.
-    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: '#161c25', toneMapped: false, fog: false }));
+    // A faint accent hairline — a guide tying the bar to its device, plainly
+    // not part of the measured bar.
+    const stem = new THREE.Mesh(stemGeo, new THREE.MeshBasicMaterial({ color: BRAND.accent, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
     stem.position.set(ax, from, az);
     d.stem = stem;
     d.stemFrom = from;
@@ -555,8 +557,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     'beforeend',
     `<div class="t-label" style="position:absolute;left:0;top:0;padding:${5 * u}px ${12 * u}px;border-radius:${10 * u}px;
         background:rgba(11,14,19,0.82);font:500 ${44 * u}px/1 var(--mono);color:var(--accent);white-space:nowrap">T</div>
-     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 10 * u}px ${portrait ? pad2[0] + 8 * u : 24 * u}px ${pad2[1]}px;
-        background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${24 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${18 * u}px),transparent);mask-composite:intersect">
+     <div class="band" style="left:${portrait ? 60 * u : 96 * u}px;top:${portrait ? 120 * u : 64 * u}px;padding:${pad2[0]}px ${pad2[1] + 26 * u}px ${portrait ? pad2[0] + 8 * u : 24 * u}px ${pad2[1]}px;
+        background:rgba(11,14,19,0.9);-webkit-mask-image:linear-gradient(to right,#000 calc(100% - ${60 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${22 * u}px),transparent);-webkit-mask-composite:source-in;mask-image:linear-gradient(to right,#000 calc(100% - ${60 * u}px),transparent),linear-gradient(to bottom,#000 calc(100% - ${22 * u}px),transparent);mask-composite:intersect">
        ${lines.map((l, i) => `<div class="ln ln${i}" style="font:700 ${size}px/1.1 var(--sans);letter-spacing:-0.025em;color:var(--text);white-space:nowrap">${l}</div>`).join('')}
      </div>`,
   );
@@ -575,25 +577,33 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const band = el.querySelector('.band');
   const lineEls = [...el.querySelectorAll('.ln')];
 
+  // The headline arrives as the house settles. In 9:16 the dot is still
+  // dropping through the headline's rows until ~18.0, so it waits for it.
+  const HEAD = portrait ? 18.0 : 17.7;
   // The band opens first, so no word is ever over bare picture; the lines
   // enter from opposite sides inside it, slowing as they land; set by 18.6 s.
   // They arrive as the house settles, into the space left for them, so the
   // landing is never a half-empty frame.
-  tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, 17.95);
+  tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, HEAD - 0.05);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 180 * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, 18.0);
-    tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, 18.0);
+    tl.fromTo(ln, { x: from * 180 * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, HEAD);
+    tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, HEAD);
   });
   // Held, never still: a slow push on the whole band.
-  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - 18.25, ease: 'none', immediateRender: false }, 18.25);
+  tl.fromTo(band, { scale: 1 }, { scale: 1.025, duration: 21.4 - (HEAD + 0.25), ease: 'none', immediateRender: false }, HEAD + 0.25);
   // Leaves fast.
   tl.to(band, { x: -160 * u, opacity: 0, duration: 0.2, ease: 'power2.in' }, 21.4);
 
   // --- every frame -------------------------------------------------------------------
   /** A bar's grown fraction at t: never linear — each eases out over its
    * whole rise (sine), so all three slow into T together. */
-  const growAt = (d, t) => Math.sin((Math.PI / 2) * clamp01((t - d.start) / d.late));
+  const growAt = (d, t) => {
+    // Eases in over its first 0.15 s and out over the rest: never linear.
+    const g = clamp01((t - d.start) / d.late);
+    const a = Math.min(0.45, 0.15 / d.late);
+    return g < a ? (Math.sin((Math.PI / 2) * a) * (g / a) ** 2) : Math.sin((Math.PI / 2) * g);
+  };
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
   onFrame((t) => {
     if (t < RENDER[0] || t > RENDER[1]) return;
@@ -633,12 +643,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.bar.scale.set(1, Math.max(0.0001, grown * d.len), 1);
       d.bar.rotation.y = Math.atan2(camera.position.x - d.anchor.x, camera.position.z - d.anchor.z);
       d.disc.visible = false;
-      // The stalk appears with its bar, never as a stray stub before it.
-      // The whole column rises: the dark stalk grows up from the device over
-      // the 0.25 s before its bar starts, then the bright bar carries on.
-      const sk = smooth(span(t, d.start - 0.25, d.start));
+      // The guide fades in with its bar, never before it.
+      const sk = smooth(span(t, d.start, d.start + 0.25));
       d.guide.visible = sk > 0;
-      d.stem.scale.set(1, Math.max(0.0001, (d.baseY - d.stemFrom) * sk), 1);
+      d.stem.scale.set(1, Math.max(0.0001, d.baseY - d.stemFrom), 1);
+      d.stem.material.opacity = 0.3 * sk;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
