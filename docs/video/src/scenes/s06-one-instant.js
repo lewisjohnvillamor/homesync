@@ -105,7 +105,7 @@ const CLEAR_R = 4;
 const CLEAR_F = 14;
 const CLEAR_IN = [17.5, 17.58];
 /** The disc opens outward from T over this span, passing through what of the sheet is still near T. */
-const CLEAR_OPEN = [17.7, 17.86];
+const CLEAR_OPEN = [17.68, 17.84];
 /** The camera comes to rest here, as the sheet lifts (its drift ends on the same pose as before, so liftDotAt's point is unchanged). */
 const LIFT0 = 17.5;
 /** The camera's drift through composition 8's hold eases to rest here. */
@@ -472,7 +472,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // In the lift's last part the clear disc opens outward from T (ease-in),
     // so what is near T — which the growth about T never carries off the
     // frame — is passed through rather than left fading where it stands.
-    const open = span(t, ...CLEAR_OPEN) ** 2 * Math.hypot(W, H);
+    const open = span(t, ...CLEAR_OPEN) ** 1.5 * Math.hypot(W, H);
     return { x: p.x, y: p.y, r: p.d / 2 + CLEAR_R * u * e + open, f: Math.max(0.01, CLEAR_F * u * e + 0.35 * open) };
   };
   const maskOf = (cl) => (cl ? `radial-gradient(circle at ${cl.x}px ${cl.y}px, transparent ${cl.r}px, #000 ${cl.r + cl.f}px)` : 'none');

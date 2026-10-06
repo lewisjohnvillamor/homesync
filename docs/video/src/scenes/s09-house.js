@@ -711,7 +711,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // Each figure appears as its bar arrives at T, not while it is still rising.
       // The plate is opaque before its words start to show, and outlasts
       // them leaving, so the words are never ghosts over the bright rooms.
-      const plate = smooth(span(t, HOUSE_TOUCH - 0.19, HOUSE_TOUCH + 0.11)) * (1 - smooth(span(t, 21.39, 21.47)));
+      const plate = smooth(span(t, HOUSE_TOUCH - 0.17, HOUSE_TOUCH + 0.13)) * (1 - smooth(span(t, 21.37, 21.45)));
       const words = smooth(span(t, HOUSE_TOUCH - 0.15, HOUSE_TOUCH + 0.15)) * (1 - smooth(span(t, 21.36, 21.44)));
       d.label.style.opacity = String(plate);
       for (const c of d.label.children) c.style.opacity = String(plate > 0 ? words / plate : 0);
@@ -732,7 +732,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       if (portrait && d.kind === 'laptop') ly = top.y + 20 * u;
       // 16:9: the TV's figure sits left of its ring — to the right it would
       // reach the dot.
-      if (!portrait && d.kind === 'tv') lx = top.x - lw - 124 * u;
+      if (!portrait && d.kind === 'tv') lx = top.x - lw - 160 * u;
       // Directly above its ring, the ring under the plate's left edge.
       if (portrait && d.kind === 'tv') { lx = top.x - 20 * u; ly = top.y - lh - 34 * u; }
       // The phone's ring sits at the plane's back edge: its figure goes above
