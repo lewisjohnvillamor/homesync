@@ -4,26 +4,29 @@
  * open: the line is set there, right-aligned on plain ground, and only after
  * the tilt has settled, so no line of the diagram ever passes through it.
  * It holds, drifting, with the finished diagram to the beat at 17.5. Then it
- * is the front object and leaves towards the camera on its own, just ahead of
- * the sheet (s06's lift, from 17.55): over 17.50–17.69 it grows about its own
- * centre with an ease-in and no travel, to 1.15× (never cropped by the frame:
- * held EDGE inside every side). Its opacity holds full for the first half of
- * the move, then falls with an ease-in (1 − f²), so it is still seen pushing
- * forward until its last frames, and reaches 0 at 17.69, before the house
- * under it starts to fill in (17.70) and before the sheet, growing about T,
- * reaches the line's box. It is drawn in front of the sheet
- * (its layer is raised). It never comes near the dot.
+ * is the front object and leaves towards the camera, with the sheet (s06's
+ * lift, also from 17.50) flying past the lens behind it: over 17.50–17.70 it
+ * grows about its own centre with an ease-in and no travel, to ~1.2× (never
+ * cropped by the frame while above 30 % opacity: held EDGE inside every side). Its opacity holds full
+ * for the first half of the move, then falls with an ease-in (1 − f²), so it
+ * is still seen pushing forward until its last frames, and reaches 0 at 17.70.
+ * It is drawn in front of the sheet (its layer is raised); the sheet's ease-in
+ * keeps every part of it off the line's letters while the line is visible.
+ * It never comes near the dot.
  */
 
 /** The line's exit towards the camera: it starts here, while bright, and is gone at OUT[1]. */
-const OUT = [17.5, 17.69];
+const OUT = [17.5, 17.7];
 /** Its final scale, reached at OUT[1] with progress k^EASE (an ease-in); capped so it stays EDGE inside the frame. */
-const GROW = 0.15;
+const GROW = 0.2;
 const EASE = 2;
 /** Its opacity holds at full to HOLD of the way through, then falls (1 − f², an ease-in) to 0 at OUT[1]. */
 const HOLD = 0.5;
-/** The line stays this far (design px) inside each side of the frame. */
+/** The line stays this far (design px) inside each side of the frame while it is above VIS opacity. */
 const EDGE = 24;
+const VIS = 0.3;
+/** Where in the move its opacity (1 − f²) falls to VIS. */
+const K_VIS = HOLD + (1 - HOLD) * Math.sqrt(1 - VIS);
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
@@ -62,7 +65,9 @@ export function build({ el, tl, u, W, H, portrait, t0, onFrame }) {
     const cy = r.top + r.height / 2;
     // The most it may grow (about its centre) and still sit EDGE inside every side.
     const gMax = Math.max(1, Math.min((Math.min(cx, W - cx) - EDGE * u) / (r.width / 2), (Math.min(cy, H - cy) - EDGE * u) / (r.height / 2)));
-    const g = 1 + Math.min(GROW, gMax - 1) * k ** EASE;
+    // Capped so it reaches gMax no sooner than where its opacity falls to VIS
+    // (it may touch the frame's edge only once fainter than that).
+    const g = 1 + Math.min(GROW, (gMax - 1) / K_VIS ** EASE) * k ** EASE;
     lift.style.transformOrigin = `${cx}px ${cy}px`;
     lift.style.transform = `scale(${g})`;
     lift.style.opacity = String(o);
