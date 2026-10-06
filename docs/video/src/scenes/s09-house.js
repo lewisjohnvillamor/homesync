@@ -584,7 +584,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // Two lines: the device's name over its figure, so each bar is plainly
       // that device's — and the chip stays narrow enough to sit between bars.
       `<div class="ms ms-${d.kind}" style="position:absolute;left:0;top:0;opacity:0;
-          padding:${7 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.94);
+          padding:${7 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgb(11,14,19);
           font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">
          <div style="font-size:${Math.round(msSize * 0.62)}px;color:var(--text-dim);margin-bottom:${6 * u}px">${NAME[d.kind]}</div>
          <div style="display:flex;align-items:center;gap:${10 * u}px">${MS[d.kind]} ms<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span></div></div>`,
@@ -706,8 +706,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     for (const d of devices) {
       const sp = toScreen(new THREE.Vector3(d.anchor.x, d.baseY, d.anchor.z), camera, W, H);
       // Each figure appears as its bar arrives at T, not while it is still rising.
-      const o = smooth(span(t, HOUSE_TOUCH - 0.15, HOUSE_TOUCH + 0.15)) * (1 - smooth(span(t, 21.38, 21.5)));
-      d.label.style.opacity = String(o);
+      // The plate is opaque before its words start to show, and outlasts
+      // them leaving, so the words are never ghosts over the bright rooms.
+      const plate = smooth(span(t, HOUSE_TOUCH - 0.25, HOUSE_TOUCH + 0.05)) * (1 - smooth(span(t, 21.42, 21.5)));
+      const words = smooth(span(t, HOUSE_TOUCH - 0.15, HOUSE_TOUCH + 0.15)) * (1 - smooth(span(t, 21.36, 21.44)));
+      d.label.style.opacity = String(plate);
+      for (const c of d.label.children) c.style.opacity = String(plate > 0 ? words / plate : 0);
       // Right of its disc; the TV's (leftmost, beside the T label) to the
       // left, or under its disc where the left would leave the frame.
       const lw = d.label.offsetWidth;
@@ -727,7 +731,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // reach the dot.
       if (!portrait && d.kind === 'tv') lx = top.x - lw - 94 * u;
       // Directly above its ring, the ring under the plate's left edge.
-      if (portrait && d.kind === 'tv') { lx = top.x - 20 * u; ly = top.y - lh - 14 * u; }
+      if (portrait && d.kind === 'tv') { lx = top.x - 20 * u; ly = top.y - lh - 34 * u; }
       // The phone's ring sits at the plane's back edge: its figure goes above
       // it, clear of the plane's outline.
       // 9:16: left of its ring, over the dark outside the plane's back corner,
