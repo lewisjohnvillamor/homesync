@@ -587,9 +587,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   const band = el.querySelector('.band');
   const lineEls = [...el.querySelectorAll('.ln')];
 
-  // The headline arrives as the house settles. In 9:16 the dot is still
-  // dropping through the headline's rows until ~18.0, so it waits for it.
-  const HEAD = portrait ? 18.0 : 17.7;
+  // The headline arrives as the house settles, on the same frame in both
+  // formats (the dot has dropped clear of its rows by then).
+  const HEAD = 18.0;
   // The band opens first, so no word is ever over bare picture; the lines
   // enter from opposite sides inside it, slowing as they land; set by 18.6 s.
   // They arrive as the house settles, into the space left for them, so the
@@ -624,7 +624,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (no see-through walls), never darker than the ground. Fog in the ground
     // colour does it: with `near` far behind the camera, its blend is the same
     // (1 − emerge) at every depth across the model.
-    const emerge = smooth(span(t, 17.1, 17.62));
+    const emerge = smooth(span(t, 17.65, 18.1));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
@@ -656,9 +656,12 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // The guide fades in with its bar, never before it.
       const sk = smooth(span(t, d.start, d.start + 0.25));
       d.guide.visible = sk > 0;
-      d.stem.scale.set(1, Math.max(0.0001, d.baseY - d.stemFrom), 1);
-      // No stalk: each bar hangs from T, and its label names its device.
-      d.guide.visible = false;
+      // A faint plumb from the device's ring all the way up to T: the bar
+      // grows along it, so bar and device are plainly one column, while the
+      // solid bar alone is the measure.
+      d.stem.scale.set(1, Math.max(0.0001, T_Y - d.stemFrom), 1);
+      d.guide.visible = sk > 0;
+      d.stem.material.opacity = 0.25 * sk;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, easeOut(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.12))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
@@ -718,7 +721,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // it, clear of the plane's outline.
       // 9:16: left of its ring, over the dark outside the plane's back corner,
       // clear of the plane's lit edge and of the headline.
-      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x - lw - 40 * u; ly = top.y - lh / 2; } }
+      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x - lw - 80 * u; ly = top.y - lh / 2; } }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
