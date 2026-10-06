@@ -5,17 +5,18 @@
  * the tilt has settled, so no line of the diagram ever passes through it.
  * It holds, drifting, with the finished diagram to the beat at 17.5. Then it
  * is the front object and leaves towards the camera on its own, just ahead of
- * the sheet (s06's lift, from 17.55): over 17.50–17.72 it grows about its own
+ * the sheet (s06's lift, from 17.55): over 17.50–17.69 it grows about its own
  * centre with an ease-in and no travel, to 1.15× (never cropped by the frame:
  * held EDGE inside every side). Its opacity holds full for the first half of
  * the move, then falls with an ease-in (1 − f²), so it is still seen pushing
- * forward until its last frames, and reaches 0 at 17.72, before the sheet,
- * growing about T, reaches the line's box. It is drawn in front of the sheet
+ * forward until its last frames, and reaches 0 at 17.69, before the house
+ * under it starts to fill in (17.70) and before the sheet, growing about T,
+ * reaches the line's box. It is drawn in front of the sheet
  * (its layer is raised). It never comes near the dot.
  */
 
 /** The line's exit towards the camera: it starts here, while bright, and is gone at OUT[1]. */
-const OUT = [17.5, 17.72];
+const OUT = [17.5, 17.69];
 /** Its final scale, reached at OUT[1] with progress k^EASE (an ease-in); capped so it stays EDGE inside the frame. */
 const GROW = 0.15;
 const EASE = 2;

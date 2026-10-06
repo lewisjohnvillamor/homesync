@@ -56,8 +56,8 @@ const C9 = 18.125;
  * The hand-over into the house, on the beat grid. Composition 8's finished
  * picture (all three bars on T, T bright, the line set) holds, drifting, to
  * the beat at 17.5. Composition 9 is drawn underneath, a solid model that is
- * exactly the ground colour until 17.65 and emerges evenly over 17.65–18.10
- * (~13 % at 17.75, ~40 % at 17.85). Nothing of the diagram travels into the
+ * exactly the ground colour until 17.70 and fills in (ease-out) over
+ * 17.70–18.12 (~18 % at 17.73, ~35 % at 17.77). Nothing of the diagram travels into the
  * house: any path from outside it to a model inside would cross a wall on
  * screen. The dot is what carries across; the icons belong to the diagram and
  * leave with it.
@@ -67,10 +67,10 @@ const C9 = 18.125;
  *               at 17.3 (swelling in too). The finished picture then holds,
  *               drifting, to the beat.
  *  17.50–17.62  The names, figures, T label and example tag leave.
- *  17.50–17.72  Composition 8's line (s08) pushes towards the camera on its
- *               own, to 1.15× about its centre, gone before the sheet reaches
- *               its box: the sheet's ease-in is steep (≤ 1.15× until 17.717),
- *               so the TV's bar, the nearest, stays ≥ 18 px clear of it.
+ *  17.50–17.69  Composition 8's line (s08) pushes towards the camera on its
+ *               own, to 1.15× about its centre, gone before the house starts
+ *               to fill in; the sheet's ease-in is steep, so the TV's bar, the
+ *               nearest, stays ≥ 60 px clear of it.
  *  17.55        The camera comes to rest (its drift eases out here) and the
  *               sheet's own ground goes in one frame (1 → 0, nothing in
  *               between): the house under it is still exactly the ground
@@ -88,9 +88,11 @@ const C9 = 18.125;
  *               one piece) fades out whole as it nears that disc, so no lane is
  *               ever seen running on either side of the dot like a bead on a
  *               bar.
- *  17.72–17.765 Every lane and icon fades out whole (OFF_HOUSE): none is left
- *               when the house passes ~15 % (17.76). Only the T line, which
- *               never lies over the house, rushes on to 17.85.
+ *  17.675–17.715 Every lane and icon fades out whole (OFF_HOUSE): none is
+ *               left once the house is above ~5 % (17.713). Only the T line,
+ *               which never lies over the house, rushes on to 17.85, widening
+ *               and glowing as it goes (T_FLARE), so the frame keeps light
+ *               while the house comes up.
  *  17.90        The dot is let go to composition 9 (liftDotAt).
  */
 /** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
@@ -103,11 +105,11 @@ const LIFT_EASE = 6;
 const LIFT_HOLD = 0.5;
 /**
  * Every lane (rule, bar and start marker, one piece) and every icon has faded
- * out whole by the time the house passes ~15 % (17.76): the lift cannot carry
+ * out whole by the time the house passes ~5 % (17.713): the lift cannot carry
  * them off it that soon without reaching the caption first. The T line, which
  * never lies over the house, leaves with the sheet as a whole.
  */
-const OFF_HOUSE = [17.72, 17.765];
+const OFF_HOUSE = [17.675, 17.715];
 /** The clear disc round the dot: past its rim by this much (design px), soft over CLEAR_F; it opens over CLEAR_IN. */
 const CLEAR_R = 44;
 const CLEAR_F = 16;
@@ -124,6 +126,16 @@ const LABELS_OUT = [17.5, 17.62];
  * film flies it into the house's host.
  */
 const DOT_RELEASE = 17.9;
+/**
+ * As the lanes clear (and the caption has gone), T — the one thing of the
+ * diagram that never lies over the house — is left as the front object: its
+ * line widens and glows as it rushes past the lens with the sheet, carrying
+ * the frame's light until the house has come up (it fades with the sheet).
+ */
+const T_FLARE = [17.6, 17.71];
+const T_WIDE = 4;
+/** (9:16's T line runs close past the house's far corner, so its glow is kept tighter there.) */
+const T_GLOW = { land: 0.6, port: 0.3 };
 
 /** Composition 7 → 8: the phone's "90 ms" moves and scales into "phone · 90 ms", the example tag sliding with it. */
 const LABEL_MOVE = [15.36, 15.61];
@@ -345,15 +357,19 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     rot: 0,
   });
   const camC = (t) => {
-    const k = sine(span(t, C8 + 0.6, DRIFT_END));
+    // 9:16's push runs later in the hold (x^1.5), so it is still moving
+    // through 17.0–17.5 rather than easing to rest from ~16.9.
+    const x = span(t, C8 + 0.6, DRIFT_END);
+    const k = sine(portrait ? x ** 1.5 : x);
     return {
-      // 9:16 pushes harder through the hold (5 %), so it never reads as paused.
+      // 9:16 pushes harder through the hold (5.5 %) and rises (below), so it never reads as paused.
       // 9:16 is framed larger (its icons close up towards the bars, so the plane is narrower).
-      s: (portrait ? 0.88 : 1.08) * lerp(1, portrait ? 1.05 : 1.04, k),
+      s: (portrait ? 0.88 : 1.08) * lerp(1, portrait ? 1.055 : 1.04, k),
       fx: portrait ? (L.iconX + SHIFT8 - devW / 2 + L.tX + 40 * u) / 2 : (L.iconX - devW / 2 + L.laneEnd) / 2,
       fy: (L.lanes.laptop + L.lanes.tv) / 2,
       px: W / 2 + (portrait ? 0 : 50 * u) + (portrait ? 0 : 30) * u * k,
-      py: (portrait ? H * 0.41 - 120 * u : H * 0.45) + 10 * u * k,
+      // 9:16 drifts up, away from the line below it (16:9 drifts down and right).
+      py: (portrait ? H * 0.41 - 120 * u - PORTRAIT_RISE * u * k : H * 0.45 + 10 * u * k),
       tilt: 90 - elevation,
       // 9:16: the house's turn (−70°) would stand the lanes on end, so the plane
       // is held at −30° (lanes within ~25° of horizontal) through the lift.
@@ -361,6 +377,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     };
   };
   const PORTRAIT_ROT = -30;
+  /** 9:16, composition 8's hold: how far (design px) the plane rises as it pushes in. */
+  const PORTRAIT_RISE = 40;
   /** 9:16, composition 8: how far (world px) the icons and names close up towards the bars. */
   const SHIFT8 = portrait ? 150 * u : 0;
   const mix = (a, b, k) => {
@@ -734,7 +752,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
         const left = NAME_R - textW[kind];
         // The laptop's and phone's names start a little left of their lanes'
         // starts, so each "NN ms" ends ≥ 24 px clear of the T line.
-        const P = { x: L.laneStart + close8 + { tv: 40, laptop: -26, phone: -22 }[kind] * u, y: L.lanes[kind] - 34 * u };
+        // Each sits ~16 px (screen) above its start marker, not touching it.
+        const P = { x: L.laneStart + close8 + { tv: 40, laptop: -26, phone: -22 }[kind] * u, y: L.lanes[kind] - 62 * u };
         const dx = lerp(close8, P.x - ox - NAME_GROW * (left - ox), b8);
         const dy = lerp(0, P.y - oy, b8);
         tail = `translate(${dx}px, ${dy}px) rotate(${-c.rot * (1 - b8)}deg) scale(${g})`;
@@ -852,7 +871,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     tlabel.style.opacity = String(span(t, 11.05, 11.3) * (1 - span(t, ...LABELS_OUT)));
     // The T line starts at the (held) dot, so nothing of it runs above T.
     const shift = dy + dy2;
-    tline.style.transform = `translateY(${shift}px) scaleY(${Math.max(0, fallK(t) * tTrim - shift / tLen)})`;
+    const flare = sine(span(t, ...T_FLARE));
+    tline.style.transform = `translateY(${shift}px) scaleY(${Math.max(0, fallK(t) * tTrim - shift / tLen)}) scaleX(${1 + T_WIDE * flare})`;
     // Tilted (8), the label steps a little further from the dot, clear of its glow.
     tlabel.style.transform = `translateY(${dy + dy2}px) scale(${Math.max(tk7, 1 / c.s * 0.9)})${portrait ? ` rotate(${-c.rot}deg)` : ''} translate(${28 * u * back}px, ${-10 * u * back}px)`;
     // One "example values" tag for the figures; in 8 just above the column of
@@ -889,7 +909,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     const flash = (at) => (t >= at ? Math.exp(-(t - at) * 4) : 0);
     // Composition 6's hold: T gathers (11.55–12.1) and all three lanes answer it together at 12.1.
     const charge = sine(span(t, 11.45, ACK)) * (1 - span(t, ACK + 0.3, ACK + 1.0));
-    const home = Math.max(1.4 * flash(FIRE7 + RUN7), arrive8(t, 4), 0.9 * land8(t, 4), 0.35 * sine(span(t, GROW8.tv[1], GROW8.tv[1] + 0.2)), 0.9 * charge);
+    const home = Math.max(1.4 * flash(FIRE7 + RUN7), arrive8(t, 4), 0.9 * land8(t, 4), 0.35 * sine(span(t, GROW8.tv[1], GROW8.tv[1] + 0.2)), 0.9 * charge, (portrait ? T_GLOW.port : T_GLOW.land) * flare);
     tline.style.boxShadow = `0 0 ${home * 34 * u}px ${home * 6 * u}px #5aa9ffaa`;
 
     // Read where T is before the lift moves the plane; from LIFT0 on the
