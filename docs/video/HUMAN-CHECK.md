@@ -8,7 +8,7 @@ results are in `out/measurements.json` and at the end of `ledger.md`.
 
 1. **Listen to it.** No human has heard the sound. Everything about it was
    measured, not heard: −16.0 LUFS integrated, 2.8 LU range, true peak
-   about −3.3 dBTP, no clipping; every effect 5–20 dB under the music and in
+   about −3.3 dBTP, no clipping; every effect at least 4.4 dB under the music and in
    its own (higher) frequency range; one whoosh per real scene change, clicks
    only on real on-screen actions (the play press, the join button, the tap,
    "this device", Enter). Listen once on laptop speakers and once on
