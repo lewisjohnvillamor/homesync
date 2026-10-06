@@ -42,14 +42,6 @@ export const pad = [0.2, 2 * 2.5 + 0.15];
 
 /** Read by the builder's checks only (never by another scene): the sheet's lines and icons on the last frame drawn. */
 export const debug = {};
-/**
- * The lift, for composition 8's line (s08), which rides the same sheet: set at
- * build. `at(t)` gives the lift's growth g about (ox, oy), its rise dy and its
- * opacity o (null before it), and the clear disc round the dot (x, y, r, f:
- * fully clear inside r, solid again at r + f), or null outside the lift.
- */
-export const sheetLift = { at: null };
-
 const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
 const easeOut = (k) => 1 - (1 - k) ** 3;
 const easeIn = (k) => k * k * k;
@@ -72,8 +64,8 @@ const C9 = 18.125;
  *  17.15        The sheet's own ground goes in one frame (1 → 0, nothing in
  *               between): the house under it is exactly the ground colour, so
  *               from here it comes up under the lanes.
- *  17.20–17.45  The sheet — icons, lanes, bars, markers, T and composition
- *               8's line, one piece, nothing on it moving on its own — leaves
+ *  17.20–17.45  The sheet — icons, lanes, bars, markers and T, one piece,
+ *               nothing on it moving on its own — leaves
  *               towards the camera: it grows 1.5× about T (where the dot
  *               stays) and rises up and out of the top of the frame (ease-in),
  *               holding its brightness and fading only in its last third. By
@@ -84,8 +76,9 @@ const C9 = 18.125;
  *               and each lane (rule, bar and start marker, one piece) fades
  *               out whole as it nears that disc, so no lane is ever seen
  *               running on either side of the dot like a bead on a bar.
- *               Composition 8's line (s08) is gone by 17.27, before the house
- *               is past ~10 %.
+ *               Composition 8's line (s08) is not on the sheet: it leaves on
+ *               its own, pushing towards the camera over 17.15–17.30, gone
+ *               before the house is past ~12 %.
  */
 /** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
 const GROUND_OFF = 17.15;
@@ -93,7 +86,7 @@ const GROUND_OFF = 17.15;
 const LIFT = [17.2, 17.45];
 const LIFT_GROW = 1.5;
 const LIFT_EASE = 1.4;
-/** 9:16's line sits lower under T, so its sheet rises further (in px) to carry the line out of the top too. */
+/** How far the sheet rises over the lift, in frame heights. */
 const LIFT_RISE = { landscape: 1.5, portrait: 1.2 };
 /** The clear disc round the dot: past its rim by this much (design px), soft over CLEAR_F; it opens over CLEAR_IN. */
 const CLEAR_R = 44;
@@ -437,15 +430,8 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     return { x: p.x, y: p.y, r: p.d / 2 + CLEAR_R * u * e, f: Math.max(0.01, CLEAR_F * u * e) };
   };
   const maskOf = (cl) => (cl ? `radial-gradient(circle at ${cl.x}px ${cl.y}px, transparent ${cl.r}px, #000 ${cl.r + cl.f}px)` : 'none');
-  sheetLift.at = (t) => {
-    if (t < LIFT[0]) return null;
-    if (t >= LIFT[1]) return { g: 1, ox: 0, oy: 0, dy: 0, o: 0, clear: null, mask: 'none' };
-    const lift = liftAt(t) ?? { g: 1, ox: 0, oy: 0, dy: 0, o: 1 };
-    return { ...lift, clear: clearAt(t), mask: maskOf(clearAt(t)) };
-  };
   /**
-   * A solid thing on the sheet (an icon; composition 8's line) is never cut
-   * round the dot as a lane is: as the lift carries it towards the clear disc
+   * A solid thing on the sheet (an icon) is never cut round the dot as a lane is: as the lift carries it towards the clear disc
    * it fades out whole, and stays out once it has passed. `q` is its outline
    * on screen before the lift (a convex polygon); the result is its opacity
    * factor at t — the least, over the lift so far, of how far its lifted
@@ -476,7 +462,6 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     }
     return f;
   };
-  sheetLift.nearFade = nearFade;
   /** How far before the clear disc an icon starts to fade out whole. */
   const ICON_NEAR = 160 * u;
   /**
