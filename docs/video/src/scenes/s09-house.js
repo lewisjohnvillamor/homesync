@@ -576,7 +576,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // Two lines: the device's name over its figure, so each bar is plainly
       // that device's — and the chip stays narrow enough to sit between bars.
       `<div class="ms ms-${d.kind}" style="position:absolute;left:0;top:0;opacity:0;
-          padding:${7 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.86);
+          padding:${7 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.94);
           font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">
          <div style="font-size:${Math.round(msSize * 0.62)}px;color:var(--text-dim);margin-bottom:${6 * u}px">${NAME[d.kind]}</div>
          <div style="display:flex;align-items:center;gap:${10 * u}px">${MS[d.kind]} ms<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span></div></div>`,
@@ -711,11 +711,14 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       if (portrait && d.kind === 'laptop') ly = top.y + 20 * u;
       // 16:9: the TV's figure sits left of its ring — to the right it would
       // reach the dot.
-      if (!portrait && d.kind === 'tv') lx = top.x - lw - 34 * u;
-      if (portrait && d.kind === 'tv') ly = top.y - lh - 14 * u;
+      if (!portrait && d.kind === 'tv') lx = top.x - lw - 94 * u;
+      // Directly above its ring, the ring under the plate's left edge.
+      if (portrait && d.kind === 'tv') { lx = top.x - 20 * u; ly = top.y - lh - 14 * u; }
       // The phone's ring sits at the plane's back edge: its figure goes above
       // it, clear of the plane's outline.
-      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x + 30 * u; ly = top.y - lh - 6 * u; } }
+      // 9:16: left of its ring, over the dark outside the plane's back corner,
+      // clear of the plane's lit edge and of the headline.
+      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x - lw - 40 * u; ly = top.y - lh / 2; } }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
