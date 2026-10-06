@@ -637,7 +637,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (1 − emerge) at every depth across the model.
     // Front-loaded (ease-out): it fills in as the caption and sheet leave, so the
     // frame never dips while the old layer is gone and the house still faint.
-    const emerge = smooth(span(t, 17.62, 17.95));
+    const emerge = smooth(span(t, 17.66, 17.95));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
@@ -711,7 +711,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // Each figure appears as its bar arrives at T, not while it is still rising.
       // The plate is opaque before its words start to show, and outlasts
       // them leaving, so the words are never ghosts over the bright rooms.
-      const plate = smooth(span(t, HOUSE_TOUCH - 0.25, HOUSE_TOUCH + 0.05)) * (1 - smooth(span(t, 21.42, 21.5)));
+      const plate = smooth(span(t, HOUSE_TOUCH - 0.19, HOUSE_TOUCH + 0.11)) * (1 - smooth(span(t, 21.39, 21.47)));
       const words = smooth(span(t, HOUSE_TOUCH - 0.15, HOUSE_TOUCH + 0.15)) * (1 - smooth(span(t, 21.36, 21.44)));
       d.label.style.opacity = String(plate);
       for (const c of d.label.children) c.style.opacity = String(plate > 0 ? words / plate : 0);
@@ -732,7 +732,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       if (portrait && d.kind === 'laptop') ly = top.y + 20 * u;
       // 16:9: the TV's figure sits left of its ring — to the right it would
       // reach the dot.
-      if (!portrait && d.kind === 'tv') lx = top.x - lw - 94 * u;
+      if (!portrait && d.kind === 'tv') lx = top.x - lw - 124 * u;
       // Directly above its ring, the ring under the plate's left edge.
       if (portrait && d.kind === 'tv') { lx = top.x - 20 * u; ly = top.y - lh - 34 * u; }
       // The phone's ring sits at the plane's back edge: its figure goes above

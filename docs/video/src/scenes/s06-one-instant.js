@@ -56,8 +56,8 @@ const C9 = 18.125;
  * The hand-over into the house, on the beat grid. Composition 8's finished
  * picture (all three bars on T, T bright, the line set) holds, drifting, to
  * the beat at 17.5. Composition 9 is drawn underneath, a solid model that is
- * exactly the ground colour until 17.62 and emerges evenly (smoothstep) over
- * 17.62–17.95, while the sheet is rushing past (so it never brightens under
+ * exactly the ground colour until 17.66 and emerges evenly (smoothstep) over
+ * 17.66–17.95, while the sheet is rushing past (so it never brightens under
  * a sheet that is standing still). Nothing of the diagram travels
  * into the house: any path from outside it to a model inside would cross a
  * wall on screen. The dot is what carries across; the icons belong to the
@@ -92,7 +92,7 @@ const C9 = 18.125;
  *               is seen running on either side of the dot like a bead.
  *  17.90        The dot is let go to composition 9 (liftDotAt).
  */
-/** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour until 17.62). */
+/** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour until 17.66). */
 const GROUND_OFF = 17.5;
 /** The lift: the sheet grows 1 → LIFT_GROW× about T (progress k^LIFT_EASE, an ease-in), with no translation; gone by LIFT[1]. */
 const LIFT = [17.5, 17.88];
