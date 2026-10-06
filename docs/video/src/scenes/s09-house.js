@@ -319,7 +319,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.len = d.late * RISE;
     // Each bar's length is its delay; its rise lasts at least 0.6 s so even
     // the 40 ms bar's arrival can be read. All three still meet T together.
-    d.rise = Math.max(d.late, 0.6);
+    d.rise = Math.max(d.late, 0.8);
     d.start = HOUSE_TOUCH - d.rise;
     d.baseY = T_Y - d.len;
     // A bar whose top rises; geometry has its origin at the bottom.
@@ -341,8 +341,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.bar.position.set(ax, d.baseY, az);
     d.bar.renderOrder = 6;
     scene.add(d.bar);
-    // Its own start: a small level disc.
-    d.disc = new THREE.Mesh(new THREE.CircleGeometry(0.075, 40), accent(1));
+    // Its device's footprint: a small accent ring lying on top of the device,
+    // lit as its bar starts, so each bar plainly belongs to its device.
+    d.disc = new THREE.Mesh(new THREE.RingGeometry(0.07, 0.1, 40), accent(1));
     d.disc.rotation.x = -Math.PI / 2;
     d.disc.position.set(ax, d.baseY, az);
     d.disc.renderOrder = 7;
@@ -413,7 +414,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   plumb.material.alphaMap = new THREE.CanvasTexture(plumbFade);
   plumb.position.set(DOT_XZ[0], Y0, DOT_XZ[1]);
   // A hairline down to the floor, so the dot plainly hangs at T's height.
-  if (portrait) scene.add(plumb);
+  // (No plumb: the dot reads as hanging at T by its own T label.)
   const spot = new THREE.Mesh(new THREE.CircleGeometry(0.14, 32), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0, depthWrite: false }));
   spot.rotation.x = -Math.PI / 2;
   spot.position.set(DOT_XZ[0], Y0 + 0.13, DOT_XZ[1]);
@@ -449,7 +450,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     d.len = (lo + hi) / 2;
     d.baseY = T_Y - d.len;
     d.bar.position.y = d.baseY;
-    d.disc.position.y = d.baseY;
+    d.disc.position.y = d.anchor.y + 0.01;
     d.stem.scale.set(1, Math.max(0.0001, d.baseY - d.stemFrom), 1);
   }
   poseCamera(probe, SETTLE);
@@ -651,7 +652,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.bar.visible = on && grown > 0.002;
       d.bar.scale.set(1, Math.max(0.0001, grown * d.len), 1);
       d.bar.rotation.y = Math.atan2(camera.position.x - d.anchor.x, camera.position.z - d.anchor.z);
-      d.disc.visible = false;
+      d.disc.visible = t >= d.start;
       // The guide fades in with its bar, never before it.
       const sk = smooth(span(t, d.start, d.start + 0.25));
       d.guide.visible = sk > 0;
@@ -660,7 +661,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       d.guide.visible = false;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
-      d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
+      d.contact.scale.setScalar(met ? Math.max(0.0001, easeOut(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.12))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
       // The rings stay with their bars until the house leaves.
       d.contact.material.opacity = met ? 1 : 0;
       
