@@ -597,7 +597,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, HEAD - 0.05);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * (portrait ? 70 : 180) * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, HEAD);
+    tl.fromTo(ln, { x: from * (portrait ? 70 : 110) * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, HEAD);
     tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, HEAD);
   });
   // Held, never still: a slow push on the whole band.
@@ -626,7 +626,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (1 − emerge) at every depth across the model.
     // Front-loaded (ease-out): it fills in as the caption and sheet leave, so the
     // frame never dips while the old layer is gone and the house still faint.
-    const emerge = Math.sin((Math.PI / 2) * span(t, 17.66, 18.1));
+    const emerge = Math.sin((Math.PI / 2) * span(t, 17.7, 18.12));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
