@@ -14,8 +14,6 @@ results are in `out/measurements.json` and at the end of `ledger.md`.
    "this device", Enter). Listen once on laptop speakers and once on
    headphones, at a normal volume, for harshness, for anything that sounds
    cheap or synthetic, and for whether the music's energy suits the picture.
-   The final critic noted the music stays level from 10 s to the end (the
-   house gets no lift); that was left as is.
 2. **Scan the QR code with a phone.** At about 8.6 s (both formats) the
    laptop shows a QR code. It was decoded from the rendered frames
    (OpenCV) as `https://github.com/lewisjohnvillamor/homesync`, but it has
@@ -51,7 +49,25 @@ results are in `out/measurements.json` and at the end of `ledger.md`.
 - **Labels near the plane's edges.** The device labels in the house scene
   sit close to the edges of the translucent plane in places (the 210 ms
   label near its back-left corner in 16:9).
+- **The house bars are the weakest of the three signature moments** (18.7–21.6 s):
+  the phone's bar hangs about a room-height above the phone, tied to it by a
+  thin dashed line, so "each device starts early by its own amount" reads
+  more clearly in the flat diagram (8–17.5 s) than in the house. The final
+  critic's suggested fix, if wanted: solid leader lines at about 40 %
+  opacity. The headline carries the meaning either way.
+- **The music is level from about 10 s to the end;** the house gets no lift.
+  Suggested if wanted: about +1.5 dB of music over 17.5–21.9 s.
 - **Small motion notes from the final critic, left as they are:** a fast
   push-in at 9.0–9.3 s in the join scene; a faint accent line in the empty
   left third of the 9:16 opening; no whoosh on the pull-back at 15.6 s (it
-  is one continuous camera move, not a new scene).
+  is one continuous camera move, not a new scene); the laptop's QR screen
+  shows about 150 ms before the 8.125 s beat (the whoosh and the phone land
+  on it); the house rests 0.35 s under its slow push before the headline.
+
+## Where things are
+
+- `out/`: both films, the music-only version, contact sheets (a frame every
+  0.5 s), `measurements.json`.
+- `ledger.md`: every critic round and what was done, ending with the final
+  quality-bar results.
+- `reviews/`: the two whole-film reviews.

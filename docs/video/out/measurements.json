@@ -1,0 +1,221 @@
+{
+  "16x9": {
+    "video": {
+      "width": 1920,
+      "height": 1080,
+      "r_frame_rate": "60/1",
+      "nb_frames": "1800"
+    },
+    "frozen_adjacent_frames": {
+      "duration_s": 30.0,
+      "frozen_total_s": 17.333,
+      "frozen_per_30s": 17.333,
+      "longest_still_s": 2.2,
+      "longest_still_from_to": [
+        24.417,
+        26.6
+      ],
+      "still_stretches_over_0.3s": [
+        [
+          0.017,
+          1.167
+        ],
+        [
+          4.233,
+          1.717
+        ],
+        [
+          6.983,
+          0.833
+        ],
+        [
+          8.4,
+          0.367
+        ],
+        [
+          11.0,
+          0.467
+        ],
+        [
+          13.417,
+          0.317
+        ],
+        [
+          14.617,
+          0.317
+        ],
+        [
+          16.1,
+          0.517
+        ],
+        [
+          17.667,
+          0.367
+        ],
+        [
+          18.283,
+          2.033
+        ],
+        [
+          20.333,
+          0.567
+        ],
+        [
+          20.917,
+          0.483
+        ],
+        [
+          22.65,
+          0.383
+        ],
+        [
+          23.533,
+          0.583
+        ],
+        [
+          24.417,
+          2.2
+        ],
+        [
+          26.833,
+          0.35
+        ],
+        [
+          27.717,
+          0.517
+        ],
+        [
+          28.383,
+          0.367
+        ],
+        [
+          28.767,
+          1.233
+        ]
+      ],
+      "threshold_levels": 0.6,
+      "compared_with_frame_s_earlier": 0.017
+    },
+    "frozen_window_0.25s": {
+      "duration_s": 30.0,
+      "frozen_total_s": 0.117,
+      "frozen_per_30s": 0.117,
+      "longest_still_s": 0.117,
+      "longest_still_from_to": [
+        24.65,
+        24.75
+      ],
+      "still_stretches_over_0.3s": [],
+      "threshold_levels": 0.6,
+      "compared_with_frame_s_earlier": 0.25
+    },
+    "loudness": {
+      "integrated_lufs": -16.0,
+      "lra_lu": 2.8,
+      "true_peak_dbfs": -3.3
+    }
+  },
+  "9x16": {
+    "video": {
+      "width": 1080,
+      "height": 1920,
+      "r_frame_rate": "60/1",
+      "nb_frames": "1800"
+    },
+    "frozen_adjacent_frames": {
+      "duration_s": 30.0,
+      "frozen_total_s": 16.633,
+      "frozen_per_30s": 16.633,
+      "longest_still_s": 2.2,
+      "longest_still_from_to": [
+        24.417,
+        26.6
+      ],
+      "still_stretches_over_0.3s": [
+        [
+          0.017,
+          0.617
+        ],
+        [
+          0.65,
+          0.7
+        ],
+        [
+          4.217,
+          1.75
+        ],
+        [
+          6.983,
+          0.833
+        ],
+        [
+          11.067,
+          0.433
+        ],
+        [
+          13.417,
+          0.417
+        ],
+        [
+          14.583,
+          0.35
+        ],
+        [
+          17.683,
+          0.333
+        ],
+        [
+          18.267,
+          2.05
+        ],
+        [
+          22.633,
+          0.533
+        ],
+        [
+          23.517,
+          0.6
+        ],
+        [
+          24.417,
+          2.2
+        ],
+        [
+          27.7,
+          0.517
+        ],
+        [
+          28.833,
+          1.067
+        ]
+      ],
+      "threshold_levels": 0.6,
+      "compared_with_frame_s_earlier": 0.017
+    },
+    "frozen_window_0.25s": {
+      "duration_s": 30.0,
+      "frozen_total_s": 0.05,
+      "frozen_per_30s": 0.05,
+      "longest_still_s": 0.05,
+      "longest_still_from_to": [
+        22.95,
+        22.983
+      ],
+      "still_stretches_over_0.3s": [],
+      "threshold_levels": 0.6,
+      "compared_with_frame_s_earlier": 0.25
+    },
+    "loudness": {
+      "integrated_lufs": -16.0,
+      "lra_lu": 2.8,
+      "true_peak_dbfs": -3.3
+    }
+  },
+  "music_only": {
+    "loudness": {
+      "integrated_lufs": -16.0,
+      "lra_lu": 2.8,
+      "true_peak_dbfs": -3.2
+    }
+  }
+}

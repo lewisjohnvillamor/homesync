@@ -426,3 +426,28 @@ Measured on r29: flicker 0; windowed frozen 0.117 s (16:9, longest 0.117 s) and 
 | C 18.1–21.9 | **Ship.** The lift no longer crosses the house. Left, low or negligible: 16:9 framing and cropped plinth corner; chip plates ramp with their text for ~5 frames; laptop bar over wall/bed; no rim on the wall tops; the 210 plate touching the plane's corner; the scene change between beats (judged with the music). | Accepted; recorded for the human check. |
 
 With A (round 16), B, C and D passed, the film goes to the final whole-film critic (`work/critic-final.md`) with its mastered sound: `work/final/` from r29.
+
+## Final review — the whole film with its sound
+
+| Pass | Film | Verdict | Findings and what was done |
+| --- | --- | --- | --- |
+| 1 | r29, mastered (`reviews/final-review-1.md`) | One more pass | **Required:** the diagram-to-house hand-over landed half a beat late (picture 17.68–17.82, whoosh peak 17.51). Lead: the whole hand-over moved 0.25 s earlier (caption push, sheet lift and pass-through, house emergence, ground off, the pulses' arrival on T), so the change is centred on 17.5 under its whoosh; storyboard comp 8 updated. Optional items (house bars' legibility, flat music after 10 s, the 9.0–9.3 push, the 9:16 frame-one line, no whoosh at 15.6, QR 150 ms early at 8.125) recorded in HUMAN-CHECK.md. |
+| 2 | r30, mastered (`reviews/final-review-2.md`) | **Ship** | The hand-over is fixed (picture peak 17.45 in 16:9, 17.53 in 9:16; whoosh peak 17.51) and the stray "EXAMPLE VALUES" tag went with it. Sound off: understood, matching facts.md. Every scene change lands on a beat. Honesty: every string traced to facts.md. Remaining items optional. |
+
+## Final quality-bar results — `out/` (from r30)
+
+| Bar | Result | |
+| --- | --- | --- |
+| Frozen screen ≤ ~1 s per 30 s (0.25 s window) | 16:9 0.117 s; 9:16 0.05 s | pass |
+| No still stretch > ~0.5 s | longest 0.117 s (16:9), 0.05 s (9:16) | pass |
+| Flicker | 0 frames in both | pass |
+| Frame one is a finished composition | judged by every range-A critic and both final critics | pass |
+| Text ≥ 4.5:1, no collisions | lowest set text 6.8:1; no collisions found in the final passes | pass |
+| Brand colours in 3D | accent within 1–3 of #5aa9ff (key-lit end within 8); text within 1 of #e9eef5; ground (9, 13, 19) for #0b0e13 — the 8-bit BT.709 encode limit, see HUMAN-CHECK.md | pass, with the noted limit |
+| Loudness steady, no clipping, effects under the music | both films −16.0 LUFS, LRA 2.8 LU, true peak −3.3 dBTP; every effect 4.4 dB or more under the music in the same window | pass |
+| Music-only version | `out/homesync-music-only.m4a`: −16.0 LUFS, true peak −3.2 dBTP | delivered |
+| Understood with the sound off | final critic's sound-off reading matches facts.md | pass |
+| Cuts on beats | all scene changes within 50 ms of a beat | pass |
+| Next to the references | final critic: "would not look weaker beside a reference film" | pass (a person should confirm) |
+
+Also: the on-screen QR code decodes (OpenCV, from the rendered frames) to `https://github.com/lewisjohnvillamor/homesync` (F24). No API key is in any file; the film uses no external service.
