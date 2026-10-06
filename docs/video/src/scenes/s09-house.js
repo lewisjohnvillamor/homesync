@@ -624,7 +624,9 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (no see-through walls), never darker than the ground. Fog in the ground
     // colour does it: with `near` far behind the camera, its blend is the same
     // (1 − emerge) at every depth across the model.
-    const emerge = smooth(span(t, 17.65, 18.1));
+    // Front-loaded (ease-out): it fills in as the caption and sheet leave, so the
+    // frame never dips while the old layer is gone and the house still faint.
+    const emerge = Math.sin((Math.PI / 2) * span(t, 17.66, 18.1));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
