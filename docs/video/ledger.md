@@ -415,3 +415,14 @@ Measured on r28: flicker 0; windowed frozen 0.033 s (16:9, longest 0.017 s) and 
 | --- | --- | --- |
 | B 8.1–18.1 | **The sheet now reads as flying past the camera**; the house is exactly the ground colour until the sheet is moving; flat TV over the 3D room, clipped comp 9 line and the 9:16 wedge **fixed**. Left: the sheet grows about T, so whatever sits near T (T, its line, "40 ms", nearby labels) never leaves the frame and faded in place over the lit house for its last 3–4 frames; caption fades where it stands (now over plain ground: harmless); ripple brushing "phone" (16:9); framing (moderate); ground colour. | Lead: **the clear disc round the dot opens outward from T** over 17.68–17.84, so what is near T is passed through — the camera goes through the sheet — rather than dissolving; with the lanes' whole-lane fade at the disc's edge, nothing of the sheet is left over the house from ~17.80. |
 | C 18.1–21.9 | Headline-over-house regression **fixed**. Left: the phone lane's label crossing the house opaque at 17.77–17.80 (9:16); plates still ~4 frames ahead of readable text; 16:9 TV chip over the plane corner; known limits ranked low to moderate (framing, laptop bar, rim, beat). | Lead: as above (the disc reaches the phone lane by ~17.73); plates lead their words by one frame and end with them; 16:9 TV chip 36u further left, clear of the plane's corner. |
+
+## Component round 29 — full render r29 (B and C): **both ship**
+
+Measured on r29: flicker 0; windowed frozen 0.117 s (16:9, longest 0.117 s) and 0.05 s (9:16); contrast ≥ 4.5:1 for set text; 3D colours within 3; bars 4.87–5.07 : 2.05–2.10 : 1 (TV/phone 2.34–2.42). Findings: `work/round29/b.md`, `c.md`.
+
+| Range | Verdict and what is left | Lead |
+| --- | --- | --- |
+| B 8.1–18.1 | **Ship.** No dissolve or double exposure remains; nothing translucent over the lit house. Left, minor: in 16:9 the lanes are removed in single frames (a fast wipe rather than a fly-past); the caption fades where it stands over plain ground; the start-marker ripple brushes "phone" at 14.4 (16:9); house framing (low to moderate); ground colour (negligible). | Accepted. |
+| C 18.1–21.9 | **Ship.** The lift no longer crosses the house. Left, low or negligible: 16:9 framing and cropped plinth corner; chip plates ramp with their text for ~5 frames; laptop bar over wall/bed; no rim on the wall tops; the 210 plate touching the plane's corner; the scene change between beats (judged with the music). | Accepted; recorded for the human check. |
+
+With A (round 16), B, C and D passed, the film goes to the final whole-film critic (`work/critic-final.md`) with its mastered sound: `work/final/` from r29.
