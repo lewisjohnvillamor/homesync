@@ -21,9 +21,9 @@
  *     every start marker fires, the longest first, and the three pulses
  *     arrive on T together. Three lanes stay three lanes, each running out of
  *     its device. The labels go; the sheet's ground goes as the house starts
- *     to come up beneath it; the sheet — icons, lanes, bars, markers, T and
- *     composition 8's line, one piece — grows towards the camera about T and
- *     rises out of the top of the frame while the house comes up underneath.
+ *     to come up beneath it; the sheet — icons, lanes, bars, markers and T,
+ *     one piece — rushes towards the camera, growing about T and out past
+ *     every edge it reaches, while the house comes up underneath.
  *     The icons belong to the diagram and leave with it; the dot stays (the
  *     sheet never crosses it) and is let go into the house.
  *
@@ -64,34 +64,34 @@ const C9 = 18.125;
  *  17.15        The sheet's own ground goes in one frame (1 → 0, nothing in
  *               between): the house under it is exactly the ground colour, so
  *               from here it comes up under the lanes.
- *  17.20–17.45  The sheet — icons, lanes, bars, markers and T, one piece,
- *               nothing on it moving on its own — leaves
- *               towards the camera: it grows 1.5× about T (where the dot
- *               stays) and rises up and out of the top of the frame (ease-in),
- *               holding its brightness and fading only in its last third. By
- *               the first frame the house is past 10 % no lane, bar or icon
- *               lies on another device's model. Whatever of it passes within
+ *  17.15–17.42  The sheet — icons, lanes, bars, markers and T, one piece,
+ *               nothing on it moving on its own — leaves towards the camera:
+ *               it grows 1 → 3.2× about T (where the dot stays) with an ease-in
+ *               and no sideways or upward travel, so every point of it moves
+ *               straight out from the dot and it rushes past the lens, off the
+ *               frame's edges. It holds full brightness for the first half and
+ *               fades (cosine) to 0 by 17.42. Whatever of it passes within
  *               ~44 px of the dot is cleared there (a soft disc round the dot,
  *               opening over the lift's first frames), so nothing crosses it;
  *               and each lane (rule, bar and start marker, one piece) fades
  *               out whole as it nears that disc, so no lane is ever seen
  *               running on either side of the dot like a bead on a bar.
  *               Composition 8's line (s08) is not on the sheet: it leaves on
- *               its own, pushing towards the camera over 17.15–17.30, gone
- *               before the house is past ~12 %.
+ *               its own, growing towards the camera about its centre over
+ *               17.10–17.26, gone before the sheet sweeps through its place.
  */
 /** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
 const GROUND_OFF = 17.15;
-/** The lift: the sheet grows LIFT_GROW× about T and rises LIFT_RISE frame heights (progress k^LIFT_EASE), gone by LIFT[1]. */
-const LIFT = [17.2, 17.45];
-const LIFT_GROW = 1.5;
-const LIFT_EASE = 1.4;
-/** How far the sheet rises over the lift, in frame heights. */
-const LIFT_RISE = { landscape: 1.5, portrait: 1.2 };
+/** The lift: the sheet grows 1 → LIFT_GROW× about T (progress k^LIFT_EASE, an ease-in), with no translation; gone by LIFT[1]. */
+const LIFT = [17.15, 17.42];
+const LIFT_GROW = 3.2;
+const LIFT_EASE = 1.7;
+/** It holds full opacity to this fraction of the lift, then falls (cosine) to 0 at LIFT[1]. */
+const LIFT_HOLD = 0.5;
 /** The clear disc round the dot: past its rim by this much (design px), soft over CLEAR_F; it opens over CLEAR_IN. */
 const CLEAR_R = 44;
 const CLEAR_F = 16;
-const CLEAR_IN = [17.2, 17.26];
+const CLEAR_IN = [17.15, 17.21];
 /** The camera freezes here (composition 9's liftDotAt is read from this frozen camera: unchanged). */
 const LIFT0 = 17.32;
 /** The camera's drift through composition 8's hold eases to rest here. */
@@ -119,7 +119,7 @@ const FIRE7 = 14.2;
 const RUN7 = 0.72;
 /** Composition 8: the bars land one after another, then all three pulses arrive on T together. */
 const GROW8 = { laptop: [15.95, 16.3], tv: [16.32, 16.95] };
-// (Before the sheet lifts at 17.33, so the arrival is seen; the TV fires just after its bar lands at 16.95.)
+// (The dot's pulse on T is seen as the sheet starts to leave; the TV fires just after its bar lands at 16.95.)
 const ARRIVE8 = 17.3;
 const RUN8 = (kind) => (DELAY_MS[kind] / 1000) * 1.4;
 /** The pull back from the close-up starts just after the phone's pulse lands on T. */
@@ -400,20 +400,20 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   /** Where the dot (T) sits on the resting plane: set each frame, the same value from LIFT0 on. */
   let restDot = null;
   /**
-   * The lift at time t: the sheet's growth g about T (ox, oy), its rise dy,
-   * and its opacity; null before it. Each point of the sheet moves on a
-   * straight line away from T and up, with progress k^LIFT_EASE: it starts
-   * gently and accelerates up and out of the top. It holds its brightness for
-   * two thirds of the way (so the frame never dips while the house comes up)
-   * and fades only in the last third, gone by LIFT[1].
+   * The lift at time t: the sheet's growth g about T (ox, oy) and its
+   * opacity; null before it. Each point of the sheet moves on a straight line
+   * straight out from T, with progress k^LIFT_EASE: it starts gently and
+   * accelerates past the lens. It holds its brightness for the first half
+   * (so the frame never dips while the house comes up) and fades in the
+   * second, gone by LIFT[1].
    */
   const liftAt = (t) => {
     const k = span(t, ...LIFT);
     if (k <= 0) return null;
     const m = k ** LIFT_EASE;
     const O = frozenDot ?? restDot ?? { x: W / 2, y: 0 };
-    const o = k < 2 / 3 ? 1 : 0.5 + 0.5 * Math.cos(Math.PI * (3 * k - 2));
-    return { g: 1 + (LIFT_GROW - 1) * m, ox: O.x, oy: O.y, dy: -LIFT_RISE[portrait ? 'portrait' : 'landscape'] * H * m, o };
+    const o = k < LIFT_HOLD ? 1 : 0.5 + 0.5 * Math.cos((Math.PI * (k - LIFT_HOLD)) / (1 - LIFT_HOLD));
+    return { g: 1 + (LIFT_GROW - 1) * m, ox: O.x, oy: O.y, dy: 0, o };
   };
   /** A screen point carried by the lift. */
   const lifted = (lf, p) => (lf ? { x: lf.ox + (p.x - lf.ox) * lf.g, y: lf.oy + (p.y - lf.oy) * lf.g + lf.dy } : p);
@@ -854,10 +854,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     // camera is frozen, so this is the same point on every later frame.
     const ar = anchor.getBoundingClientRect();
     restDot = { x: ar.left + ar.width / 2, y: ar.top + ar.height / 2, d: Math.min(46 * u, Math.max(24 * u, (ar.width + ar.height) / 2)) };
-    // The lift: the sheet — lanes, bars, markers and T together — comes up
-    // towards the camera, growing about a point below the frame and rising
-    // out of the top, over the house coming up underneath; it holds its
-    // brightness at first and fades as it speeds up. (The dot stays where T
+    // The lift: the sheet — lanes, bars, markers and T together — rushes
+    // towards the camera, growing about T with no travel, over the house
+    // coming up underneath; it holds its brightness at first and fades as it
+    // speeds up. (The dot stays where T
     // was: it is measured above, before the lift moves anything.)
     if (lift) {
       lifter.style.transformOrigin = `${lift.ox}px ${lift.oy}px`;
