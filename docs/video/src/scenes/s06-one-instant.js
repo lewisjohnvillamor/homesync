@@ -80,7 +80,12 @@ const C9 = 18.125;
  *               the first frame the house is past 10 % no lane, bar or icon
  *               lies on another device's model. Whatever of it passes within
  *               ~44 px of the dot is cleared there (a soft disc round the dot,
- *               opening over the lift's first frames), so nothing crosses it.
+ *               opening over the lift's first frames), so nothing crosses it;
+ *               and each lane (rule, bar and start marker, one piece) fades
+ *               out whole as it nears that disc, so no lane is ever seen
+ *               running on either side of the dot like a bead on a bar.
+ *               Composition 8's line (s08) is gone by 17.27, before the house
+ *               is past ~10 %.
  */
 /** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour). */
 const GROUND_OFF = 17.15;
@@ -256,7 +261,7 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
       const q = (c) => root.querySelector(c);
       const icon = el.querySelector(`.icon-${kind}`);
       return [kind, {
-        icon, ackring: q('.ackring'), name: q('.name'), nin: q('.nin'), nms: q('.nms'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
+        root, icon, ackring: q('.ackring'), name: q('.name'), nin: q('.nin'), nms: q('.nms'), rule: q('.rule'), tick: q('.tick'), flash: q('.flash'), bar: q('.bar'),
         screen: icon.querySelector('.screen'), start: q('.start'), fire: q('.fire'), pulse: q('.pulse'), ms: q('.ms'),
         w: DELAY_MS[kind] * L.pxPerMs,
       }];
@@ -474,6 +479,13 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
   sheetLift.nearFade = nearFade;
   /** How far before the clear disc an icon starts to fade out whole. */
   const ICON_NEAR = 160 * u;
+  /**
+   * How far before the clear disc a lane (its rule, bar and start marker, one
+   * piece) starts to fade out whole: it is gone by the disc's solid rim, ~60 px
+   * from the dot's own, so a lane is never seen running on through the dot
+   * as a bead on a bar.
+   */
+  const LANE_NEAR = 70 * u;
 
   /** Each icon's drawing: how far right of its centre it reaches, in its own pixels (its lane starts just past this). */
   const SVG_BOX = { laptop: { vb: [300, 200], right: 288 }, tv: { vb: [324, 200], right: 318 } };
@@ -871,6 +883,21 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
     const clear = clearAt(t);
     sheet.style.maskImage = maskOf(clear);
     sheet.style.webkitMaskImage = maskOf(clear);
+    // Each lane's outline on screen (rule, bar and start marker together); the
+    // sheet carries every lane up past the dot, and each fades out whole
+    // before it reaches the clear disc, staying out once past it (nearFade).
+    const laneNear = {};
+    for (const kind of order) {
+      const g = planeSegs[kind];
+      const y = L.lanes[kind];
+      const bx = L.tX - lanes[kind].w * g.grow;
+      const x0 = Math.min(g.ruleS.x, bx - 15 * u);
+      const x1 = Math.max(g.ruleE.x, L.tX);
+      const hh = Math.max(barH / 2, 15 * u, ruleH / 2) + Math.abs(g.ruleS.y - y);
+      const q0 = [[x0, y - hh], [x1, y - hh], [x1, y + hh], [x0, y + hh]].map(([x, yy]) => project(c, x, yy));
+      laneNear[kind] = nearFade(t, q0, LANE_NEAR);
+      lanes[kind].root.style.opacity = laneNear[kind] < 1 ? String(laneNear[kind]) : '';
+    }
     // Each icon's outline on screen; an icon the sheet carries towards the
     // dot fades out whole before it reaches the clear disc (nearFade).
     for (const kind of order) {
@@ -893,9 +920,10 @@ export function build({ el, u, W, H, portrait, t0, onFrame, hostDot, waitFor }) 
         const g = planeSegs[kind];
         const y = L.lanes[kind];
         const bx = L.tX - lanes[kind].w * g.grow;
-        debug.segs.push({ kind, what: 'lane', a: S(g.ruleS.x, g.ruleS.y), b: S(g.ruleE.x, g.ruleE.y), r: hw(ruleH), o: g.ro * lf.o });
-        debug.segs.push({ kind, what: 'bar', a: S(bx, y), b: S(L.tX, y), r: hw(barH), o: lf.o });
-        debug.segs.push({ kind, what: 'start', a: S(bx, y), b: S(bx, y), r: hw(30 * u), o: g.so * lf.o });
+        const ln = laneNear[kind];
+        debug.segs.push({ kind, what: 'lane', a: S(g.ruleS.x, g.ruleS.y), b: S(g.ruleE.x, g.ruleE.y), r: hw(ruleH), o: g.ro * lf.o * ln });
+        debug.segs.push({ kind, what: 'bar', a: S(bx, y), b: S(L.tX, y), r: hw(barH), o: (g.grow > 0 ? 1 : 0) * lf.o * ln });
+        debug.segs.push({ kind, what: 'start', a: S(bx, y), b: S(bx, y), r: hw(30 * u), o: g.so * lf.o * ln });
       }
       debug.segs.push({ kind: 'T', what: 'T', a: S(L.tX, L.tTop + shift), b: S(L.tX, L.tTop + tLen * fallK(t) * tTrim), r: hw(6 * u), o: lf.o });
       for (const kind of order) debug.quads[kind] = { o: iconPlace[kind].o * iconPlace[kind].near * lf.o, q: iconPlace[kind].q };

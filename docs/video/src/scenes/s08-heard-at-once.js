@@ -8,9 +8,15 @@
  * the house. It is text, so it is never cut round the dot as the lanes are:
  * as the sheet carries it up towards the dot it fades out whole, gone before
  * it comes within ~60 px of the dot's rim (rule: nothing flies through text).
+ * It is also gone within the lift's first few frames (OUT): before it has grown
+ * past ~1.05×, so never cut by the frame's edges, and before the house coming
+ * up underneath is past ~10 % (17.27), so it is never seen over the picture.
  */
 
 import { sheetLift } from './s06-one-instant.js';
+
+/** The line leaves with the sheet and is gone by OUT[1]: its opacity falls as (1 − k)², fast at first. */
+const OUT = [17.19, 17.27];
 
 export function build({ el, tl, u, W, portrait, t0, onFrame }) {
   const right = portrait ? 70 * u : 110 * u;
@@ -35,9 +41,12 @@ export function build({ el, tl, u, W, portrait, t0, onFrame }) {
   const NEAR = (portrait ? 420 : 280) * u;
   onFrame((t) => {
     const s = sheetLift.at?.(t) ?? null;
+    const k = Math.min(1, Math.max(0, (t - OUT[0]) / (OUT[1] - OUT[0])));
+    const out = (1 - k) ** 2;
+    line.parentElement.style.visibility = k >= 1 ? 'hidden' : '';
     if (!s) {
       lift.style.transform = 'none';
-      lift.style.opacity = '1';
+      lift.style.opacity = String(out);
       clear.style.maskImage = 'none';
       clear.style.webkitMaskImage = 'none';
       return;
@@ -52,7 +61,7 @@ export function build({ el, tl, u, W, portrait, t0, onFrame }) {
     const r = line.getBoundingClientRect();
     const near = sheetLift.nearFade(t, [{ x: r.left, y: r.top }, { x: r.right, y: r.top }, { x: r.right, y: r.bottom }, { x: r.left, y: r.bottom }], NEAR);
     lift.style.transform = `translateY(${s.dy}px) scale(${s.g})`;
-    lift.style.opacity = String(s.o * near);
+    lift.style.opacity = String(s.o * near * out);
   });
   void W;
 }
