@@ -317,7 +317,10 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
   for (const d of devices) {
     d.len = d.late * RISE;
-    d.start = HOUSE_TOUCH - d.late;
+    // Each bar's length is its delay; its rise lasts at least 0.6 s so even
+    // the 40 ms bar's arrival can be read. All three still meet T together.
+    d.rise = Math.max(d.late, 0.6);
+    d.start = HOUSE_TOUCH - d.rise;
     d.baseY = T_Y - d.len;
     // A bar whose top rises; geometry has its origin at the bottom.
     // A flat ribbon turned to face the camera: square ends, so what shows on
@@ -564,12 +567,17 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   );
   const msSize = portrait ? 36 * u : 32 * u;
   const MS = { laptop: 40, phone: 90, tv: 210 };
+  const NAME = { laptop: 'laptop', phone: 'phone', tv: 'TV' };
   for (const d of devices) {
     el.insertAdjacentHTML(
       'beforeend',
-      `<div class="ms ms-${d.kind}" style="position:absolute;left:0;top:0;opacity:0;display:flex;align-items:center;gap:${10 * u}px;
-          padding:${6 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.86);
-          font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">${MS[d.kind]} ms<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span></div>`,
+      // Two lines: the device's name over its figure, so each bar is plainly
+      // that device's — and the chip stays narrow enough to sit between bars.
+      `<div class="ms ms-${d.kind}" style="position:absolute;left:0;top:0;opacity:0;
+          padding:${7 * u}px ${12 * u}px;border-radius:${10 * u}px;background:rgba(11,14,19,0.86);
+          font:500 ${msSize}px/1 var(--mono);color:var(--text);white-space:nowrap">
+         <div style="font-size:${Math.round(msSize * 0.62)}px;color:var(--text-dim);margin-bottom:${6 * u}px">${NAME[d.kind]}</div>
+         <div style="display:flex;align-items:center;gap:${10 * u}px">${MS[d.kind]} ms<span class="example-tag" style="--tag-size:${Math.round(msSize * 0.62)}px">example</span></div></div>`,
     );
     d.label = el.querySelector(`.ms-${d.kind}`);
   }
@@ -599,11 +607,11 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   /** A bar's grown fraction at t: never linear — each eases out over its
    * whole rise (sine), so all three slow into T together. */
   const growAt = (d, t) => {
-    // Eases in over its first 0.15 s and out over the rest: never linear.
-    const g = clamp01((t - d.start) / d.late);
-    const a = Math.min(0.45, 0.15 / d.late);
-    return g < a ? (Math.sin((Math.PI / 2) * a) * (g / a) ** 2) : Math.sin((Math.PI / 2) * g);
+    // Eases in and out (sine): never linear, lands slowly.
+    const g = clamp01((t - d.start) / d.rise);
+    return (1 - Math.cos(Math.PI * g)) / 2;
   };
+
   const RENDER = [t0 - pad[0] - 0.01, t1 + pad[1]];
   onFrame((t) => {
     if (t < RENDER[0] || t > RENDER[1]) return;
@@ -647,7 +655,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       const sk = smooth(span(t, d.start, d.start + 0.25));
       d.guide.visible = sk > 0;
       d.stem.scale.set(1, Math.max(0.0001, d.baseY - d.stemFrom), 1);
-      d.stem.material.opacity = 0.3 * sk;
+      // No stalk: each bar hangs from T, and its label names its device.
+      d.guide.visible = false;
       const met = t >= HOUSE_TOUCH;
       d.contact.visible = met;
       d.contact.scale.setScalar(met ? Math.max(0.0001, smooth(span(t, HOUSE_TOUCH, HOUSE_TOUCH + 0.3))) * (1 + 0.12 * Math.sin(Math.PI * 2 * ((t - HOUSE_TOUCH) / 0.625)) ** 2 * span(t, HOUSE_TOUCH + 0.3, HOUSE_TOUCH + 0.5)) : 0.0001);
@@ -698,10 +707,13 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
       // 9:16: the TV's and laptop's rings sit side by side, so the laptop's
       // figure goes just below its ring, keeping the two figures apart.
       if (portrait && d.kind === 'laptop') ly = top.y + 20 * u;
+      // 16:9: the TV's figure sits left of its ring — to the right it would
+      // reach the dot.
+      if (!portrait && d.kind === 'tv') lx = top.x - lw - 34 * u;
       if (portrait && d.kind === 'tv') ly = top.y - lh - 14 * u;
       // The phone's ring sits at the plane's back edge: its figure goes above
       // it, clear of the plane's outline.
-      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x + 30 * u; ly = top.y - lh - 40 * u; } }
+      if (d.kind === 'phone') { lx = top.x - lw / 2; ly = top.y - lh - 26 * u; if (portrait) { lx = top.x + 30 * u; ly = top.y - lh - 6 * u; } }
       d.label.style.transform = `translate(${lx}px, ${ly}px)`;
     }
 
