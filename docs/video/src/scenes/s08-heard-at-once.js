@@ -3,20 +3,20 @@
  * its lanes rising to the right, which leaves the lower right of the frame
  * open: the line is set there, right-aligned on plain ground, and only after
  * the tilt has settled, so no line of the diagram ever passes through it.
- * It holds, drifting, with the finished diagram to the beat at 17.5. Then it
+ * It holds, drifting, with the finished diagram to 17.25. Then it
  * is the front object and leaves towards the camera, with the sheet (s06's
- * lift, also from 17.50) flying past the lens behind it: over 17.50–17.70 it
+ * lift, also from 17.25) flying past the lens behind it: over 17.25–17.45 it
  * grows about its own centre with an ease-in and no travel, to ~1.2× (never
  * cropped by the frame while above 30 % opacity: held EDGE inside every side). Its opacity holds full
  * for the first half of the move, then falls with an ease-in (1 − f²), so it
- * is still seen pushing forward until its last frames, and reaches 0 at 17.70.
+ * is still seen pushing forward until its last frames, and reaches 0 at 17.45.
  * It is drawn in front of the sheet (its layer is raised); the sheet's ease-in
  * keeps every part of it off the line's letters while the line is visible.
  * It never comes near the dot.
  */
 
 /** The line's exit towards the camera: it starts here, while bright, and is gone at OUT[1]. */
-const OUT = [17.5, 17.7];
+const OUT = [17.25, 17.45];
 /** Its final scale, reached at OUT[1] with progress k^EASE (an ease-in); capped so it stays EDGE inside the frame. */
 const GROW = 0.2;
 const EASE = 2;
@@ -44,7 +44,7 @@ export function build({ el, tl, u, W, H, portrait, t0, onFrame }) {
   // keeps a line through it; set by ~16.0 s; drifts until the sheet lifts.
   tl.fromTo(line, { x: 140 * u, opacity: 0 }, { x: 0, opacity: 1, duration: 0.5, ease: 'expo.out' }, t0);
   tl.to(line, { x: -30 * u, duration: OUT[1] - (t0 + 0.5), ease: 'sine.inOut' }, t0 + 0.5);
-  // The exit: its own push towards the camera from 17.5, on the beat (see the header).
+  // The exit: its own push towards the camera from 17.25, so the change is centred on the 17.5 beat (see the header).
   // In front of the sheet (s06), which is drawn before it.
   el.style.zIndex = '1';
   onFrame((t) => {

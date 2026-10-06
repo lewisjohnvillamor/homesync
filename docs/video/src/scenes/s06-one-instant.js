@@ -55,9 +55,10 @@ const C9 = 18.125;
 /**
  * The hand-over into the house, on the beat grid. Composition 8's finished
  * picture (all three bars on T, T bright, the line set) holds, drifting, to
- * the beat at 17.5. Composition 9 is drawn underneath, a solid model that is
- * exactly the ground colour until 17.66 and emerges evenly (smoothstep) over
- * 17.66–17.95, while the sheet is rushing past (so it never brightens under
+ * 17.25, so that the visible change — the sheet rushing past and the house
+ * waking — is centred on the beat at 17.5, under its whoosh. Composition 9 is drawn underneath, a solid model that is
+ * exactly the ground colour until 17.41 and emerges evenly (smoothstep) over
+ * 17.41–17.70, while the sheet is rushing past (so it never brightens under
  * a sheet that is standing still). Nothing of the diagram travels
  * into the house: any path from outside it to a model inside would cross a
  * wall on screen. The dot is what carries across; the icons belong to the
@@ -69,15 +70,15 @@ const C9 = 18.125;
  *
  *  16.95        T brightens as the TV's bar lands (swelling in over 0.12 s,
  *               never switching on); the three pulses arrive on T together
- *               at 17.3 (swelling in too). The finished picture then holds,
+ *               at 17.05 (swelling in too). The finished picture then holds,
  *               drifting, to the beat.
- *  17.50        The camera comes to rest (its drift eases out here) and the
+ *  17.25        The camera comes to rest (its drift eases out here) and the
  *               sheet's own ground goes in one frame (1 → 0, nothing in
  *               between): the house under it is still exactly the ground
  *               colour, so nothing changes on screen.
- *  17.50–17.70  Composition 8's line (s08) pushes towards the camera on its
+ *  17.25–17.45  Composition 8's line (s08) pushes towards the camera on its
  *               own, to ~1.2× about its centre, drawn above the sheet.
- *  17.50–17.88  The whole sheet — icons, names, figures, example tag, lanes,
+ *  17.25–17.63  The whole sheet — icons, names, figures, example tag, lanes,
  *               bars, markers, T and its label, one piece, nothing on it
  *               moving on its own — flies towards the camera: it grows
  *               1 → LIFT_GROW× about T (where the dot stays) with an ease-in
@@ -85,17 +86,17 @@ const C9 = 18.125;
  *               out from the dot and it rushes past the lens, off the frame's
  *               edges, over the house waking underneath. It holds full
  *               opacity for its first LIFT_HOLD and fades (cosine) to 0 by
- *               17.88. Whatever of it passes close to the dot is cleared
+ *               17.63. Whatever of it passes close to the dot is cleared
  *               there (a soft, wide-feathered disc, so no dark ring), so
  *               nothing crosses it; each lane (rule, bar and start marker,
  *               one piece) fades out whole as it nears that disc, so no lane
  *               is seen running on either side of the dot like a bead.
  *  17.90        The dot is let go to composition 9 (liftDotAt).
  */
-/** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour until 17.66). */
-const GROUND_OFF = 17.5;
+/** The sheet's ground goes in one frame, here (the house underneath is exactly the ground colour until 17.41). */
+const GROUND_OFF = 17.25;
 /** The lift: the sheet grows 1 → LIFT_GROW× about T (progress k^LIFT_EASE, an ease-in), with no translation; gone by LIFT[1]. */
-const LIFT = [17.5, 17.88];
+const LIFT = [17.25, 17.63];
 const LIFT_GROW = 6;
 const LIFT_EASE = 5.5;
 /** It holds full opacity to this fraction of the lift, then falls (cosine) to 0 at LIFT[1]. */
@@ -103,11 +104,11 @@ const LIFT_HOLD = 0.8;
 /** The clear disc round the dot: solid to CLEAR_R (design px) past its rim, feathered over CLEAR_F; it opens over CLEAR_IN. */
 const CLEAR_R = 4;
 const CLEAR_F = 14;
-const CLEAR_IN = [17.5, 17.58];
+const CLEAR_IN = [17.25, 17.33];
 /** The disc opens outward from T over this span, passing through what of the sheet is still near T. */
-const CLEAR_OPEN = [17.68, 17.84];
+const CLEAR_OPEN = [17.43, 17.59];
 /** The camera comes to rest here, as the sheet lifts (its drift ends on the same pose as before, so liftDotAt's point is unchanged). */
-const LIFT0 = 17.5;
+const LIFT0 = 17.25;
 /** The camera's drift through composition 8's hold eases to rest here. */
 const DRIFT_END = LIFT0;
 /**
@@ -131,8 +132,8 @@ const FIRE7 = 14.2;
 const RUN7 = 0.72;
 /** Composition 8: the bars land one after another, then all three pulses arrive on T together. */
 const GROW8 = { laptop: [15.95, 16.3], tv: [16.32, 16.95] };
-// (The TV fires just after its bar lands at 16.95; the three pulses arrive on T inside the finished hold, before 17.5.)
-const ARRIVE8 = 17.3;
+// (The TV fires just after its bar lands at 16.95; the three pulses arrive on T inside the finished hold, before the lift at 17.25.)
+const ARRIVE8 = 17.05;
 /**
  * The arrival on T in 8 swells in rather than jumping on: it rises (sine)
  * over ARRIVE8_RISE centred on ARRIVE8, then decays as before. Never a step

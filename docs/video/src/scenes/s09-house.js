@@ -637,7 +637,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
     // (1 − emerge) at every depth across the model.
     // Front-loaded (ease-out): it fills in as the caption and sheet leave, so the
     // frame never dips while the old layer is gone and the house still faint.
-    const emerge = smooth(span(t, 17.66, 17.95));
+    const emerge = smooth(span(t, 17.41, 17.70));
     const camD = camera.position.distanceTo(frame.target);
     const A = 1e4;
     scene.fog.near = -A;
