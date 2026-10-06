@@ -381,7 +381,8 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
 
   /** The camera at time t: HOUSE_VIEW at the start, a slow orbit and push, a quicker push as the dot leaves. */
   function poseCamera(cam, t) {
-    const x = clamp01((t - 17.8) / (t1 - 17.8));
+    // The slow push starts as the house is lit, so it never waits still.
+    const x = clamp01((t - 17.5) / (t1 - 17.5));
     const k = x * (1.4 - 0.4 * x);
     const azimuth = ((portrait ? HOUSE_VIEW_PORTRAIT.azimuth : HOUSE_VIEW.azimuth) + 6 * k + 6 * smooth(span(t, HOUSE_TOUCH, 21.5))) * DEG;
     const elevation = frame.elevation * DEG;
@@ -595,7 +596,7 @@ export function build({ el, tl, u, W, H, portrait, t0, t1, onFrame, hostDot }) {
   tl.fromTo(band, { opacity: 0, scale: 0.97, transformOrigin: '0% 0%' }, { opacity: 1, scale: 1, duration: 0.3, ease: 'power2.out' }, HEAD - 0.05);
   lineEls.forEach((ln, i) => {
     const from = i % 2 === 0 ? -1 : 1;
-    tl.fromTo(ln, { x: from * 180 * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, HEAD);
+    tl.fromTo(ln, { x: from * (portrait ? 70 : 180) * u }, { x: 0, duration: 0.45, ease: 'power3.out' }, HEAD);
     tl.fromTo(ln, { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'none' }, HEAD);
   });
   // Held, never still: a slow push on the whole band.
